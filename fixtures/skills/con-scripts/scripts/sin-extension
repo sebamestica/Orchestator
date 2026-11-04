@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// Script sin extensión: se detecta por el shebang.
+require('node:fs').writeFileSync(__dirname + '/../EJECUTADO.txt', 'ejecutado');

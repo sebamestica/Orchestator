@@ -1,0 +1,9 @@
+{
+  "name": "text-utils-ejemplo",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Librería de utilidades de texto sin dependencias externas para pruebas de aceptación",
+  "scripts": {
+    "test": "node --test"
+  }
+}

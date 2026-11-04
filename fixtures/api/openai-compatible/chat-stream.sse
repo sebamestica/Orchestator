@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-SIMULADO","object":"chat.completion.chunk","created":1793581200,"model":"qwen3:8b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning_content":"Pienso brevemente."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-SIMULADO","object":"chat.completion.chunk","created":1793581200,"model":"qwen3:8b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"Hola desde un servidor compatible."},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-SIMULADO","object":"chat.completion.chunk","created":1793581200,"model":"qwen3:8b","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":"stop"}]}
+
+data: {"id":"chatcmpl-SIMULADO","object":"chat.completion.chunk","created":1793581200,"model":"qwen3:8b","system_fingerprint":"fp_ollama","choices":[],"usage":{"prompt_tokens":290,"completion_tokens":20,"total_tokens":310,"completion_tokens_details":{"reasoning_tokens":5}}}
+
+data: [DONE]
+

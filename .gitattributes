@@ -1,0 +1,8 @@
+# El repo es LF. Sin esto, git de Windows (core.autocrlf=true) saca CRLF en los worktrees de la flota
+# y cambian los hashes de los fixtures (tests/core/skills/hub.test.ts falla en el gate).
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.ico binary
+*.zip binary

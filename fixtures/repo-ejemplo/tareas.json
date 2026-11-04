@@ -1,0 +1,62 @@
+[
+  {
+    "id": "task-slug",
+    "projectId": "repo-ejemplo",
+    "title": "Implementar generador de slugs en text-utils",
+    "objective": "Implementar la función slugify en src/slug.mjs para convertir texto a formato slug apto para URL y completar sus pruebas en test/slug.test.mjs.",
+    "ownedPaths": [
+      "src/slug.mjs",
+      "test/slug.test.mjs"
+    ],
+    "dependsOn": [],
+    "acceptance": [
+      "slugify devuelve una cadena vacía ante cadenas vacías o tipos no string",
+      "slugify normaliza diacríticos, convierte a minúsculas y reemplaza espacios y signos por guiones",
+      "slugify colapsa guiones repetidos y elimina guiones al inicio y fin",
+      "El gate node --test pasa sin errores"
+    ],
+    "difficulty": "low",
+    "contextRefs": [],
+    "skillRefs": []
+  },
+  {
+    "id": "task-case",
+    "projectId": "repo-ejemplo",
+    "title": "Implementar conversiones camelCase y snake_case en text-utils",
+    "objective": "Implementar las funciones camelCase y snakeCase en src/case.mjs y completar sus pruebas en test/case.test.mjs.",
+    "ownedPaths": [
+      "src/case.mjs",
+      "test/case.test.mjs"
+    ],
+    "dependsOn": [],
+    "acceptance": [
+      "camelCase y snakeCase manejan cadenas vacías devolviendo cadena vacía",
+      "camelCase convierte palabras separadas por espacios o guiones a formato camelCase",
+      "snakeCase convierte palabras a minúsculas separadas por guión bajo",
+      "El gate node --test pasa sin errores"
+    ],
+    "difficulty": "low",
+    "contextRefs": [],
+    "skillRefs": []
+  },
+  {
+    "id": "task-truncate",
+    "projectId": "repo-ejemplo",
+    "title": "Implementar función de truncado con elipsis en text-utils",
+    "objective": "Implementar la función truncate en src/truncate.mjs respetando la longitud máxima y sufijo configurable, y completar sus pruebas en test/truncate.test.mjs.",
+    "ownedPaths": [
+      "src/truncate.mjs",
+      "test/truncate.test.mjs"
+    ],
+    "dependsOn": [],
+    "acceptance": [
+      "truncate maneja cadenas vacías o maxLength no positivo devolviendo cadena vacía",
+      "truncate devuelve la cadena original si su longitud no supera maxLength",
+      "truncate recorta y añade sufijo sin superar maxLength en longitud total",
+      "El gate node --test pasa sin errores"
+    ],
+    "difficulty": "low",
+    "contextRefs": [],
+    "skillRefs": []
+  }
+]

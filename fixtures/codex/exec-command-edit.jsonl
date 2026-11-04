@@ -1,0 +1,9 @@
+{"type":"thread.started","thread_id":"01a199bb-9ac0-7c81-85b9-379dc0a7ac10"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Leeré fixture.txt y cambiaré «antes» por «despues».\n"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'Get-Content -LiteralPath fixture.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command 'Get-Content -LiteralPath fixture.txt'","aggregated_output":"antes\r\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"<TEMP>\\fixture.txt","kind":"update"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"<TEMP>\\fixture.txt","kind":"update"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"LISTO"}}
+{"type":"turn.completed","usage":{"input_tokens":69035,"cached_input_tokens":59136,"cache_write_input_tokens":0,"output_tokens":127,"reasoning_output_tokens":0}}

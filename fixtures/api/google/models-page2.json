@@ -1,0 +1,1 @@
+{"models":[{"name":"models/gemini-3.1-pro","version":"001","displayName":"Gemini 3.1 Pro","inputTokenLimit":1048576,"outputTokenLimit":65536,"supportedGenerationMethods":["generateContent","countTokens"]}]}

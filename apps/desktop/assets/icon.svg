@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Icono de Berland: lienzo #090909 de la interfaz, borde de vidrio y una «B» de trazo claro.
+       apps/desktop/tools/icon.ts dibuja exactamente esta geometría para generar icon.ico. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#090909"/>
+  <rect x="8.75" y="8.75" width="238.5" height="238.5" rx="55.25" fill="none" stroke="#ececec" stroke-opacity="0.12" stroke-width="1.5"/>
+  <path d="M86 68V188M86 68H132A28 28 0 0 1 132 124H86M86 124H138A32 32 0 0 1 138 188H86" fill="none" stroke="#ececec" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

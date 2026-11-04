@@ -1,0 +1,278 @@
+/*
+ * Tema del orquestador. Colores, superficies de vidrio, marco y animaciones portados de
+ * C:\dev\studyapp\packages\theme\src\index.css (HeroUI v3 + Tailwind 4). Acento monocromo:
+ * el acento es el propio texto (--foreground) sobre el lienzo (--canvas).
+ */
+@import "tailwindcss";
+@import "@heroui/styles";
+@import "@fontsource/geist/400.css";
+@import "@fontsource/geist/500.css";
+@import "@fontsource/geist/600.css";
+@import "@fontsource/geist-mono/400.css";
+
+@source "../";
+
+@custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+    --color-canvas: var(--canvas);
+    --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, monospace;
+}
+
+@theme static {
+    --ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-spring: linear(0, 0.0856, 0.2678, 0.4696, 0.6502, 0.7926, 0.8944, 0.9607, 0.9993, 1.0184, 1.025, 1.0244, 1.0204, 1.0153, 1.0104, 1.0064, 1.0035, 1.0015, 1.0003, 0.9997, 0.9994, 0.9994, 0.9994, 0.9996, 1);
+    --duration-quick: 140ms;
+    --duration-fast: 200ms;
+    --duration-base: 320ms;
+    --duration-slow: 420ms;
+    --duration-page: 560ms;
+}
+
+@utility duration-quick { transition-duration: var(--duration-quick); }
+@utility duration-fast { transition-duration: var(--duration-fast); }
+@utility duration-base { transition-duration: var(--duration-base); }
+@utility duration-slow { transition-duration: var(--duration-slow); }
+
+:root,
+.light,
+[data-theme="light"],
+.dark,
+[data-theme="dark"] {
+    --accent: var(--foreground);
+    --accent-foreground: var(--canvas);
+    --accent-soft-foreground: var(--default-foreground);
+    --table-head: color-mix(in oklab, var(--foreground) 3%, var(--background));
+    --glass-blur: 28px;
+    --glass-saturation: 1.8;
+    --glass-backdrop: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    --field-shadow: 0 0 0 0 transparent inset;
+    --field-border-width: 1px;
+    --field-border: var(--border);
+    --default-font-family: var(--font-sans);
+    --default-mono-font-family: var(--font-mono);
+}
+
+:root,
+.light,
+[data-theme="light"] {
+    --canvas: #f5f5f5;
+    --background: rgba(245, 245, 245, 0.72);
+    --dashboard-surface: rgba(244, 244, 245, 0.64);
+    --surface: rgba(255, 255, 255, 0.6);
+    --surface-secondary: rgba(239, 239, 240, 0.64);
+    --surface-tertiary: rgba(234, 234, 235, 0.68);
+    --overlay: rgba(255, 255, 255, 0.72);
+    --field-background: rgba(255, 255, 255, 0.55);
+}
+
+.dark,
+[data-theme="dark"] {
+    --canvas: #090909;
+    --background: rgba(9, 9, 9, 0.72);
+    --dashboard-surface: rgba(16, 16, 17, 0.6);
+    --surface: rgba(24, 24, 27, 0.58);
+    --surface-secondary: rgba(35, 35, 37, 0.62);
+    --surface-tertiary: rgba(38, 39, 40, 0.66);
+    --overlay: rgba(24, 24, 27, 0.68);
+    --field-background: rgba(23, 23, 25, 0.55);
+}
+
+/* Efectos reducidos (ajuste «Menos efectos»): sin desenfoque, que es lo que más GPU gasta. */
+[data-effects="reduced"] {
+    --glass-backdrop: none;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+}
+
+html {
+    background-color: var(--canvas);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    margin: 0;
+    background-color: var(--canvas);
+    overflow: hidden;
+    user-select: none;
+}
+
+/* Texto seleccionable donde tiene sentido (mensajes, código, registros). */
+.selectable,
+.selectable * {
+    user-select: text;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 14%, transparent) transparent;
+}
+
+.glass-surface,
+.surface--default,
+.surface--secondary,
+.surface--tertiary,
+.card--default,
+.card--secondary,
+.card--tertiary,
+.alert,
+.toast,
+.tooltip,
+.popover,
+.dropdown__popover,
+.select__popover,
+.modal__dialog,
+.alert-dialog__dialog,
+.drawer__dialog {
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+}
+
+.button {
+    --spacing: 0.3rem;
+}
+
+.tabs__list-container {
+    background-color: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.tabs__indicator {
+    background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+    box-shadow: none;
+}
+
+:root {
+    --app-titlebar-height: 2.5rem;
+    --app-header-height: 3.5rem;
+    --sidebar-width: 15rem;
+    --panel-width: 22rem;
+}
+
+.popover {
+    --tw-ease: var(--ease-emphasized);
+}
+
+@keyframes enter-rise {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+        filter: blur(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+    }
+}
+
+.animate-enter {
+    animation: enter-rise var(--duration-page) var(--ease-emphasized) both;
+}
+
+/* Indicador del elemento activo de la navegación (como en studyapp). */
+.nav-indicator {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+/* Acciones que aparecen al pasar el ratón por una fila. */
+.reveal {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-emphasized);
+}
+
+.group:hover .reveal,
+.group:focus-within .reveal,
+.reveal:has([aria-expanded="true"]) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Barra de título propia (Electron sin marco): la zona vacía arrastra la ventana. */
+.titlebar {
+    height: var(--app-titlebar-height);
+    -webkit-app-region: drag;
+    app-region: drag;
+}
+
+.titlebar button,
+.titlebar a,
+.titlebar [role="menu"],
+.titlebar [data-no-drag] {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+}
+
+.app-sidebar {
+    width: var(--sidebar-width);
+    transition: width var(--duration-slow) var(--ease-emphasized);
+}
+
+.app-sidebar[data-state="collapsed"] {
+    width: 0;
+}
+
+.app-sidebar > * {
+    transition: opacity var(--duration-base) var(--ease-emphasized);
+}
+
+.app-sidebar[data-state="collapsed"] > * {
+    opacity: 0;
+}
+
+/* Marco y superficie principal: el panel redondeado sobre el lienzo. */
+.chrome-frame {
+    padding: 0 0.5rem 0.5rem 0;
+}
+
+.chrome-surface {
+    border-radius: 1rem;
+    background: var(--dashboard-surface);
+    border: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.dark .chrome-surface,
+[data-theme="dark"] .chrome-surface {
+    background: color-mix(in oklab, var(--foreground) 3%, var(--canvas));
+}
+
+/* Capa de «suelta para adjuntar» sobre el composer o la ventana. */
+.drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: inherit;
+    border: 1.5px dashed color-mix(in oklab, var(--foreground) 40%, transparent);
+    background: color-mix(in oklab, var(--canvas) 70%, transparent);
+    -webkit-backdrop-filter: var(--glass-backdrop);
+    backdrop-filter: var(--glass-backdrop);
+    pointer-events: none;
+    animation: enter-rise var(--duration-fast) var(--ease-emphasized) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-enter,
+    .drop-overlay {
+        animation: none;
+    }
+
+    .reveal,
+    .app-sidebar,
+    .app-sidebar > * {
+        transition: none;
+    }
+}

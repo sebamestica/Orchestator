@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client",
+      "node"
+    ],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/ui",
+    "src/shared",
+    "tests/ui"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

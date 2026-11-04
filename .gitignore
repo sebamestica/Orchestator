@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env*
+# Encargos, registros y estado local de cada agente en su worktree
+.orq/
+# Bóvedas de prueba generadas por los tests
+tests/**/tmp-*/

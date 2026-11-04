@@ -1,0 +1,5 @@
+{"type":"item.completed","item":{"id":"reason","type":"reasoning","text":"Resumen de razonamiento"}}
+{"type":"item.started","item":{"id":"cmd","type":"command_execution","command":"Get-Content fixture.txt","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"cmd","type":"command_execution","command":"Get-Content fixture.txt","aggregated_output":"antes\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"patch","type":"file_change","changes":[{"path":"fixture.txt","kind":"update"},{"path":"nuevo.txt","kind":"add"},{"path":"viejo.txt","kind":"delete"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"future","type":"future_item","data":"preservar"}}

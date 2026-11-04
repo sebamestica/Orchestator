@@ -1,0 +1,423 @@
+/**
+ * Estado de la vista de chat con la mente (una sola vista a la vez): conversaciones del proyecto, chat
+ * activo, mensajes, propuestas e historia de eventos de su sesión. Las acciones hablan con `/chats` (c15).
+ * El estado global de la app (proyectos, agentes, ajustes) sigue en `src/ui/store/app.ts`.
+ */
+import { create } from 'zustand';
+import type { AgentEvent, Attachment, Chat, ChatMessage, MindMode, Proposal } from '../../../shared/index.ts';
+import { api, ApiError } from '../../api/client.ts';
+import type { LiveMessage } from '../../api/live.ts';
+import { mergeEvents, upsertMessage } from './timeline.ts';
+
+export type ChatStatus = 'idle' | 'loading' | 'ready' | 'unavailable' | 'missing' | 'error';
+export type Decision = 'approve' | 'reject';
+
+const enc = encodeURIComponent;
+
+/** El núcleo aún no tiene `/chats` (c15): ruta desconocida, método no admitido o respuesta que no es JSON. */
+export function isUnavailable(err: unknown): boolean {
+  if (err instanceof SyntaxError) return true;
+  if (!(err instanceof ApiError)) return false;
+  if (err.status === 405 || err.status === 501) return true;
+  return err.status === 404 && /ruta no encontrada/i.test(err.message);
+}
+
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+const byRecent = (a: Chat, b: Chat) => b.updatedAt.localeCompare(a.updatedAt);
+
+function upsertChat(list: readonly Chat[], chat: Chat): Chat[] {
+  return [...list.filter((c) => c.id !== chat.id), chat].sort(byRecent);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+/** Lee `{proposals}` o `{proposal}` de una respuesta de aprobar o rechazar; `null` si no trae ninguna. */
+export function proposalsFrom(res: unknown, current: readonly Proposal[]): Proposal[] | null {
+  if (!isRecord(res)) return null;
+  if (Array.isArray(res.proposals)) return res.proposals as Proposal[];
+  const one = res.proposal;
+  if (isRecord(one) && isRecord(one.task) && typeof one.task.id === 'string') {
+    const p = one as unknown as Proposal;
+    return current.map((c) => (c.task.id === p.task.id ? p : c));
+  }
+  return null;
+}
+
+/** Elige una carpeta: diálogo nativo de Electron o, en la web, el diálogo de Windows del núcleo. */
+export async function pickFolder(): Promise<string | null> {
+  const bridge = typeof window === 'undefined' ? undefined : window.orq;
+  if (bridge) return bridge.pickFolder();
+  const r = await api.post<{ path: string | null }>('/fs/pick-folder');
+  return r.path;
+}
+
+/** Adjunta un archivo: por ruta en Electron (sin copiar bytes) o subiendo los bytes en la web. */
+export async function attachFile(file: File): Promise<Attachment> {
+  const path = typeof window === 'undefined' ? null : (window.orq?.pathForFile(file) ?? null);
+  const r = path
+    ? await api.post<{ attachment: Attachment }>('/attachments/by-path', { path })
+    : await api.upload<{ attachment: Attachment }>('/attachments', file, file.name);
+  return r.attachment;
+}
+
+interface ChatData {
+  projectId: string | null;
+  status: ChatStatus;
+  error: string | null;
+  chats: Chat[];
+  activeId: string | null;
+  chat: Chat | null;
+  messages: ChatMessage[];
+  proposals: Proposal[];
+  /** Eventos de `chat.sessionId` (últimos 500, por `seq`). */
+  events: AgentEvent[];
+  /** Último `seq` visto de la sesión: desde ahí se pide `replay` al reconectar. */
+  lastSeq: number;
+  /** Modo mientras aún no hay chat (se usa al crearlo). */
+  draftMode: MindMode;
+  /** Carpetas extra elegidas antes de crear el chat. */
+  pendingRoots: string[];
+  /** Aviso breve de una acción fallida. */
+  notice: string | null;
+  /** Propuestas con una acción en curso (`'*'` = aprobar todo). */
+  busy: Record<string, true>;
+}
+
+interface ChatActions {
+  reset(): void;
+  open(projectId: string | null, chatId: string | null, defaultMode: MindMode): Promise<void>;
+  select(chatId: string): Promise<void>;
+  refresh(): Promise<void>;
+  createChat(opts?: { cwd?: string }): Promise<Chat | null>;
+  renameChat(chatId: string, title: string): Promise<void>;
+  deleteChat(chatId: string): Promise<void>;
+  setMode(mode: MindMode): Promise<void>;
+  setExtraRoots(roots: string[]): Promise<void>;
+  send(chatId: string, text: string, attachments: Attachment[]): Promise<boolean>;
+  interrupt(): Promise<void>;
+  decide(taskId: string, decision: Decision): Promise<void>;
+  approveAll(): Promise<void>;
+  ingest(events: readonly AgentEvent[]): void;
+  applyLive(message: LiveMessage): void;
+  setNotice(notice: string | null): void;
+}
+
+export type ChatStore = ChatData & ChatActions;
+
+const INITIAL: ChatData = {
+  projectId: null,
+  status: 'idle',
+  error: null,
+  chats: [],
+  activeId: null,
+  chat: null,
+  messages: [],
+  proposals: [],
+  events: [],
+  lastSeq: -1,
+  draftMode: 'plan',
+  pendingRoots: [],
+  notice: null,
+  busy: {},
+};
+
+/** Cambia en cada `open`/`reset`: las respuestas de una apertura anterior se descartan. */
+let generation = 0;
+
+export const useChat = create<ChatStore>((set, get) => {
+  /** Carga un chat (datos, mensajes y propuestas) si sigue siendo el activo. */
+  async function load(chatId: string, gen: number): Promise<void> {
+    const alive = () => gen === generation && get().activeId === chatId;
+    const base = `/chats/${enc(chatId)}`;
+    try {
+      const [c, m] = await Promise.all([api.get<{ chat: Chat }>(base), api.get<{ messages: ChatMessage[] }>(`${base}/messages`)]);
+      if (!alive()) return;
+      const sameSession = get().chat?.sessionId === c.chat.sessionId;
+      set((s) => ({
+        status: 'ready',
+        error: null,
+        chat: c.chat,
+        chats: s.chats.some((x) => x.id === c.chat.id) ? s.chats.map((x) => (x.id === c.chat.id ? c.chat : x)) : upsertChat(s.chats, c.chat),
+        messages: m.messages,
+        ...(sameSession ? {} : { events: [], lastSeq: -1 }),
+      }));
+    } catch (err) {
+      if (!alive()) return;
+      if (isUnavailable(err)) set({ status: 'unavailable', error: null });
+      else if (err instanceof ApiError && err.status === 404) set({ status: 'missing', chat: null, messages: [], proposals: [] });
+      else set({ status: 'error', error: errorText(err) });
+      return;
+    }
+    try {
+      const p = await api.get<{ proposals: Proposal[] }>(`${base}/proposals`);
+      if (alive()) set({ proposals: p.proposals });
+    } catch {
+      // Sin propuestas (o la ruta aún no existe): el hilo sigue funcionando.
+    }
+  }
+
+  async function refetchProposals(chatId: string): Promise<void> {
+    try {
+      const p = await api.get<{ proposals: Proposal[] }>(`/chats/${enc(chatId)}/proposals`);
+      if (get().activeId === chatId) set({ proposals: p.proposals });
+    } catch {
+      // Se queda con lo que había; el mensaje `proposals` de /ws lo corrige.
+    }
+  }
+
+  function setBusy(key: string, on: boolean) {
+    set((s) => ({
+      busy: on ? { ...s.busy, [key]: true } : (Object.fromEntries(Object.entries(s.busy).filter(([k]) => k !== key)) as Record<string, true>),
+    }));
+  }
+
+  return {
+    ...INITIAL,
+
+    reset() {
+      generation++;
+      set({ ...INITIAL });
+    },
+
+    async open(projectId, chatId, defaultMode) {
+      const s = get();
+      const sameScope = s.status !== 'idle' && s.projectId === projectId;
+      const settled = s.status === 'ready' || s.status === 'loading';
+      // Misma carpeta y mismo chat (p. ej. la ruta recibe el id del chat recién creado): nada que hacer.
+      if (sameScope && settled && (chatId === s.activeId || (chatId === null && s.activeId !== null))) return;
+      if (sameScope && chatId !== null && s.status !== 'unavailable' && s.status !== 'error') {
+        await get().select(chatId);
+        return;
+      }
+      const gen = ++generation;
+      set({ ...INITIAL, projectId, status: 'loading', draftMode: defaultMode });
+      let chats: Chat[];
+      try {
+        const r = await api.get<{ chats: Chat[] }>(projectId ? `/chats?projectId=${enc(projectId)}` : '/chats');
+        chats = r.chats.filter((c) => c.projectId === projectId).sort(byRecent);
+      } catch (err) {
+        if (gen !== generation) return;
+        set(isUnavailable(err) ? { status: 'unavailable' } : { status: 'error', error: errorText(err) });
+        return;
+      }
+      if (gen !== generation) return;
+      const id = chatId ?? chats[0]?.id ?? null;
+      set({ chats, activeId: id, status: id ? 'loading' : 'ready' });
+      if (id) await load(id, gen);
+    },
+
+    async select(chatId) {
+      if (get().activeId === chatId && get().status === 'ready') return;
+      set({ activeId: chatId, status: 'loading', chat: null, messages: [], proposals: [], events: [], lastSeq: -1, notice: null, busy: {} });
+      await load(chatId, generation);
+    },
+
+    async refresh() {
+      const id = get().activeId;
+      if (id && get().status === 'ready') await load(id, generation);
+    },
+
+    async createChat(opts = {}) {
+      const { projectId, draftMode, pendingRoots } = get();
+      const gen = generation;
+      try {
+        const r = await api.post<{ chat: Chat }>('/chats', {
+          projectId,
+          mode: draftMode,
+          ...(opts.cwd ? { cwd: opts.cwd } : {}),
+          ...(pendingRoots.length ? { extraRoots: pendingRoots } : {}),
+        });
+        if (gen !== generation) return r.chat;
+        set((s) => ({
+          chats: upsertChat(s.chats, r.chat),
+          activeId: r.chat.id,
+          chat: r.chat,
+          messages: [],
+          proposals: [],
+          events: [],
+          lastSeq: -1,
+          pendingRoots: [],
+          status: 'ready',
+          notice: null,
+        }));
+        return r.chat;
+      } catch (err) {
+        set(isUnavailable(err) ? { status: 'unavailable' } : { notice: `No se pudo crear la conversación: ${errorText(err)}` });
+        return null;
+      }
+    },
+
+    async renameChat(chatId, title) {
+      try {
+        const r = await api.patch<{ chat: Chat }>(`/chats/${enc(chatId)}`, { title });
+        set((s) => ({ chats: upsertChat(s.chats, r.chat), chat: s.chat?.id === chatId ? r.chat : s.chat }));
+      } catch (err) {
+        set({ notice: `No se pudo renombrar: ${errorText(err)}` });
+      }
+    },
+
+    async deleteChat(chatId) {
+      try {
+        await api.del<unknown>(`/chats/${enc(chatId)}`);
+      } catch (err) {
+        set({ notice: `No se pudo borrar: ${errorText(err)}` });
+        return;
+      }
+      const rest = get().chats.filter((c) => c.id !== chatId);
+      set({ chats: rest });
+      if (get().activeId !== chatId) return;
+      const next = rest[0];
+      if (next) {
+        await get().select(next.id);
+      } else {
+        set({ activeId: null, chat: null, messages: [], proposals: [], events: [], lastSeq: -1, status: 'ready' });
+      }
+    },
+
+    async setMode(mode) {
+      const chat = get().chat;
+      if (!chat) {
+        set({ draftMode: mode });
+        return;
+      }
+      const prev = chat.mode;
+      if (prev === mode) return;
+      set((s) => ({ chat: s.chat?.id === chat.id ? { ...s.chat, mode } : s.chat }));
+      try {
+        const r = await api.patch<{ chat?: Chat }>(`/chats/${enc(chat.id)}`, { mode });
+        if (r?.chat) {
+          const updated = r.chat;
+          set((s) => ({ chat: s.chat?.id === chat.id ? updated : s.chat, chats: upsertChat(s.chats, updated) }));
+        }
+      } catch (err) {
+        set((s) => ({ chat: s.chat?.id === chat.id ? { ...s.chat, mode: prev } : s.chat, notice: `No se pudo cambiar el modo: ${errorText(err)}` }));
+      }
+    },
+
+    async setExtraRoots(roots) {
+      const chat = get().chat;
+      if (!chat) {
+        set({ pendingRoots: roots });
+        return;
+      }
+      try {
+        const r = await api.patch<{ chat?: Chat }>(`/chats/${enc(chat.id)}`, { extraRoots: roots });
+        const updated = r?.chat ?? { ...chat, extraRoots: roots };
+        set((s) => ({ chat: s.chat?.id === chat.id ? updated : s.chat, chats: upsertChat(s.chats, updated) }));
+      } catch (err) {
+        set({ notice: `No se pudieron guardar las carpetas extra: ${errorText(err)}` });
+      }
+    },
+
+    async send(chatId, text, attachments) {
+      try {
+        const r = await api.post<{ message?: ChatMessage; chat?: Chat }>(`/chats/${enc(chatId)}/messages`, {
+          text,
+          attachmentIds: attachments.map((a) => a.id),
+        });
+        if (get().activeId !== chatId) return true;
+        set((s) => ({
+          messages: r?.message ? upsertMessage(s.messages, r.message) : s.messages,
+          chat: r?.chat ?? (s.chat ? { ...s.chat, state: 'running' } : s.chat),
+          notice: null,
+        }));
+        return true;
+      } catch (err) {
+        set({ notice: `No se pudo enviar: ${errorText(err)}` });
+        return false;
+      }
+    },
+
+    async interrupt() {
+      const chat = get().chat;
+      if (!chat) return;
+      try {
+        await api.post<unknown>(`/chats/${enc(chat.id)}/interrupt`);
+      } catch (err) {
+        set({ notice: `No se pudo detener: ${errorText(err)}` });
+      }
+    },
+
+    async decide(taskId, decision) {
+      const chat = get().chat;
+      if (!chat || get().busy[taskId]) return;
+      const before = get().proposals;
+      const approval = decision === 'approve' ? 'approved' : 'rejected';
+      setBusy(taskId, true);
+      set({ proposals: before.map((p) => (p.task.id === taskId ? { ...p, approval } : p)) });
+      try {
+        const r = await api.post<unknown>(`/chats/${enc(chat.id)}/proposals/${enc(taskId)}/${decision}`);
+        const next = proposalsFrom(r, get().proposals);
+        if (next) set({ proposals: next });
+        else await refetchProposals(chat.id);
+      } catch (err) {
+        set({ proposals: before, notice: `No se pudo ${decision === 'approve' ? 'aprobar' : 'rechazar'} ${taskId}: ${errorText(err)}` });
+      } finally {
+        setBusy(taskId, false);
+      }
+    },
+
+    async approveAll() {
+      const chat = get().chat;
+      if (!chat || get().busy['*']) return;
+      const before = get().proposals;
+      setBusy('*', true);
+      set({ proposals: before.map((p) => (p.approval === 'proposed' ? { ...p, approval: 'approved' } : p)) });
+      try {
+        const r = await api.post<unknown>(`/chats/${enc(chat.id)}/proposals/approve-all`);
+        const next = proposalsFrom(r, get().proposals);
+        if (next) set({ proposals: next });
+        else await refetchProposals(chat.id);
+      } catch (err) {
+        set({ proposals: before, notice: `No se pudo aprobar todo: ${errorText(err)}` });
+      } finally {
+        setBusy('*', false);
+      }
+    },
+
+    ingest(events) {
+      const sessionId = get().chat?.sessionId;
+      if (!sessionId || events.length === 0) return;
+      const mine = events.filter((e) => e.sessionId === sessionId);
+      if (mine.length === 0) return;
+      set((s) => {
+        const merged = mergeEvents(s.events, mine);
+        if (merged === s.events) return {};
+        return { events: merged, lastSeq: Math.max(s.lastSeq, merged.at(-1)?.seq ?? -1) };
+      });
+    },
+
+    applyLive(message) {
+      const s = get();
+      switch (message.type) {
+        case 'chat': {
+          const chat = message.chat;
+          if (chat.projectId !== s.projectId) return;
+          set((st) => ({ chats: upsertChat(st.chats, chat), chat: st.activeId === chat.id ? chat : st.chat }));
+          return;
+        }
+        case 'chat_message':
+          if (message.message.chatId === s.activeId) set((st) => ({ messages: upsertMessage(st.messages, message.message) }));
+          return;
+        case 'chat_deleted':
+          set((st) => ({ chats: st.chats.filter((c) => c.id !== message.chatId) }));
+          if (message.chatId === s.activeId) set({ status: 'missing', chat: null, messages: [], proposals: [], events: [], lastSeq: -1 });
+          return;
+        case 'proposals':
+          if (message.chatId === s.activeId) set({ proposals: message.proposals });
+          return;
+        default:
+          return;
+      }
+    },
+
+    setNotice(notice) {
+      set({ notice });
+    },
+  };
+});

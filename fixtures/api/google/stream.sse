@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "Hola desde "}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 280,"totalTokenCount": 280,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 280}]},"modelVersion": "gemini-3.5-flash","responseId": "SIMULADO"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "Gemini."}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 280,"candidatesTokenCount": 6,"totalTokenCount": 330,"cachedContentTokenCount": 100,"thoughtsTokenCount": 44,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 280}]},"modelVersion": "gemini-3.5-flash","responseId": "SIMULADO"}
+

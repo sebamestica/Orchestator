@@ -1,0 +1,3 @@
+WARNING: failed to clean up stale arg0 temp dirs: Acceso denegado. (os error 5)
+WARNING: proceeding, even though we could not create PATH aliases: Acceso denegado. (os error 5) at path "<CODEX_HOME>\\tmp\\arg0-windows\\codex-arg0DeKUKn"
+Error: failed to initialize in-process app-server client: Acceso denegado. (os error 5)

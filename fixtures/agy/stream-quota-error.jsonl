@@ -1,0 +1,2 @@
+{"event":"init","conversation_id":"quota-test-id","init":{"model":"gemini-3.8-flash-high","cwd":"C:\\dev\\orquestador-wt\\agy-cli","tools":[],"permission_mode":"always-proceed"}}
+{"event":"result","result":{"conversation_id":"quota-test-id","status":"ERROR","response":"","error":"RESOURCE_EXHAUSTED: Rate limit exceeded or quota exhausted for Gemini Models (5-hour limit). Please retry later.","duration_seconds":0.5,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0},"finished_reason":"error"}}

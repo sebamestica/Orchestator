@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "apps/desktop/src",
+    "apps/desktop/tools",
+    "apps/desktop/vite.config.ts",
+    "src/shared"
+  ],
+  "exclude": [
+    "apps/desktop/out"
+  ]
+}

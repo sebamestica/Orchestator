@@ -1,0 +1,12 @@
+export { ClaudeSdkAdapter, DEFAULT_CLAUDE_MODEL, DEFAULT_SETTING_SOURCES, RULES_FILES, insecureUrlWarning, installedSdkVersion, loadRepoRules, taskReadRoots } from './adapter.ts';
+export type { ClaudeSdkAdapterOptions, QueryFn } from './adapter.ts';
+export { ClaudeSdkTranslator, SUMMARY_MAX, describeToolInput, toolResultText, truncate } from './translate.ts';
+export type { ErrorHint, TranslatorOptions } from './translate.ts';
+export { classifyClaudeError, codeFromAssistantError, codeFromHttpStatus, codeFromText } from './errors.ts';
+export { createPolicyHook, createToolPolicy, decideToolUse, isInside } from './permissions.ts';
+export type { ToolPolicyOptions } from './permissions.ts';
+export { commandName, insideProblem, lexicallyInside, resolveShellPath, shellCommandProblem, writeProblem } from './shell-policy.ts';
+export { parseBash, parseCmd, parsePowerShell, parseShell } from './shell-parse.ts';
+export type { ParsedScript, Redirect, ShellKind, SimpleCommand, Word } from './shell-parse.ts';
+export { FALLBACK_PRICE, MODEL_PRICES, estimateCostUsd, priceOf } from './pricing.ts';
+export type { ModelPrice, TokenUsage } from './pricing.ts';

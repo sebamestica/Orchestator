@@ -1,0 +1,2818 @@
+{
+  "info": {
+    "_postman_id": "6f0c2a7e-3b1d-4e8a-9c55-0d7b8e41a2f3",
+    "name": "Orquestador — API local",
+    "description": "API local del núcleo del orquestador (REST + WebSocket, solo `127.0.0.1`). Generada por `docs/api/generate.ts` desde las rutas del servidor (`createApp(...).routes`) y sus esquemas Zod: no la edites a mano; vuelve a importarla tras regenerar.\n\n1. Arranca el núcleo y copia el `token` de la línea JSON que imprime.\n2. Pégalo en la variable de colección `token` (columna «Current value»). La autenticación `Bearer {{token}}` está definida en la colección y la heredan todas las peticiones.\n3. Prueba `GET /health`: si responde `200`, el núcleo está arriba y el token es válido.\n\nErrores: `{\"error\":{\"code\",\"message\"}}`. Ninguna respuesta incluye claves: en `POST /agents` la clave va en el cuerpo (`{{apiKey}}`) y la respuesta solo trae `secretRef`.\n\n## WebSocket `/ws`\n\nPostman v2.1 no guarda peticiones WebSocket en colecciones: crea una a mano (New → WebSocket) con:\n\n- URL: `ws://127.0.0.1:47811/ws`\n- Encabezado: `Authorization: Bearer {{token}}`\n\nEl token va en el encabezado del handshake, nunca en la URL. El `WebSocket` del navegador no puede mandar encabezados: la interfaz lo envía como subprotocolo (`Sec-WebSocket-Protocol: orq, orq.bearer.<token>`, con `orq` primero) y el servidor responde `orq`. Electron (proceso principal), Node (`ws`) y Postman usan el encabezado `Authorization`.\n\nMensajes del servidor (esquema `WsServerMessage` en openapi.json): `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error`, `settings`, `chat`, `chat_message`, `chat_deleted`, `proposals`, `plugin`.\nMensajes del cliente (esquema `WsClientMessage`): `replay`, `ping`. Ejemplo: `{\"type\":\"replay\",\"sessionId\":\"01a198bb-df05-7741-818d-3f0a16dd05ae\",\"since\":-1}`.\n\nTras reconectar, pide `replay` con el último `seq` recibido y descarta duplicados por `seq`: los eventos en vivo pueden llegar antes que la respuesta.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:47811",
+      "type": "string",
+      "description": "URL del núcleo (solo 127.0.0.1). Cambia el puerto si arrancas con ORQ_PORT."
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "Token que imprime el núcleo al arrancar (cambia en cada arranque). Ponlo solo en «Current value»."
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "type": "string",
+      "description": "Clave del proveedor para POST /agents. Ponla solo en «Current value» y bórrala después."
+    },
+    {
+      "key": "agentId",
+      "value": "claude-mi-clave",
+      "type": "string",
+      "description": "Agente para las rutas /agents/:id (POST /agents la actualiza)."
+    },
+    {
+      "key": "projectId",
+      "value": "vetworld",
+      "type": "string",
+      "description": "Proyecto para /projects/:id y /memory/:project/context."
+    },
+    {
+      "key": "planId",
+      "value": "plan-20261101-a1b2c3",
+      "type": "string",
+      "description": "Plan para /plans/:id (POST /plans la actualiza)."
+    },
+    {
+      "key": "taskId",
+      "value": "validar-citas",
+      "type": "string",
+      "description": "Tarea para /tasks/:id (POST /plans y POST /tasks la actualizan)."
+    },
+    {
+      "key": "sessionId",
+      "value": "01a198bb-df05-7741-818d-3f0a16dd05ae",
+      "type": "string",
+      "description": "Sesión para /sessions/:id."
+    },
+    {
+      "key": "skillName",
+      "value": "revisar-pr-20261101-214500-a1b2c3",
+      "type": "string",
+      "description": "Skill en cuarentena para /skills/:name/approve y /reject."
+    }
+  ],
+  "item": [
+    {
+      "name": "Sistema",
+      "description": "Estado del núcleo.",
+      "item": [
+        {
+          "name": "/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Estado del servidor"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"ok\": true,\n  \"version\": \"0.1.0\",\n  \"startedAt\": \"2026-11-01T21:30:00.000Z\",\n  \"uptimeMs\": 93500\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Agentes",
+      "description": "Registro de agentes: alta con clave (va a la bóveda DPAPI), CLIs detectados, prueba y baja.",
+      "item": [
+        {
+          "name": "/agents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/agents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents"
+              ]
+            },
+            "description": "Lista los agentes registrados"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/agents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"agents\": [\n    {\n      \"config\": {\n        \"id\": \"claude-mi-clave\",\n        \"kind\": \"claude-sdk\",\n        \"provider\": \"anthropic\",\n        \"displayName\": \"Claude (mi clave)\",\n        \"model\": \"claude-opus-5-5\",\n        \"baseUrl\": \"https://api.anthropic.com\",\n        \"secretRef\": \"claude-mi-clave-key-3fa9c1\",\n        \"quotaFloor\": 0.2,\n        \"budgetUsd\": 20,\n        \"enabled\": true\n      },\n      \"quotaMethod\": \"manual-budget\",\n      \"lastProbe\": {\n        \"agentId\": \"claude-mi-clave\",\n        \"installed\": true,\n        \"authenticated\": true,\n        \"version\": \"0.3.302\",\n        \"models\": [\n          \"claude-opus-5-5\"\n        ],\n        \"quotaMethod\": \"manual-budget\",\n        \"warnings\": [\n          \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n        ]\n      },\n      \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n      \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n    },\n    {\n      \"config\": {\n        \"id\": \"codex\",\n        \"kind\": \"codex-cli\",\n        \"provider\": \"codex\",\n        \"displayName\": \"Codex CLI\",\n        \"quotaFloor\": 0.2,\n        \"enabled\": true\n      },\n      \"quotaMethod\": \"codex-ratelimits\",\n      \"lastProbe\": {\n        \"agentId\": \"codex\",\n        \"installed\": true,\n        \"authenticated\": true,\n        \"version\": \"0.165.0\",\n        \"models\": [\n          \"gpt-6.1-sol\"\n        ],\n        \"quotaMethod\": \"codex-ratelimits\",\n        \"warnings\": []\n      },\n      \"createdAt\": \"2026-11-01T21:30:00.000Z\",\n      \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"{{apiKey}}\",\n  \"displayName\": \"Claude (mi clave)\",\n  \"baseUrl\": \"https://api.anthropic.com\",\n  \"budgetUsd\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Agrega un agente\n\nCon `apiKey`: prueba el agente con la clave solo en memoria y, si la prueba sale bien, guarda el agente y la clave en la bóveda (DPAPI) con su método de cupo; si la prueba falla no se guarda nada. Sin `apiKey`: registra una configuración sin clave (CLIs). La respuesta nunca incluye la clave, solo `secretRef`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set('agentId', pm.response.json().agent.config.id);",
+                  "pm.test('la respuesta no contiene la clave', () => pm.expect(pm.response.text()).to.not.include(pm.variables.get('apiKey') || '<sin clave>'));"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"provider\": \"anthropic\",\n  \"apiKey\": \"{{apiKey}}\",\n  \"displayName\": \"Claude (mi clave)\",\n  \"baseUrl\": \"https://api.anthropic.com\",\n  \"budgetUsd\": 20\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"agent\": {\n    \"config\": {\n      \"id\": \"claude-mi-clave\",\n      \"kind\": \"claude-sdk\",\n      \"provider\": \"anthropic\",\n      \"displayName\": \"Claude (mi clave)\",\n      \"model\": \"claude-opus-5-5\",\n      \"baseUrl\": \"https://api.anthropic.com\",\n      \"secretRef\": \"claude-mi-clave-key-3fa9c1\",\n      \"quotaFloor\": 0.2,\n      \"budgetUsd\": 20,\n      \"enabled\": true\n    },\n    \"quotaMethod\": \"manual-budget\",\n    \"lastProbe\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"installed\": true,\n      \"authenticated\": true,\n      \"version\": \"0.3.302\",\n      \"models\": [\n        \"claude-opus-5-5\"\n      ],\n      \"quotaMethod\": \"manual-budget\",\n      \"warnings\": [\n        \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n      ]\n    },\n    \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n    \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n  },\n  \"probe\": {\n    \"agentId\": \"claude-mi-clave\",\n    \"installed\": true,\n    \"authenticated\": true,\n    \"version\": \"0.3.302\",\n    \"models\": [\n      \"claude-opus-5-5\"\n    ],\n    \"quotaMethod\": \"manual-budget\",\n    \"warnings\": [\n      \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents/detect",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/agents/detect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                "detect"
+              ]
+            },
+            "description": "Detecta CLIs instalados (codex, agy) y registra los nuevos"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/agents/detect",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents",
+                    "detect"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"detected\": [\n    {\n      \"id\": \"codex\",\n      \"kind\": \"codex-cli\",\n      \"provider\": \"codex\",\n      \"displayName\": \"Codex CLI\",\n      \"executable\": \"C:\\\\Program Files\\\\nodejs\\\\node.exe\",\n      \"argsPrefix\": [\n        \"C:\\\\Users\\\\yo\\\\AppData\\\\Roaming\\\\npm\\\\node_modules\\\\@openai\\\\codex\\\\bin\\\\codex.js\"\n      ],\n      \"version\": \"0.165.0\"\n    },\n    {\n      \"id\": \"agy\",\n      \"kind\": \"agy-cli\",\n      \"provider\": \"antigravity\",\n      \"displayName\": \"Antigravity CLI (agy)\",\n      \"executable\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\Programs\\\\agy\\\\agy.exe\",\n      \"argsPrefix\": []\n    }\n  ],\n  \"added\": [\n    {\n      \"config\": {\n        \"id\": \"agy\",\n        \"kind\": \"agy-cli\",\n        \"provider\": \"antigravity\",\n        \"displayName\": \"Antigravity CLI (agy)\",\n        \"quotaFloor\": 0.2,\n        \"enabled\": true\n      },\n      \"quotaMethod\": null,\n      \"lastProbe\": null,\n      \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n      \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/agents/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{agentId}}"
+                }
+              ]
+            },
+            "description": "Detalle de un agente"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/agents/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{agentId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"agent\": {\n    \"config\": {\n      \"id\": \"claude-mi-clave\",\n      \"kind\": \"claude-sdk\",\n      \"provider\": \"anthropic\",\n      \"displayName\": \"Claude (mi clave)\",\n      \"model\": \"claude-opus-5-5\",\n      \"baseUrl\": \"https://api.anthropic.com\",\n      \"secretRef\": \"claude-mi-clave-key-3fa9c1\",\n      \"quotaFloor\": 0.2,\n      \"budgetUsd\": 20,\n      \"enabled\": true\n    },\n    \"quotaMethod\": \"manual-budget\",\n    \"lastProbe\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"installed\": true,\n      \"authenticated\": true,\n      \"version\": \"0.3.302\",\n      \"models\": [\n        \"claude-opus-5-5\"\n      ],\n      \"quotaMethod\": \"manual-budget\",\n      \"warnings\": [\n        \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n      ]\n    },\n    \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n    \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/agents/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{agentId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false,\n  \"quotaFloor\": 0.25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cambia nombre, modelo, URL, umbral de cupo, presupuesto o habilitación"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/agents/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{agentId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enabled\": false,\n  \"quotaFloor\": 0.25\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"agent\": {\n    \"config\": {\n      \"id\": \"claude-mi-clave\",\n      \"kind\": \"claude-sdk\",\n      \"provider\": \"anthropic\",\n      \"displayName\": \"Claude (mi clave)\",\n      \"model\": \"claude-opus-5-5\",\n      \"baseUrl\": \"https://api.anthropic.com\",\n      \"secretRef\": \"claude-mi-clave-key-3fa9c1\",\n      \"quotaFloor\": 0.25,\n      \"budgetUsd\": 20,\n      \"enabled\": false\n    },\n    \"quotaMethod\": \"manual-budget\",\n    \"lastProbe\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"installed\": true,\n      \"authenticated\": true,\n      \"version\": \"0.3.302\",\n      \"models\": [\n        \"claude-opus-5-5\"\n      ],\n      \"quotaMethod\": \"manual-budget\",\n      \"warnings\": [\n        \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n      ]\n    },\n    \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n    \"updatedAt\": \"2026-11-01T21:50:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/agents/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{agentId}}"
+                }
+              ]
+            },
+            "description": "Borra un agente y su clave de la bóveda"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/agents/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{agentId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"deleted\": true,\n  \"id\": \"claude-mi-clave\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "/agents/:id/probe",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/agents/:id/probe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "agents",
+                ":id",
+                "probe"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{agentId}}"
+                }
+              ]
+            },
+            "description": "Prueba el agente (instalación, sesión, modelos) y guarda su método de cupo"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/agents/:id/probe",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "agents",
+                    ":id",
+                    "probe"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{agentId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"agent\": {\n    \"config\": {\n      \"id\": \"claude-mi-clave\",\n      \"kind\": \"claude-sdk\",\n      \"provider\": \"anthropic\",\n      \"displayName\": \"Claude (mi clave)\",\n      \"model\": \"claude-opus-5-5\",\n      \"baseUrl\": \"https://api.anthropic.com\",\n      \"secretRef\": \"claude-mi-clave-key-3fa9c1\",\n      \"quotaFloor\": 0.2,\n      \"budgetUsd\": 20,\n      \"enabled\": true\n    },\n    \"quotaMethod\": \"manual-budget\",\n    \"lastProbe\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"installed\": true,\n      \"authenticated\": true,\n      \"version\": \"0.3.302\",\n      \"models\": [\n        \"claude-opus-5-5\"\n      ],\n      \"quotaMethod\": \"manual-budget\",\n      \"warnings\": [\n        \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n      ]\n    },\n    \"createdAt\": \"2026-11-01T21:31:12.000Z\",\n    \"updatedAt\": \"2026-11-01T21:31:12.000Z\"\n  },\n  \"probe\": {\n    \"agentId\": \"claude-mi-clave\",\n    \"installed\": true,\n    \"authenticated\": true,\n    \"version\": \"0.3.302\",\n    \"models\": [\n      \"claude-opus-5-5\"\n    ],\n    \"quotaMethod\": \"manual-budget\",\n    \"warnings\": [\n      \"El proveedor no informa saldo: el cupo se mide con budgetUsd.\"\n    ]\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cupos",
+      "description": "Cupo restante por agente (Codex, agy, OpenRouter, presupuesto manual).",
+      "item": [
+        {
+          "name": "/quotas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/quotas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quotas"
+              ],
+              "query": [
+                {
+                  "key": "agentId",
+                  "value": "",
+                  "description": "Solo la foto de este agente.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Última foto de cupo de cada agente"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/quotas",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "quotas"
+                  ],
+                  "query": [
+                    {
+                      "key": "agentId",
+                      "value": "",
+                      "description": "Solo la foto de este agente.",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"quotas\": [\n    {\n      \"snapshot\": {\n        \"agentId\": \"codex\",\n        \"method\": \"codex-ratelimits\",\n        \"takenAt\": \"2026-11-01T21:45:00.000Z\",\n        \"buckets\": [\n          {\n            \"groupId\": \"codex\",\n            \"groupName\": \"Codex\",\n            \"window\": \"5h\",\n            \"remainingFraction\": 0.99,\n            \"resetAt\": \"2026-11-02T05:46:24.000Z\"\n          },\n          {\n            \"groupId\": \"codex\",\n            \"groupName\": \"Codex\",\n            \"window\": \"weekly\",\n            \"remainingFraction\": 0.88,\n            \"resetAt\": \"2026-11-04T14:00:31.000Z\"\n          }\n        ],\n        \"stale\": false\n      },\n      \"recordedAt\": \"2026-11-01T21:45:00.000Z\"\n    },\n    {\n      \"snapshot\": {\n        \"agentId\": \"agy\",\n        \"method\": \"agy-usage\",\n        \"takenAt\": \"2026-11-01T21:45:00.000Z\",\n        \"buckets\": [\n          {\n            \"groupId\": \"gemini\",\n            \"groupName\": \"Gemini Models\",\n            \"window\": \"5h\",\n            \"remainingFraction\": 0.998650074005127,\n            \"resetAt\": \"2026-11-02T00:45:40.000Z\"\n          },\n          {\n            \"groupId\": \"gemini\",\n            \"groupName\": \"Gemini Models\",\n            \"window\": \"weekly\",\n            \"remainingFraction\": 0.9996142983436584,\n            \"resetAt\": \"2026-11-08T19:45:40.000Z\"\n          }\n        ],\n        \"stale\": false\n      },\n      \"recordedAt\": \"2026-11-01T21:45:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/quotas/refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/quotas/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "quotas",
+                "refresh"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Lee ahora el cupo de todos los agentes habilitados (o de uno)\n\nCada foto nueva se guarda y se transmite por `/ws` como `{type:\"quota\"}`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/quotas/refresh",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "quotas",
+                    "refresh"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"quotas\": [\n    {\n      \"snapshot\": {\n        \"agentId\": \"codex\",\n        \"method\": \"codex-ratelimits\",\n        \"takenAt\": \"2026-11-01T21:45:00.000Z\",\n        \"buckets\": [\n          {\n            \"groupId\": \"codex\",\n            \"groupName\": \"Codex\",\n            \"window\": \"5h\",\n            \"remainingFraction\": 0.99,\n            \"resetAt\": \"2026-11-02T05:46:24.000Z\"\n          },\n          {\n            \"groupId\": \"codex\",\n            \"groupName\": \"Codex\",\n            \"window\": \"weekly\",\n            \"remainingFraction\": 0.88,\n            \"resetAt\": \"2026-11-04T14:00:31.000Z\"\n          }\n        ],\n        \"stale\": false\n      },\n      \"recordedAt\": \"2026-11-01T21:45:00.000Z\"\n    },\n    {\n      \"snapshot\": {\n        \"agentId\": \"agy\",\n        \"method\": \"agy-usage\",\n        \"takenAt\": \"2026-11-01T21:45:00.000Z\",\n        \"buckets\": [\n          {\n            \"groupId\": \"gemini\",\n            \"groupName\": \"Gemini Models\",\n            \"window\": \"5h\",\n            \"remainingFraction\": 0.998650074005127,\n            \"resetAt\": \"2026-11-02T00:45:40.000Z\"\n          },\n          {\n            \"groupId\": \"gemini\",\n            \"groupName\": \"Gemini Models\",\n            \"window\": \"weekly\",\n            \"remainingFraction\": 0.9996142983436584,\n            \"resetAt\": \"2026-11-08T19:45:40.000Z\"\n          }\n        ],\n        \"stale\": false\n      },\n      \"recordedAt\": \"2026-11-01T21:45:00.000Z\"\n    }\n  ],\n  \"errors\": []\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Proyectos",
+      "description": "Repositorios locales sobre los que trabaja la flota.",
+      "item": [
+        {
+          "name": "/projects",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ]
+            },
+            "description": "Lista los proyectos"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"projects\": [\n    {\n      \"id\": \"vetworld\",\n      \"name\": \"Vetworld\",\n      \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n      \"createdAt\": \"2026-11-01T21:30:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/projects",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"vetworld\",\n  \"name\": \"Vetworld\",\n  \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n  \"workspace\": {\n    \"worktreesRoot\": \"C:\\\\dev\\\\.worktrees\\\\vetworld-orq\",\n    \"links\": [\n      \".tools\",\n      \"workbench\",\n      \"assets-source\",\n      \"node_modules\"\n    ],\n    \"gate\": [\n      {\n        \"command\": \"npm\",\n        \"args\": [\n          \"run\",\n          \"-s\",\n          \"gate\"\n        ],\n        \"timeoutMs\": 1800000\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registra un proyecto (repo local)\n\nCon `workspace` (enlaces, `postCreate` y `gate` obligatorio) la flota puede crear worktrees e integrar tareas del proyecto; sin él se registra igual, pero la flota rechaza sus tareas por falta de gate. Para cambiarlo: DELETE y POST de nuevo."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/projects",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"vetworld\",\n  \"name\": \"Vetworld\",\n  \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n  \"workspace\": {\n    \"worktreesRoot\": \"C:\\\\dev\\\\.worktrees\\\\vetworld-orq\",\n    \"links\": [\n      \".tools\",\n      \"workbench\",\n      \"assets-source\",\n      \"node_modules\"\n    ],\n    \"gate\": [\n      {\n        \"command\": \"npm\",\n        \"args\": [\n          \"run\",\n          \"-s\",\n          \"gate\"\n        ],\n        \"timeoutMs\": 1800000\n      }\n    ]\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"project\": {\n    \"id\": \"vetworld\",\n    \"name\": \"Vetworld\",\n    \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n    \"createdAt\": \"2026-11-01T21:30:00.000Z\",\n    \"workspace\": {\n      \"worktreesRoot\": \"C:\\\\dev\\\\.worktrees\\\\vetworld-orq\",\n      \"baseBranch\": \"main\",\n      \"integrationBranch\": \"orq/integracion\",\n      \"links\": [\n        \".tools\",\n        \"workbench\",\n        \"assets-source\",\n        \"node_modules\"\n      ],\n      \"postCreate\": [],\n      \"gate\": [\n        {\n          \"command\": \"npm\",\n          \"args\": [\n            \"run\",\n            \"-s\",\n            \"gate\"\n          ],\n          \"timeoutMs\": 1800000,\n          \"env\": {}\n        }\n      ]\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/projects/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{projectId}}"
+                }
+              ]
+            },
+            "description": "Detalle de un proyecto"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{projectId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"project\": {\n    \"id\": \"vetworld\",\n    \"name\": \"Vetworld\",\n    \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n    \"createdAt\": \"2026-11-01T21:30:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/projects/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{projectId}}"
+                }
+              ]
+            },
+            "description": "Borra un proyecto (no toca el repo)\n\nCon tareas activas (`ready`, `running`, `review` o `handed_off`) responde 409: cambiar la configuración de worktrees o el gate con tareas en curso dejaría integraciones a medias. Cancélalas o espera a que terminen."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{projectId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"deleted\": true,\n  \"id\": \"vetworld\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "/projects/inspect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/projects/inspect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "inspect"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deduce id, nombre, gate y enlaces de una carpeta antes de registrarla\n\nGate: el primer script de `package.json` entre `check`, `gate` y `test` (`npm run -s <script>`), o pytest (`python -m pytest -q`), o `null`. `links`: `node_modules` si existe. Avisa si no es git, si no hay gate o si la carpeta ya es un proyecto."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/inspect",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "inspect"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\",\n  \"suggestedId\": \"vetworld\",\n  \"suggestedName\": \"Vetworld\",\n  \"isGitRepo\": true,\n  \"gate\": [\n    {\n      \"command\": \"npm\",\n      \"args\": [\n        \"run\",\n        \"-s\",\n        \"gate\"\n      ]\n    }\n  ],\n  \"links\": [\n    \"node_modules\"\n  ],\n  \"warnings\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "/projects/from-folder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/projects/from-folder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                "from-folder"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\",\n  \"name\": \"Vetworld\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registra un proyecto apuntando a una carpeta\n\nCon git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git o sin gate se registra sin `workspace` (la flota no ejecuta sus tareas hasta reconfigurarlo). 409 si el id ya existe o la carpeta ya es un proyecto."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/projects/from-folder",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "projects",
+                    "from-folder"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\",\n  \"name\": \"Vetworld\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"project\": {\n    \"id\": \"vetworld\",\n    \"name\": \"Vetworld\",\n    \"repoPath\": \"C:\\\\dev\\\\Vetworld\",\n    \"createdAt\": \"2026-11-01T21:30:00.000Z\",\n    \"workspace\": {\n      \"worktreesRoot\": \"C:\\\\dev\\\\.worktrees\\\\vetworld-orq\",\n      \"baseBranch\": \"main\",\n      \"integrationBranch\": \"orq/integracion\",\n      \"links\": [\n        \"node_modules\"\n      ],\n      \"postCreate\": [],\n      \"gate\": [\n        {\n          \"command\": \"npm\",\n          \"args\": [\n            \"run\",\n            \"-s\",\n            \"gate\"\n          ],\n          \"timeoutMs\": 1800000,\n          \"env\": {}\n        }\n      ]\n    }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Planes y tareas",
+      "description": "Plan en texto → tareas propuestas → aprobación → ejecución.",
+      "item": [
+        {
+          "name": "/plans",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plans"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"vetworld\",\n  \"text\": \"1. Agregar validación al formulario de citas.\\n2. Pruebas del formulario.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Convierte un plan en tareas (pendientes de aprobación)\n\nEl planificador (Claude) devuelve tareas validadas: rutas sin solapes, dependencias existentes y sin ciclos. Si no lo logra responde 422 con `issues`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('planId', body.plan.id);",
+                  "  if (body.tasks.length > 0) pm.collectionVariables.set('taskId', body.tasks[0].task.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/plans",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plans"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"projectId\": \"vetworld\",\n  \"text\": \"1. Agregar validación al formulario de citas.\\n2. Pruebas del formulario.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plan\": {\n    \"id\": \"plan-20261101-a1b2c3\",\n    \"projectId\": \"vetworld\",\n    \"text\": \"1. Agregar validación al formulario de citas.\\n2. Pruebas del formulario.\",\n    \"warnings\": [],\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"taskIds\": [\n      \"validar-citas\",\n      \"pruebas-citas\"\n    ]\n  },\n  \"tasks\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/plans/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plans/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plans",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{planId}}"
+                }
+              ]
+            },
+            "description": "Plan y sus tareas"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/plans/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plans",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{planId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plan\": {\n    \"id\": \"plan-20261101-a1b2c3\",\n    \"projectId\": \"vetworld\",\n    \"text\": \"1. Agregar validación al formulario de citas.\\n2. Pruebas del formulario.\",\n    \"warnings\": [],\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"taskIds\": [\n      \"validar-citas\",\n      \"pruebas-citas\"\n    ]\n  },\n  \"tasks\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/plans/:id/approve",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plans/:id/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plans",
+                ":id",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{planId}}"
+                }
+              ]
+            },
+            "description": "Aprueba todas las tareas pendientes del plan"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/plans/:id/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plans",
+                    ":id",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{planId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plan\": {\n    \"id\": \"plan-20261101-a1b2c3\",\n    \"projectId\": \"vetworld\",\n    \"text\": \"1. Agregar validación al formulario de citas.\\n2. Pruebas del formulario.\",\n    \"warnings\": [],\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"taskIds\": [\n      \"validar-citas\",\n      \"pruebas-citas\"\n    ]\n  },\n  \"tasks\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"state\": \"ready\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:42:00.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"state\": \"ready\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:42:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasks?projectId=vetworld&state=pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks"
+              ],
+              "query": [
+                {
+                  "key": "projectId",
+                  "value": "vetworld"
+                },
+                {
+                  "key": "state",
+                  "value": "pending"
+                },
+                {
+                  "key": "planId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista tareas (filtros opcionales)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks?projectId=vetworld&state=pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks"
+                  ],
+                  "query": [
+                    {
+                      "key": "projectId",
+                      "value": "vetworld"
+                    },
+                    {
+                      "key": "state",
+                      "value": "pending"
+                    },
+                    {
+                      "key": "planId",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"tasks\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"state\": \"pending\",\n      \"planId\": \"plan-20261101-a1b2c3\",\n      \"agentId\": null,\n      \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n      \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"validar-citas\",\n  \"projectId\": \"vetworld\",\n  \"title\": \"Validar el formulario de citas\",\n  \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n  \"ownedPaths\": [\n    \"src/citas/**\"\n  ],\n  \"dependsOn\": [],\n  \"acceptance\": [\n    \"Pruebas del formulario en verde\"\n  ],\n  \"difficulty\": \"low\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea una tarea suelta (pendiente)"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set('taskId', pm.response.json().task.task.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"id\": \"validar-citas\",\n  \"projectId\": \"vetworld\",\n  \"title\": \"Validar el formulario de citas\",\n  \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n  \"ownedPaths\": [\n    \"src/citas/**\"\n  ],\n  \"dependsOn\": [],\n  \"acceptance\": [\n    \"Pruebas del formulario en verde\"\n  ],\n  \"difficulty\": \"low\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"task\": {\n    \"task\": {\n      \"id\": \"validar-citas\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Validar el formulario de citas\",\n      \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n      \"ownedPaths\": [\n        \"src/citas/**\"\n      ],\n      \"dependsOn\": [],\n      \"acceptance\": [\n        \"Pruebas del formulario en verde\"\n      ],\n      \"difficulty\": \"low\",\n      \"contextRefs\": [],\n      \"skillRefs\": []\n    },\n    \"state\": \"pending\",\n    \"planId\": null,\n    \"agentId\": null,\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tasks/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{taskId}}"
+                }
+              ]
+            },
+            "description": "Detalle de una tarea"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{taskId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"task\": {\n    \"task\": {\n      \"id\": \"validar-citas\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Validar el formulario de citas\",\n      \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n      \"ownedPaths\": [\n        \"src/citas/**\"\n      ],\n      \"dependsOn\": [],\n      \"acceptance\": [\n        \"Pruebas del formulario en verde\"\n      ],\n      \"difficulty\": \"low\",\n      \"suggestedAgent\": \"codex\",\n      \"contextRefs\": [],\n      \"skillRefs\": []\n    },\n    \"state\": \"pending\",\n    \"planId\": \"plan-20261101-a1b2c3\",\n    \"agentId\": null,\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks/:id/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks/:id/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks",
+                ":id",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{taskId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Aprueba una tarea pendiente (pasa a ready); opcionalmente fija el agente"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks/:id/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks",
+                    ":id",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{taskId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"task\": {\n    \"task\": {\n      \"id\": \"validar-citas\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Validar el formulario de citas\",\n      \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n      \"ownedPaths\": [\n        \"src/citas/**\"\n      ],\n      \"dependsOn\": [],\n      \"acceptance\": [\n        \"Pruebas del formulario en verde\"\n      ],\n      \"difficulty\": \"low\",\n      \"suggestedAgent\": \"codex\",\n      \"contextRefs\": [],\n      \"skillRefs\": []\n    },\n    \"state\": \"ready\",\n    \"planId\": \"plan-20261101-a1b2c3\",\n    \"agentId\": null,\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"updatedAt\": \"2026-11-01T21:42:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks/:id/cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks/:id/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks",
+                ":id",
+                "cancel"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{taskId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Ya no hace falta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cancela una tarea pendiente, lista, en curso o en revisión"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks/:id/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks",
+                    ":id",
+                    "cancel"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{taskId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"Ya no hace falta\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"task\": {\n    \"task\": {\n      \"id\": \"validar-citas\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Validar el formulario de citas\",\n      \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n      \"ownedPaths\": [\n        \"src/citas/**\"\n      ],\n      \"dependsOn\": [],\n      \"acceptance\": [\n        \"Pruebas del formulario en verde\"\n      ],\n      \"difficulty\": \"low\",\n      \"suggestedAgent\": \"codex\",\n      \"contextRefs\": [],\n      \"skillRefs\": []\n    },\n    \"state\": \"cancelled\",\n    \"planId\": \"plan-20261101-a1b2c3\",\n    \"agentId\": null,\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"updatedAt\": \"2026-11-01T21:42:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/tasks/manual",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tasks/manual",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tasks",
+                "manual"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": \"vetworld\",\n  \"title\": \"Corregir la fecha de las citas\",\n  \"objective\": \"Las citas del lunes se muestran con un día de desfase: corrige la zona horaria al guardarlas.\",\n  \"ownedPaths\": [\n    \"src/citas/**\"\n  ],\n  \"acceptance\": [\n    \"Las pruebas de citas pasan\"\n  ],\n  \"approve\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea una tarea a mano (y la aprueba, salvo `approve: false`)\n\nEl núcleo completa el encargo: id `manual-<fecha>-<6 hex>`, sin dependencias, dificultad `medium`, el agente elegido como sugerido y, si no hay aceptación, «La verificación del proyecto (gate) pasa». Con `approve` (por defecto) se aprueba igual que `POST /tasks/:id/approve`."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/tasks/manual",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "tasks",
+                    "manual"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"projectId\": \"vetworld\",\n  \"title\": \"Corregir la fecha de las citas\",\n  \"objective\": \"Las citas del lunes se muestran con un día de desfase: corrige la zona horaria al guardarlas.\",\n  \"ownedPaths\": [\n    \"src/citas/**\"\n  ],\n  \"acceptance\": [\n    \"Las pruebas de citas pasan\"\n  ],\n  \"approve\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"task\": {\n    \"task\": {\n      \"id\": \"manual-20261101-4f9a2c\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Corregir la fecha de las citas\",\n      \"objective\": \"Las citas del lunes se muestran con un día de desfase: corrige la zona horaria al guardarlas.\",\n      \"ownedPaths\": [\n        \"src/citas/**\"\n      ],\n      \"dependsOn\": [],\n      \"acceptance\": [\n        \"Las pruebas de citas pasan\"\n      ],\n      \"difficulty\": \"medium\",\n      \"contextRefs\": [],\n      \"skillRefs\": []\n    },\n    \"state\": \"pending\",\n    \"planId\": null,\n    \"agentId\": null,\n    \"createdAt\": \"2026-11-01T21:40:05.000Z\",\n    \"updatedAt\": \"2026-11-01T21:40:05.000Z\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sesiones",
+      "description": "Sesiones de agente y sus eventos normalizados (con reconexión por `seq`).",
+      "item": [
+        {
+          "name": "/sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "taskId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "agentId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "parentSessionId",
+                  "value": "",
+                  "description": "Subagentes de esta sesión.",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Lista sesiones (más recientes primero)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions"
+                  ],
+                  "query": [
+                    {
+                      "key": "taskId",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "agentId",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "parentSessionId",
+                      "value": "",
+                      "description": "Subagentes de esta sesión.",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"sessions\": [\n    {\n      \"id\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"taskId\": \"validar-citas\",\n      \"parentSessionId\": null,\n      \"state\": \"done\",\n      \"startedAt\": \"2026-11-01T21:42:00.000Z\",\n      \"updatedAt\": \"2026-11-01T21:43:30.000Z\",\n      \"endedAt\": \"2026-11-01T21:43:30.000Z\",\n      \"lastSeq\": 6\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/sessions/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{sessionId}}"
+                }
+              ]
+            },
+            "description": "Detalle de una sesión"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{sessionId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"session\": {\n    \"id\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n    \"agentId\": \"codex\",\n    \"taskId\": \"validar-citas\",\n    \"parentSessionId\": null,\n    \"state\": \"done\",\n    \"startedAt\": \"2026-11-01T21:42:00.000Z\",\n    \"updatedAt\": \"2026-11-01T21:43:30.000Z\",\n    \"endedAt\": \"2026-11-01T21:43:30.000Z\",\n    \"lastSeq\": 6\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/sessions/:id/events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sessions/:id/events?since=-1&limit=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sessions",
+                ":id",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "since",
+                  "value": "-1",
+                  "description": "Último `seq` recibido: devuelve los eventos con `seq` mayor (−1 o ausente: desde el principio)."
+                },
+                {
+                  "key": "limit",
+                  "value": "500",
+                  "description": "Máximo de eventos (500 por defecto)."
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{sessionId}}"
+                }
+              ]
+            },
+            "description": "Eventos de una sesión desde un seq (reconexión)\n\nDevuelve los eventos con `seq > since`, en orden. Repite con `since = lastSeq` mientras `hasMore` sea true."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/sessions/:id/events?since=-1&limit=500",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "sessions",
+                    ":id",
+                    "events"
+                  ],
+                  "query": [
+                    {
+                      "key": "since",
+                      "value": "-1",
+                      "description": "Último `seq` recibido: devuelve los eventos con `seq` mayor (−1 o ausente: desde el principio)."
+                    },
+                    {
+                      "key": "limit",
+                      "value": "500",
+                      "description": "Máximo de eventos (500 por defecto)."
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{sessionId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n  \"events\": [\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 0,\n      \"ts\": \"2026-11-01T21:42:00.000Z\",\n      \"type\": \"status\",\n      \"payload\": {\n        \"state\": \"running\",\n        \"detail\": \"thread.started\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 1,\n      \"ts\": \"2026-11-01T21:42:20.000Z\",\n      \"type\": \"tool_call\",\n      \"payload\": {\n        \"callId\": \"item_1\",\n        \"name\": \"command_execution\",\n        \"inputSummary\": \"npm test -- citas\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 2,\n      \"ts\": \"2026-11-01T21:42:41.000Z\",\n      \"type\": \"tool_result\",\n      \"payload\": {\n        \"callId\": \"item_1\",\n        \"ok\": true,\n        \"summary\": \"12 pruebas aprobadas\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 3,\n      \"ts\": \"2026-11-01T21:42:55.000Z\",\n      \"type\": \"file_change\",\n      \"payload\": {\n        \"path\": \"src/citas/formulario.ts\",\n        \"change\": \"modify\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 4,\n      \"ts\": \"2026-11-01T21:43:10.000Z\",\n      \"type\": \"text\",\n      \"payload\": {\n        \"text\": \"OK\",\n        \"role\": \"assistant\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 5,\n      \"ts\": \"2026-11-01T21:43:11.000Z\",\n      \"type\": \"usage\",\n      \"payload\": {\n        \"inputTokens\": 22572,\n        \"outputTokens\": 5,\n        \"cachedInputTokens\": 13440,\n        \"reasoningTokens\": 0,\n        \"model\": \"gpt-6.1-sol\"\n      }\n    },\n    {\n      \"sessionId\": \"01a198bb-df05-7741-818d-3f0a16dd05ae\",\n      \"agentId\": \"codex\",\n      \"seq\": 6,\n      \"ts\": \"2026-11-01T21:43:30.000Z\",\n      \"type\": \"done\",\n      \"payload\": {\n        \"ok\": true,\n        \"summary\": \"Validación agregada; pruebas en verde.\"\n      }\n    }\n  ],\n  \"lastSeq\": 6,\n  \"hasMore\": false\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Uso",
+      "description": "Tokens y costo acumulados.",
+      "item": [
+        {
+          "name": "/usage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage?groupBy=agent,day",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usage"
+              ],
+              "query": [
+                {
+                  "key": "groupBy",
+                  "value": "agent,day",
+                  "description": "Lista separada por comas: `agent`, `day`, `session`, `model`. Sin agrupar: total general."
+                },
+                {
+                  "key": "agentId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "sessionId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "model",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Día inicial (AAAA-MM-DD, zona horaria del núcleo).",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "Día final (AAAA-MM-DD, incluido).",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Totales de tokens y costo por agente, día, sesión y/o modelo"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/usage?groupBy=agent,day",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "usage"
+                  ],
+                  "query": [
+                    {
+                      "key": "groupBy",
+                      "value": "agent,day",
+                      "description": "Lista separada por comas: `agent`, `day`, `session`, `model`. Sin agrupar: total general."
+                    },
+                    {
+                      "key": "agentId",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sessionId",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "model",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "from",
+                      "value": "",
+                      "description": "Día inicial (AAAA-MM-DD, zona horaria del núcleo).",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "",
+                      "description": "Día final (AAAA-MM-DD, incluido).",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"groupBy\": [\n    \"agent\",\n    \"day\"\n  ],\n  \"rows\": [\n    {\n      \"agentId\": \"claude-mi-clave\",\n      \"day\": \"2026-11-01\",\n      \"inputTokens\": 18250,\n      \"outputTokens\": 2140,\n      \"cachedInputTokens\": 12000,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 0.103,\n      \"entries\": 3\n    },\n    {\n      \"agentId\": \"codex\",\n      \"day\": \"2026-11-01\",\n      \"inputTokens\": 22572,\n      \"outputTokens\": 5,\n      \"cachedInputTokens\": 13440,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 0,\n      \"entries\": 1\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Skills",
+      "description": "Hub de skills con cuarentena.",
+      "item": [
+        {
+          "name": "/skills",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/skills",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "skills"
+              ]
+            },
+            "description": "Lista las skills instaladas"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/skills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "skills"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"skills\": [\n    {\n      \"name\": \"flota-orquestador\",\n      \"folder\": \"flota-orquestador\",\n      \"dir\": \"C:\\\\dev\\\\agent-hub\\\\skills\\\\flota-orquestador\",\n      \"root\": \"C:\\\\dev\\\\agent-hub\\\\skills\",\n      \"description\": \"Reglas para trabajar en la flota del orquestador.\",\n      \"valid\": true,\n      \"problems\": []\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/skills/import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/skills/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "skills",
+                "import"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Importa una skill (carpeta o .zip) a cuarentena y devuelve el informe de revisión"
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/skills/import",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "skills",
+                    "import"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"version\": 1,\n    \"id\": \"revisar-pr-20261101-214500-a1b2c3\",\n    \"name\": \"revisar-pr\",\n    \"description\": \"Revisa un PR y deja comentarios en español.\",\n    \"importedAt\": \"2026-11-01T21:45:00.000Z\",\n    \"source\": {\n      \"kind\": \"zip\",\n      \"path\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\",\n      \"sha256\": \"6f9bde7b3c3c90f1692c4071a3f1cb69709f7ee04531239a31442abd601ee4eb\",\n      \"topFolder\": \"revisar-pr\"\n    },\n    \"fileCount\": 2,\n    \"totalBytes\": 3120,\n    \"treeHash\": \"sha256:1ed65407c3d185c563d8e9a03dae30ba597254417dee0f5d6243249819acfd1c\",\n    \"files\": [\n      {\n        \"path\": \"SKILL.md\",\n        \"size\": 2048,\n        \"sha256\": \"ee8be1e7c5ca51b32e7a824690c5369c0025cf9e8961ca92d417965003607812\"\n      },\n      {\n        \"path\": \"scripts/check.sh\",\n        \"size\": 1072,\n        \"sha256\": \"f334e3a73256c1be8daa684df566fa56f4037e392ea8fa4a80f05b031233994e\",\n        \"script\": [\n          \"extensión\",\n          \"shebang\"\n        ]\n      }\n    ],\n    \"scripts\": [\n      {\n        \"path\": \"scripts/check.sh\",\n        \"reasons\": [\n          \"extensión\",\n          \"shebang\"\n        ]\n      }\n    ],\n    \"license\": {\n      \"declared\": \"MIT\",\n      \"files\": []\n    },\n    \"skipped\": [],\n    \"warnings\": [],\n    \"skillMdPreview\": \"---\\nname: revisar-pr\\ndescription: Revisa un PR y deja comentarios en español.\\nlicense: MIT\\n---\\n# Revisar PR\",\n    \"path\": \"C:\\\\dev\\\\agent-hub\\\\skills-entrantes\\\\revisar-pr-20261101-214500-a1b2c3\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/skills/:name/approve",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/skills/:name/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "skills",
+                ":name",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "name",
+                  "value": "{{skillName}}"
+                }
+              ]
+            },
+            "description": "Aprueba una skill en cuarentena"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/skills/:name/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "skills",
+                    ":name",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "name",
+                      "value": "{{skillName}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"name\": \"revisar-pr\",\n    \"description\": \"Revisa un PR y deja comentarios en español.\",\n    \"source\": {\n      \"kind\": \"zip\",\n      \"path\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\",\n      \"sha256\": \"6f9bde7b3c3c90f1692c4071a3f1cb69709f7ee04531239a31442abd601ee4eb\",\n      \"topFolder\": \"revisar-pr\"\n    },\n    \"treeHash\": \"sha256:1ed65407c3d185c563d8e9a03dae30ba597254417dee0f5d6243249819acfd1c\",\n    \"fileCount\": 2,\n    \"totalBytes\": 3120,\n    \"scripts\": [\n      \"scripts/check.sh\"\n    ],\n    \"license\": {\n      \"declared\": \"MIT\",\n      \"files\": []\n    },\n    \"quarantineId\": \"revisar-pr-20261101-214500-a1b2c3\",\n    \"importedAt\": \"2026-11-01T21:45:00.000Z\",\n    \"approvedAt\": \"2026-11-01T21:50:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/skills/:name/reject",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/skills/:name/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "skills",
+                ":name",
+                "reject"
+              ],
+              "variable": [
+                {
+                  "key": "name",
+                  "value": "{{skillName}}"
+                }
+              ]
+            },
+            "description": "Rechaza (descarta) una skill en cuarentena"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/skills/:name/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "skills",
+                    ":name",
+                    "reject"
+                  ],
+                  "variable": [
+                    {
+                      "key": "name",
+                      "value": "{{skillName}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": \"revisar-pr-20261101-214500-a1b2c3\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Memoria",
+      "description": "Extractos de la memoria en Obsidian para ahorrar contexto.",
+      "item": [
+        {
+          "name": "/memory/:project/context",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/memory/:project/context?budget=4000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "memory",
+                ":project",
+                "context"
+              ],
+              "query": [
+                {
+                  "key": "taskId",
+                  "value": "",
+                  "description": "Extracto pertinente para esta tarea (si falta, contexto general del proyecto).",
+                  "disabled": true
+                },
+                {
+                  "key": "budget",
+                  "value": "4000",
+                  "description": "Presupuesto en caracteres (4000 por defecto)."
+                }
+              ],
+              "variable": [
+                {
+                  "key": "project",
+                  "value": "{{projectId}}"
+                }
+              ]
+            },
+            "description": "Extracto de memoria (Obsidian) para un proyecto o una tarea"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/memory/:project/context?budget=4000",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "memory",
+                    ":project",
+                    "context"
+                  ],
+                  "query": [
+                    {
+                      "key": "taskId",
+                      "value": "",
+                      "description": "Extracto pertinente para esta tarea (si falta, contexto general del proyecto).",
+                      "disabled": true
+                    },
+                    {
+                      "key": "budget",
+                      "value": "4000",
+                      "description": "Presupuesto en caracteres (4000 por defecto)."
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "project",
+                      "value": "{{projectId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"projectId\": \"vetworld\",\n  \"taskId\": \"validar-citas\",\n  \"budgetChars\": 4000,\n  \"chars\": 180,\n  \"context\": \"# Vetworld\\nEstado: formulario de citas sin validación.\\nDecisiones: Zod en formularios; Vitest para pruebas.\\n\\n## Sesiones pertinentes\\n- 2026-10-30 citas-ui (codex): ok, src/citas/**\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ajustes",
+      "description": "Ajustes de la interfaz (F5): la mente, los subagentes de la flota, el modo inicial, el umbral de cupo, la concurrencia y la apariencia.",
+      "item": [
+        {
+          "name": "/settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "settings"
+              ]
+            },
+            "description": "Ajustes de la interfaz: mente, subagentes, modo, cupo, concurrencia y apariencia"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/settings",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "settings"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"workers\": [],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.2,\n    \"concurrency\": 3,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "settings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mind\": {\n    \"effort\": \"high\"\n  },\n  \"workers\": [\n    \"claude-mi-clave\",\n    \"codex\"\n  ],\n  \"concurrency\": 2,\n  \"quotaFloor\": 0.25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cambia ajustes (un nivel de profundidad) y los difunde por /ws\n\nSolo los campos enviados; `mind` y `appearance` se mezclan campo a campo y `mind.model: null` borra el modelo. `workers` vacío: todos los agentes habilitados son subagentes. La mente debe ser un agente registrado que pueda serlo (`GET /mind/candidates`, `support` distinto de `none`). Cada cambio se transmite por `/ws` como `{type:\"settings\"}` y la flota aplica al momento la concurrencia, los subagentes y el umbral de cupo."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/settings",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "settings"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mind\": {\n    \"effort\": \"high\"\n  },\n  \"workers\": [\n    \"claude-mi-clave\",\n    \"codex\"\n  ],\n  \"concurrency\": 2,\n  \"quotaFloor\": 0.25\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"workers\": [\n      \"claude-mi-clave\",\n      \"codex\"\n    ],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.25,\n    \"concurrency\": 2,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/mind/candidates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/mind/candidates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "mind",
+                "candidates"
+              ]
+            },
+            "description": "Agentes que pueden hacer de mente, con sus modelos\n\nClaude (`claude-sdk`) habilitado: `full`. Codex y agy: `experimental` (necesitan el puente MCP de F5.2). Modelos por API y agentes deshabilitados: `none`. Los modelos salen de la última prueba del agente."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/mind/candidates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "mind",
+                    "candidates"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"candidates\": [\n    {\n      \"agentId\": \"claude-mi-clave\",\n      \"displayName\": \"Claude (mi clave)\",\n      \"kind\": \"claude-sdk\",\n      \"support\": \"full\",\n      \"models\": [\n        \"claude-opus-5-5\"\n      ]\n    },\n    {\n      \"agentId\": \"codex\",\n      \"displayName\": \"Codex CLI\",\n      \"kind\": \"codex-cli\",\n      \"support\": \"experimental\",\n      \"note\": \"necesita el puente MCP (F5.2)\",\n      \"models\": [\n        \"gpt-6.1-sol\"\n      ]\n    },\n    {\n      \"agentId\": \"agy\",\n      \"displayName\": \"Antigravity CLI (agy)\",\n      \"kind\": \"agy-cli\",\n      \"support\": \"experimental\",\n      \"note\": \"necesita el puente MCP (F5.2)\",\n      \"models\": []\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Carpetas",
+      "description": "Explorador de carpetas del equipo y diálogo nativo de Windows para elegir la carpeta de un proyecto (F5).",
+      "item": [
+        {
+          "name": "/fs/list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fs/list?path=C:\\dev",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fs",
+                "list"
+              ],
+              "query": [
+                {
+                  "key": "path",
+                  "value": "C:\\dev"
+                }
+              ]
+            },
+            "description": "Lista una carpeta del equipo (o las carpetas habituales y las unidades)\n\nCarpetas primero, sin archivos de sistema, con `isGitRepo` (tiene `.git`) y como mucho 2000 entradas. Sin `path`: `C:\\dev`, el Escritorio, el perfil y las unidades que existen (`path: \"\"`)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/fs/list?path=C:\\dev",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "fs",
+                    "list"
+                  ],
+                  "query": [
+                    {
+                      "key": "path",
+                      "value": "C:\\dev"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"path\": \"C:\\\\dev\",\n  \"parent\": \"C:\\\\\",\n  \"entries\": [\n    {\n      \"name\": \"agent-hub\",\n      \"path\": \"C:\\\\dev\\\\agent-hub\",\n      \"isDir\": true,\n      \"isGitRepo\": false\n    },\n    {\n      \"name\": \"orquestador\",\n      \"path\": \"C:\\\\dev\\\\orquestador\",\n      \"isDir\": true,\n      \"isGitRepo\": true\n    },\n    {\n      \"name\": \"Vetworld\",\n      \"path\": \"C:\\\\dev\\\\Vetworld\",\n      \"isDir\": true,\n      \"isGitRepo\": true\n    },\n    {\n      \"name\": \"notas.md\",\n      \"path\": \"C:\\\\dev\\\\notas.md\",\n      \"isDir\": false,\n      \"isGitRepo\": false\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/fs/pick-folder",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fs/pick-folder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fs",
+                "pick-folder"
+              ]
+            },
+            "description": "Abre el diálogo de carpetas de Windows y devuelve la elegida\n\nPara la interfaz web (Electron usa el suyo). Espera a que el usuario elija o cancele (`path: null`); con un diálogo ya abierto, la petición espera esa misma respuesta. 501 fuera de Windows."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/fs/pick-folder",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "fs",
+                    "pick-folder"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

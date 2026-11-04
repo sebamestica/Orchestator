@@ -1,0 +1,28 @@
+{
+  "id": "vetworld",
+  "name": "Vetworld",
+  "repoPath": "C:\\dev\\Vetworld",
+  "workspace": {
+    "worktreesRoot": "C:\\dev\\.worktrees\\vetworld-orq",
+    "baseBranch": "main",
+    "integrationBranch": "orq/integracion",
+    "links": [".tools", "workbench", "assets-source", "node_modules"],
+    "postCreate": [
+      {
+        "command": "node",
+        "args": [
+          "-e",
+          "const fs=require('node:fs'),path=require('node:path');const dst=path.join('.claude','skills');fs.mkdirSync(dst,{recursive:true});let n=0;for(const base of [path.join('.agents','skills'),path.join('.agents','skills','vendor')]){if(!fs.existsSync(base))continue;for(const d of fs.readdirSync(base,{withFileTypes:true})){const src=path.join(base,d.name);if(d.isDirectory()&&fs.existsSync(path.join(src,'SKILL.md'))){fs.cpSync(src,path.join(dst,d.name),{recursive:true});n++}}}console.log(n+' skills copiadas a .claude/skills')"
+        ],
+        "timeoutMs": 120000
+      }
+    ],
+    "gate": [
+      {
+        "command": "npm",
+        "args": ["run", "-s", "gate"],
+        "timeoutMs": 1800000
+      }
+    ]
+  }
+}
