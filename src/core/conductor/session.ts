@@ -15,7 +15,7 @@ import { idSchema, redactSecrets } from '../../shared/index.ts';
 import type { AgentEvent, MindMode } from '../../shared/index.ts';
 import { createToolGuard } from './guard.ts';
 import type { Awaitable, ConductorPorts, ProposedTask, SdkMessageTranslator, TranslatorInit } from './ports.ts';
-import { buildConductorSystemPrompt } from './prompt.ts';
+import { buildConductorSystemPrompt, type ConductorWorkMode } from './prompt.ts';
 import { redactDeep } from './redact.ts';
 import { CONDUCTOR_SERVER_NAME, CONDUCTOR_TOOL_NAMES, FLEET_TOOL_NAMES, createConductorTools, mcpToolName } from './tools.ts';
 import type { ConductorTools } from './tools.ts';
@@ -112,6 +112,8 @@ export interface ConductorSessionOptions {
   autoApprove?: (taskIds: readonly string[]) => Awaitable<readonly ProposedTask[]>;
   /** Carpetas extra que eligió el usuario: se pueden leer y se nombran en el prompt. */
   extraRoots?: readonly string[];
+  /** Modo de trabajo de la flota en el proyecto (worktrees o local), para el prompt. */
+  workMode?: ConductorWorkMode;
   /** Archivos o carpetas que nunca se leen (bóveda y base de datos del núcleo). */
   denyPaths?: readonly string[];
   /** Servidores MCP extra (plugins); sus herramientas entran en `allowedTools` como `mcp__<nombre>__*`. */
@@ -280,6 +282,7 @@ export class ConductorSession {
         projectDir: o.cwd,
         ...(this.mode ? { mode: this.mode } : {}),
         ...(extraRoots.length ? { extraRoots } : {}),
+        ...(opts.workMode ? { workMode: opts.workMode } : {}),
         date: now(),
         quotas: opts.ports.quotas.all(),
         quotaFloor: o.quotaFloor,

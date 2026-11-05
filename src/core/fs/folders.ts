@@ -284,6 +284,33 @@ export function gateForWorkspace(gate: readonly GateCommand[]): { command: strin
   return gate.map((g) => ({ command: g.command, args: [...g.args], timeoutMs: DEFAULT_GATE_TIMEOUT_MS }));
 }
 
+/**
+ * El repositorio tiene al menos un commit: HEAD separado (apunta a un commit) o la rama de HEAD existe como ref suelta
+ * o en `packed-refs` (también en worktrees enlazados, vía `commondir`). Un `git init` recién hecho no tiene ninguno y
+ * no admite worktrees.
+ */
+export async function hasCommits(dir: string): Promise<boolean> {
+  const dotGit = join(dir, '.git');
+  try {
+    let gitDir = dotGit;
+    if ((await stat(dotGit)).isFile()) {
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec((await readSmall(dotGit)) ?? '');
+      if (!m?.[1]) return false;
+      gitDir = resolve(dir, m[1]);
+    }
+    const head = ((await readSmall(join(gitDir, 'HEAD'))) ?? '').trim();
+    const ref = /^ref:\s*(refs\/heads\/.+)$/.exec(head)?.[1];
+    if (!ref) return /^[0-9a-f]{40,64}$/i.test(head);
+    const common = ((await readSmall(join(gitDir, 'commondir'))) ?? '').trim();
+    const commonDir = common ? resolve(gitDir, common) : gitDir;
+    if (await exists(join(commonDir, ...ref.split('/')))) return true;
+    const packed = (await readSmall(join(commonDir, 'packed-refs'))) ?? '';
+    return packed.split(/\r?\n/).some((line) => line.trim().endsWith(` ${ref}`));
+  } catch {
+    return false;
+  }
+}
+
 /** Rama actual leyendo `.git/HEAD` (también en worktrees enlazados). `undefined` si HEAD está separado o no se lee. */
 export async function currentBranch(dir: string): Promise<string | undefined> {
   const dotGit = join(dir, '.git');
@@ -336,6 +363,8 @@ export interface FolderReport {
   inspection: FolderInspection;
   /** Rama actual (`undefined`: HEAD separado o sin git). */
   branch: string | undefined;
+  /** El repositorio tiene al menos un commit (sin commits no hay worktrees: modo local). */
+  hasCommits: boolean;
   /** Proyecto ya registrado en esta misma carpeta. */
   registeredAs: string | undefined;
 }
@@ -363,10 +392,12 @@ export async function inspectFolder(raw: string, opts: FsEnv & { projects?: read
   const { gate, warnings } = await deduceGate(dir);
   const links = (await exists(join(dir, 'node_modules'))) ? ['node_modules'] : [];
   const branch = git ? await currentBranch(dir) : undefined;
+  const committed = git ? await hasCommits(dir) : false;
 
   if (registeredAs) warnings.push(`La carpeta ya está registrada como el proyecto ${registeredAs}`);
   if (suggestedId !== base) warnings.push(`Ya existe un proyecto con id ${base}: se sugiere ${suggestedId}`);
   if (!git) warnings.push('No es un repositorio git: se trabajará en local, directamente en la carpeta (sin worktrees ni commits)');
+  else if (!committed) warnings.push('El repositorio git aún no tiene commits: se trabajará en local, directamente en la carpeta (sin worktrees ni commits)');
   else if (!branch) warnings.push('HEAD separado: se usará main como rama base');
   if (!gate) {
     warnings.push(
@@ -376,6 +407,7 @@ export async function inspectFolder(raw: string, opts: FsEnv & { projects?: read
   return {
     inspection: { path: dir, suggestedId, suggestedName: folderName, isGitRepo: git, gate, links, warnings },
     branch,
+    hasCommits: committed,
     registeredAs,
   };
 }

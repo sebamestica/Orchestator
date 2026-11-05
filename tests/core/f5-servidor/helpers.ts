@@ -39,6 +39,12 @@ export function gitInit(dir: string, branch = 'main'): void {
   execFileSync('git', ['init', '-q', '-b', branch], { cwd: dir, stdio: 'ignore', windowsHide: true });
 }
 
+/** Repo git con un commit vacío (sin commits no hay worktrees: el núcleo lo registraría en modo local). */
+export function gitInitWithCommit(dir: string, branch = 'main'): void {
+  gitInit(dir, branch);
+  execFileSync('git', ['-c', 'user.name=u', '-c', 'user.email=u@l', 'commit', '-q', '--allow-empty', '-m', 'inicio'], { cwd: dir, stdio: 'ignore', windowsHide: true });
+}
+
 export function putAgent(store: SqliteStore, id: string, kind: AgentKind, extra: { enabled?: boolean; models?: string[]; model?: string } = {}): void {
   const provider = kind === 'claude-sdk' || kind === 'api' ? 'anthropic' : kind === 'codex-cli' ? 'codex' : 'antigravity';
   const config = agentConfigSchema.parse({

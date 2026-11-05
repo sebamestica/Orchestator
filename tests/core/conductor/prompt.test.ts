@@ -46,10 +46,11 @@ describe('prompt de sistema del orquestador', () => {
     const p = CONDUCTOR_PROMPT_PREFIX;
     expect(p).toMatch(/^Eres el orquestador/);
     expect(p).toMatch(/no editas código ni ejecutas comandos: delegas/);
-    expect(p).toMatch(/Un worktree por tarea/);
+    expect(p).toMatch(/cada tarea tiene su worktree y su rama/);
+    expect(p).toMatch(/modo local .*la flota trabaja directamente en la carpeta del proyecto, una tarea a la vez y sin commits/);
     expect(p).toMatch(/Propiedad de archivos/);
     expect(p).toMatch(/revisor de una tarea siempre es un agente distinto de su autor/);
-    expect(p).toMatch(/Codex o agy agotan su cupo.*Claude continúa la tarea en el mismo worktree/);
+    expect(p).toMatch(/Codex o agy agotan su cupo.*Claude continúa la tarea en el mismo worktree \(o en la misma carpeta, en modo local\)/);
     expect(p).toMatch(/Push, merge a main.*solo con aprobación explícita del usuario/);
     for (const name of CONDUCTOR_TOOL_NAMES) expect(p).toContain(`- ${name}(`);
     expect(p).toMatch(/Tú no puedes aprobarlas/);
@@ -79,6 +80,17 @@ describe('prompt de sistema del orquestador', () => {
     expect(solo).toMatch(/## Agente suelto/);
     expect(solo).toMatch(/Carpetas extra de lectura: D:\\fotos/);
     expect(solo).not.toMatch(/## Modo:/);
+  });
+
+  it('el modo de trabajo del proyecto va en el contexto: en local, la mente sabe que no hacen falta commits', () => {
+    const local = renderSessionContext({ projectId: 'marketing', projectDir: 'C:\\dev\\marketing', mode: 'bypass', workMode: 'local' });
+    expect(local).toMatch(/Modo de trabajo: local\. La flota escribe directamente en C:\\dev\\marketing/);
+    expect(local).toMatch(/No le pidas al usuario commits, git init ni ramas/);
+    const wt = renderSessionContext({ projectId: 'orquestador', projectDir: 'C:\\dev\\orquestador', workMode: 'worktrees' });
+    expect(wt).toMatch(/Modo de trabajo: worktrees/);
+    // Sin el dato (terminal antigua), no se agrega la línea; el prefijo no cambia.
+    expect(renderSessionContext({ projectId: 'x1', projectDir: 'C:\\x' })).not.toMatch(/Modo de trabajo/);
+    expect(buildConductorSystemPrompt({ projectId: 'marketing', projectDir: 'C:\\dev\\marketing', workMode: 'local' })[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
   });
 
   it('tacha secretos del contexto dinámico', () => {

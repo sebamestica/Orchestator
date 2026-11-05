@@ -1073,7 +1073,7 @@
                 }
               }
             },
-            "description": "Registra un proyecto apuntando a una carpeta\n\nCon git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git o sin gate se registra sin `workspace`: la flota trabaja en **modo local**, directamente en la carpeta (sin worktrees, ramas ni commits; una tarea a la vez; el gate se corre si aparece uno). 409 si el id ya existe o la carpeta ya es un proyecto."
+            "description": "Registra un proyecto apuntando a una carpeta\n\nCon git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git, sin commits o sin gate se registra sin `workspace`: la flota trabaja en **modo local**, directamente en la carpeta (sin worktrees, ramas ni commits; una tarea a la vez; el gate se corre si aparece uno). 409 si el id ya existe o la carpeta ya es un proyecto."
           },
           "response": [
             {

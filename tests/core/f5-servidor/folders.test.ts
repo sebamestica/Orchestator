@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -9,6 +10,7 @@ import {
   deduceGate,
   encodePowerShell,
   FolderError,
+  hasCommits,
   isSystemEntry,
   listFolder,
   listRoots,
@@ -18,7 +20,7 @@ import {
   type SpawnFn,
 } from '../../../src/core/fs/folders.ts';
 import { folderInspectionSchema, fsListResponse } from '../../../src/shared/index.ts';
-import { cleanupDirs, gitInit, makeF5App, tempDir, writeFiles } from './helpers.ts';
+import { cleanupDirs, gitInit, gitInitWithCommit, makeF5App, tempDir, writeFiles } from './helpers.ts';
 
 afterEach(cleanupDirs);
 
@@ -107,7 +109,7 @@ describe('POST /projects/inspect', () => {
   it('package.json: check gana a gate y a test; enlaza node_modules; git real', async () => {
     const dir = join(await tempDir(), 'Mi Proyecto Ñandú');
     await mkdir(join(dir, 'node_modules'), { recursive: true });
-    gitInit(dir, 'desarrollo');
+    gitInitWithCommit(dir, 'desarrollo');
     await writeFiles(dir, { 'package.json': JSON.stringify({ scripts: { test: 'vitest run', gate: 'node gate.js', check: 'tsc && vitest' } }) });
     const r = await inspect(dir);
     expect(r).toMatchObject({
@@ -179,7 +181,7 @@ describe('POST /projects/from-folder', () => {
   it('repo git con gate: registra con workspace (worktrees, rama actual, integración, enlaces y gate)', async () => {
     const dir = join(await tempDir(), 'Clinica');
     await mkdir(join(dir, 'node_modules'), { recursive: true });
-    gitInit(dir, 'trabajo');
+    gitInitWithCommit(dir, 'trabajo');
     await writeFiles(dir, { 'package.json': JSON.stringify({ scripts: { check: 'vitest run' } }) });
     const t = makeF5App();
     const res = await t.req('POST', '/projects/from-folder', { body: { path: dir, name: 'Clínica veterinaria' } });
@@ -218,6 +220,35 @@ describe('POST /projects/from-folder', () => {
       expect(project).toMatchObject({ id, name });
       expect(project.workspace).toBeUndefined();
     }
+  });
+
+  it('repo git SIN commits (caso marketing), aunque tenga gate: modo local, sin workspace, con aviso', async () => {
+    const root = await tempDir();
+    const dir = join(root, 'marketing');
+    await writeFiles(root, { 'marketing/package.json': JSON.stringify({ scripts: { check: 'node -e 0' } }) });
+    gitInit(dir);
+    expect(await hasCommits(dir)).toBe(false);
+    const t = makeF5App();
+    const inspect = await t.req('POST', '/projects/inspect', { body: { path: dir } });
+    expect((inspect.json as { warnings: string[] }).warnings.join('\n')).toMatch(/aún no tiene commits: se trabajará en local/);
+    const res = await t.req('POST', '/projects/from-folder', { body: { path: dir } });
+    expect(res.status, res.text).toBe(201);
+    expect((res.json as { project: Record<string, unknown> }).project.workspace).toBeUndefined();
+  });
+
+  it('hasCommits: con un commit sí (también por packed-refs); HEAD separado sí', async () => {
+    const root = await tempDir();
+    const dir = join(root, 'repo');
+    await writeFiles(root, { 'repo/a.txt': 'a' });
+    gitInit(dir);
+    const g = (...args: string[]) => execFileSync('git', ['-c', 'user.name=u', '-c', 'user.email=u@l', ...args], { cwd: dir, stdio: 'pipe', windowsHide: true }).toString();
+    g('add', '.');
+    g('commit', '-q', '-m', 'uno');
+    expect(await hasCommits(dir)).toBe(true);
+    g('pack-refs', '--all');
+    expect(await hasCommits(dir)).toBe(true);
+    g('checkout', '-q', '--detach');
+    expect(await hasCommits(dir)).toBe(true);
   });
 
   it('valida el cuerpo con Zod e informa carpetas inexistentes con 404', async () => {

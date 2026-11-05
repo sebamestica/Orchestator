@@ -601,6 +601,8 @@ export class ChatService {
       projectId: chat.projectId,
       cwd: chat.cwd,
       extraRoots: chat.extraRoots,
+      // Sin `workspace` el proyecto trabaja en modo local (directo en la carpeta, sin commits).
+      ...(chat.projectId ? { workMode: this.#deps.store.getProject(chat.projectId)?.workspace ? 'worktrees' as const : 'local' as const } : {}),
       mode: () => this.#modeOf(chatId),
       autoApprove: (ids) => live.proposals.approve(ids),
       readRoots: () => {

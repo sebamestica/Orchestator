@@ -199,7 +199,7 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
         tag: 'Proyectos',
         summary: 'Registra un proyecto apuntando a una carpeta',
         description:
-          'Con git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git o sin gate se registra sin `workspace`: la flota trabaja en **modo local**, directamente en la carpeta (sin worktrees, ramas ni commits; una tarea a la vez; el gate se corre si aparece uno). 409 si el id ya existe o la carpeta ya es un proyecto.',
+          'Con git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git, sin commits o sin gate se registra sin `workspace`: la flota trabaja en **modo local**, directamente en la carpeta (sin worktrees, ramas ni commits; una tarea a la vez; el gate se corre si aparece uno). 409 si el id ya existe o la carpeta ya es un proyecto.',
         body: projectFromFolderBody,
         response: apiSchemas.projectResponse,
         status: 201,
@@ -214,7 +214,8 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
         if (store.getProject(id)) throw new ApiError(409, 'conflict', `Ya existe el proyecto ${id}`);
         const name = (body.name ?? inspection.suggestedName).slice(0, 120);
         const input: ProjectInput = { id, name, repoPath: inspection.path };
-        if (inspection.isGitRepo && inspection.gate) {
+        // Worktrees solo con git, al menos un commit y gate; si falta algo, modo local (directo en la carpeta).
+        if (inspection.isGitRepo && report.hasCommits && inspection.gate) {
           input.workspace = {
             worktreesRoot: folderWorktreesRoot(id, inspection.path, platform),
             baseBranch: report.branch ?? 'main',

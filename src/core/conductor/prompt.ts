@@ -18,11 +18,11 @@ export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local d
 - agy / Antigravity (Gemini, cupo de 5 h y semanal; también ofrece Claude con el cupo de Google): módulos acotados, investigación web y pruebas.
 
 ## Reglas de la flota (obligatorias)
-1. Un worktree por tarea, con su propia rama. Nunca dos tareas en la misma carpeta.
+1. Aislamiento: en un proyecto con worktrees, cada tarea tiene su worktree y su rama. En un proyecto en modo local (sin worktrees: carpeta sin git, sin commits o sin gate), la flota trabaja directamente en la carpeta del proyecto, una tarea a la vez y sin commits. El modo de cada proyecto va en el contexto de la sesión. Nunca dos tareas a la vez en la misma carpeta.
 2. Propiedad de archivos: cada tarea declara sus rutas propias y no se solapan con las de otra tarea. Un agente solo modifica sus rutas; lo que necesite fuera de ellas lo propone en su informe.
 3. Contratos compartidos primero: las interfaces entre módulos no se cambian sin aprobación del usuario; se proponen.
 4. El revisor de una tarea siempre es un agente distinto de su autor.
-5. Traspaso: si Codex o agy agotan su cupo, o quedan por debajo del umbral, Claude continúa la tarea en el mismo worktree a partir de su .orq/HANDOFF.md, sin rehacer lo que ya funciona.
+5. Traspaso: si Codex o agy agotan su cupo, o quedan por debajo del umbral, Claude continúa la tarea en el mismo worktree (o en la misma carpeta, en modo local) a partir de su .orq/HANDOFF.md, sin rehacer lo que ya funciona.
 6. Push, merge a main, borrar ramas, reescribir historia, desplegar o pagar: solo con aprobación explícita del usuario. Tú nunca lo haces por tu cuenta ni se lo encargas a un agente sin esa aprobación.
 7. Ninguna clave ni secreto en tareas, memoria, mensajes ni respuestas. Si ves uno, no lo repitas.
 8. Verificación real: una tarea está lista cuando su verificación pasa y el informe trae cifras reales; lo no ejecutado se declara como no ejecutado.
@@ -85,6 +85,17 @@ export interface ConductorPromptContext {
   notes?: string;
   /** Valores que se tachan además de los patrones de `redactSecrets`. */
   secrets?: readonly string[];
+  /** Cómo trabaja la flota en el proyecto: worktrees o modo local (directo en la carpeta). */
+  workMode?: ConductorWorkMode;
+}
+
+export type ConductorWorkMode = 'local' | 'worktrees';
+
+/** Línea del contexto con el modo de trabajo del proyecto. */
+export function workModeLine(mode: ConductorWorkMode, dir: string): string {
+  return mode === 'local'
+    ? `- Modo de trabajo: local. La flota escribe directamente en ${dir}: sin worktrees, ramas ni commits, y una tarea a la vez. No le pidas al usuario commits, git init ni ramas: no hacen falta. Lo que hagan los agentes queda guardado en la carpeta.`
+    : '- Modo de trabajo: worktrees. Cada tarea trabaja en su copia y su rama, y se integra en la rama de integración tras el gate.';
 }
 
 /** Contexto variable de la sesión. Va siempre después del marcador, nunca al inicio. */
@@ -94,6 +105,7 @@ export function renderSessionContext(ctx: ConductorPromptContext): string {
     lines.push('- Proyecto: ninguno (agente suelto)', `- Carpeta de trabajo: ${ctx.projectDir}`);
   } else {
     lines.push(`- Proyecto: ${ctx.projectId}`, `- Carpeta del proyecto: ${ctx.projectDir}`);
+    if (ctx.workMode) lines.push(workModeLine(ctx.workMode, ctx.projectDir));
   }
   if (ctx.extraRoots?.length) lines.push(`- Carpetas extra de lectura: ${ctx.extraRoots.join('; ')}`);
   if (ctx.date) lines.push(`- Fecha: ${ctx.date.toISOString().slice(0, 10)}`);
