@@ -1,8 +1,7 @@
 # Issue 13 — Ajustes › Almacenamiento: cuánto ocupa Berland en disco y vaciarlo
 
-Estado: hecho · Commit: uno solo, a nombre del usuario y sin trailers
-`src/core/chat/conversations.ts` (carpetas internas de las conversaciones sin proyecto; otro agente lo cablea en
-paralelo: aquí solo se usa para medir y vaciar)
+Estado: hecho · Commit: uno solo, a nombre del usuario y sin trailers · Depende de: issue 12
+(`src/core/chat/conversations.ts`, las carpetas internas de las conversaciones; aquí solo se usan para medir y vaciar)
 
 ## Problema
 - El usuario no sabe cuánto espacio en disco usa Berland ni tiene cómo liberarlo. «Memoria» aquí es espacio en disco,

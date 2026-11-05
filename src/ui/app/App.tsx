@@ -11,6 +11,7 @@ import { Sidebar } from './Sidebar.tsx';
 import { TitleBar } from './TitleBar.tsx';
 import type { Route } from './routes.ts';
 import { useRoute } from './use-route.ts';
+import { BootScreen } from '../components/BootScreen.tsx';
 
 // Vistas pesadas por demanda: la portada carga sola y rápido.
 const ChatView = lazy(() => import('../features/chat/ChatView.tsx'));
@@ -115,7 +116,9 @@ export function App() {
               <Suspense fallback={null}>
                 <View route={route} />
               </Suspense>
-            ) : core === 'starting' ? null : (
+            ) : core === 'starting' ? (
+              <BootScreen label="Conectando con el núcleo…" />
+            ) : (
               <div className="flex flex-1 items-center justify-center">
                 <EmptyState
                   icon={Plug}

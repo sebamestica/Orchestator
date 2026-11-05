@@ -276,3 +276,13 @@ body {
         transition: none;
     }
 }
+
+/* Pantalla de arranque (src/shared/boot-animation.ts): intensidad del halo según el tema. */
+:root {
+  --boot-glow: 0.035;
+  --boot-halo: 0.06;
+}
+:root.dark {
+  --boot-glow: 0.1;
+  --boot-halo: 0.1;
+}

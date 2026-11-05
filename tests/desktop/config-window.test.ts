@@ -109,7 +109,23 @@ describe('página de estado', () => {
     expect(html).toContain(`script-src 'sha256-${hash}'`);
     expect(html).toContain("default-src 'none'");
     expect(html).toContain('<title>Berland</title>');
-    expect(html).toContain('class="spin"');
+    // Esperando: la animación de Berland (núcleo y agentes), sin la ruedita de antes.
+    expect(html).toContain('class="boot"');
+    expect(html).toContain('class="boot-art"');
+    expect(html).not.toContain('class="spin"');
+    expect(html).toContain('@keyframes boot-spin');
+    expect(html).toContain('prefers-reduced-motion');
+  });
+
+  it('esperando: la etiqueta cambia el «…» final por puntos animados y el estado se anuncia con el texto entero', () => {
+    const html = statusPageHtml({ title: 'Arrancando el núcleo…', busy: true });
+    expect(html).toContain('aria-label="Arrancando el núcleo…"');
+    expect(html).toContain('<span class="boot-label">Arrancando el núcleo<span class="boot-dots" aria-hidden="true">');
+    expect(html.match(/class="boot-node"/g)).toHaveLength(6);
+    // Un error no lleva animación.
+    const error = statusPageHtml({ title: 'El núcleo se detuvo', detail: 'Código de salida: 1' });
+    expect(error).not.toContain('class="boot"');
+    expect(error).toContain('<h1>El núcleo se detuvo</h1>');
   });
 
   it('se entrega como URL data: decodificable', () => {
