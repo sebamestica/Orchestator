@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { MindMode, QuotaProvider, TaskBrief } from '../../shared/index.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import {
@@ -8,10 +9,16 @@ import {
   type ConductorQueryFn,
   type ConductorSessionOptions,
   type DeliveryReport,
+  type FleetPort,
+  type FleetTaskStatus,
   type PlannerPort,
+  type ProjectTaskStatus,
+  type SkillCatalogPort,
+  type SkillInfo,
 } from '../conductor/index.ts';
 import { planToTasks } from '../orchestrator/index.ts';
 import { QuotaMonitor } from '../quota/monitor.ts';
+import { SkillHub } from '../skills/index.ts';
 import type { AgentRecord } from '../store/index.ts';
 import type { Composition } from './compose.ts';
 import { withoutHostCredentials } from './env.ts';
@@ -72,6 +79,54 @@ function conductorAgent(comp: Composition, agentId?: string): AgentRecord {
   return agent;
 }
 
+/** Proyecto de una tarea según la cola de la flota o, si la cola no la tiene, la base. */
+export function taskProjectOf(comp: Pick<Composition, 'fleet'> & Partial<Pick<Composition, 'store'>>): (taskId: string) => string | undefined {
+  return (taskId) => comp.fleet.queue.get(taskId)?.task.projectId ?? comp.store?.getTask(taskId)?.task.projectId;
+}
+
+/**
+ * Flota con el proyecto de cada tarea en `status` y `list` (`ProjectTaskStatus`): con él, `estado` y el planificador
+ * de la mente solo ven las tareas del proyecto de la sesión. `delegate` y `retry` pasan tal cual.
+ */
+export function withTaskProjects(port: FleetPort, projectOf: (taskId: string) => string | undefined): FleetPort {
+  const tag = (status: FleetTaskStatus): ProjectTaskStatus => {
+    const projectId = projectOf(status.taskId);
+    return projectId === undefined ? status : { ...status, projectId };
+  };
+  const retry = port.retry?.bind(port);
+  return {
+    delegate: (task) => port.delegate(task),
+    status: async (taskId) => {
+      const status = await port.status(taskId);
+      return status && tag(status);
+    },
+    list: async () => (await port.list()).map(tag),
+    ...(retry ? { retry } : {}),
+  };
+}
+
+/**
+ * Skills que ve la mente de un proyecto: las comunes del hub (`installRoot`) y, con `projectDir`, las de
+ * `<proyecto>/.agents/skills`. Nunca las de la carpeta donde arrancó el núcleo (`SkillHub` usa `process.cwd()`), que
+ * pueden ser de otro proyecto.
+ */
+export function projectSkillsPort(hub: Pick<SkillHub, 'list' | 'installRoot'>, projectDir?: string): SkillCatalogPort {
+  const own = projectDir === undefined ? undefined : new SkillHub({ roots: [join(projectDir, '.agents', 'skills')] });
+  return {
+    async list(): Promise<SkillInfo[]> {
+      const shared = (await hub.list()).filter((s) => s.root === hub.installRoot);
+      return own ? [...shared, ...(await own.list())] : shared;
+    },
+  };
+}
+
+/** Lo que la mente nunca lee con Read/Grep/Glob: bóveda de claves, base del núcleo y memoria de todos los proyectos. */
+export function mindDenyPaths(comp: Pick<Composition, 'config' | 'memory'>): string[] {
+  const db = comp.config.dbPath;
+  // La memoria (Obsidian) tiene la de todos los proyectos: se lee solo con `leer_memoria`, acotada al proyecto.
+  return [comp.config.vaultPath, db, `${db}-wal`, `${db}-shm`, comp.memory.vaultPath];
+}
+
 async function quotaProviders(comp: Composition): Promise<QuotaProvider[]> {
   const out: QuotaProvider[] = [];
   for (const agent of comp.registry.list().filter((a) => a.config.enabled)) {
@@ -112,11 +167,20 @@ export async function createConductor(comp: Composition, opts: ConductorOptions)
 
   const mode = opts.mode ?? 'plan';
   const session = new ConductorSession({
-    ports: { planner: plannerPort(comp), proposals, fleet: fleetPort, quotas, memory: comp.memory, skills: comp.skills },
+    ports: {
+      planner: plannerPort(comp),
+      proposals,
+      // Con el proyecto de cada tarea: `estado` y el planificador solo ven las de este proyecto.
+      fleet: withTaskProjects(fleetPort, taskProjectOf(comp)),
+      quotas,
+      memory: comp.memory,
+      skills: projectSkillsPort(comp.skills, opts.cwd),
+    },
     projectId: opts.projectId,
     mode,
     autoApprove: (ids) => proposals.approve(ids),
     cwd: opts.cwd,
+    denyPaths: mindDenyPaths(comp),
     env,
     baseEnv: withoutHostCredentials(comp.hostEnv()),
     ...(agent.config.model ? { model: agent.config.model } : {}),

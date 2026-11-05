@@ -43,6 +43,17 @@ export function mcpToolName(name: ConductorToolName): string {
 export type ToolResult = Awaited<ReturnType<SdkMcpToolDefinition['handler']>>;
 type ToolExtras = NonNullable<Parameters<typeof tool>[4]>;
 
+/**
+ * Estado de la flota con el proyecto de su tarea. Los puertos del núcleo lo agregan (`withTaskProjects`, en
+ * `app/conductor.ts`): con él, `estado` y el planificador no ven tareas de otro proyecto.
+ */
+export type ProjectTaskStatus = FleetTaskStatus & { projectId?: string };
+
+/** Proyecto de un estado de la flota, si el puerto lo informa. */
+export function statusProject(status: FleetTaskStatus | undefined): string | undefined {
+  return status && 'projectId' in status && typeof status.projectId === 'string' ? status.projectId : undefined;
+}
+
 export interface ConductorToolsOptions {
   /** Proyecto por omisión de `crear_tareas` (el de la sesión). */
   defaultProjectId?: string;
@@ -142,12 +153,25 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     }
   }
 
-  async function knownTaskIds(): Promise<string[]> {
-    const ids = new Set<string>();
-    for (const e of await ports.proposals.list()) ids.add(e.task.id);
-    for (const s of await ports.fleet.list()) ids.add(s.taskId);
-    return [...ids].sort();
+  /**
+   * Propuestas y tareas de la flota de `projectId`. Una tarea de la flota cuyo proyecto no se conoce solo cuenta si es
+   * una propuesta de esta conversación (del mismo proyecto): las demás pueden ser de otro proyecto y no se muestran.
+   */
+  async function projectTasks(projectId: string): Promise<{ entries: ProposedTask[]; statuses: FleetTaskStatus[] }> {
+    const entries = (await ports.proposals.list()).filter((e) => e.task.projectId === projectId);
+    const own = new Set(entries.map((e) => e.task.id));
+    const statuses = (await ports.fleet.list()).filter((s) => (statusProject(s) ?? (own.has(s.taskId) ? projectId : undefined)) === projectId);
+    return { entries, statuses };
   }
+
+  /** Ids que el planificador puede usar en `dependsOn`: solo los del proyecto del plan. */
+  async function knownTaskIds(projectId: string): Promise<string[]> {
+    const { entries, statuses } = await projectTasks(projectId);
+    return [...new Set([...entries.map((e) => e.task.id), ...statuses.map((s) => s.taskId)])].sort();
+  }
+
+  /** Proyecto de la sesión para `leer_memoria`/`escribir_memoria`, o el que se pidió. */
+  const memoryProject = (proyecto: string | undefined): string | undefined => proyecto ?? defaultProjectId;
 
   const defs = [
     define(
@@ -185,7 +209,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
         if (standalone) return noFleet('crear_tareas');
         const projectId = proyecto ?? defaultProjectId;
         if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
-        const result = await ports.planner.plan({ projectId, planText: redact(plan), knownTaskIds: await knownTaskIds(), signal: opts.signal });
+        const result = await ports.planner.plan({ projectId, planText: redact(plan), knownTaskIds: await knownTaskIds(projectId), signal: opts.signal });
         if (!result.ok) {
           const issues = result.issues.slice(0, MAX_ISSUES).map((i) => ({ codigo: i.code, mensaje: oneLine(i.message), tareas: i.taskIds }));
           return fail(`el planificador no pudo convertir el plan en tareas válidas: ${JSON.stringify(issues)}. Ajusta el plan y vuelve a intentarlo.`);
@@ -272,19 +296,25 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     ),
     define(
       'estado',
-      'Estado de una tarea (aprobación, avance en la flota y motivo del último cambio, p. ej. por qué falló) o, sin taskId, resumen de toda la flota.',
-      { taskId: idSchema.optional().describe('Id de la tarea; omítelo para ver la flota completa.') },
+      'Estado de una tarea de este proyecto (aprobación, avance en la flota y motivo del último cambio, p. ej. por qué falló) o, sin taskId, ' +
+        'resumen de las tareas del proyecto. Solo informa las tareas del proyecto de esta sesión: las de otros proyectos no se muestran.',
+      { taskId: idSchema.optional().describe('Id de la tarea; omítelo para ver las tareas del proyecto.') },
       readOnly,
       async ({ taskId }) => {
         if (standalone) return noFleet('estado');
+        const scope = defaultProjectId;
         if (taskId !== undefined) {
           const entry = await ports.proposals.get(taskId);
           const status = await ports.fleet.status(taskId);
           if (!entry && !status) return fail(`no existe la tarea ${taskId}.`);
+          // Con proyecto de sesión, una tarea de otro proyecto (o de proyecto desconocido) no se informa.
+          if (scope !== undefined && (entry?.task.projectId ?? statusProject(status)) !== scope) {
+            return fail(`la tarea ${taskId} no es de este proyecto (${scope}): estado solo informa las tareas del proyecto de esta sesión.`);
+          }
           return reply({
             tarea: taskId,
             titulo: entry?.task.title ?? null,
-            proyecto: entry?.task.projectId ?? null,
+            proyecto: entry?.task.projectId ?? statusProject(status) ?? null,
             aprobacion: entry ? entry.approval : null,
             aprobacionTexto: entry ? label(entry.approval) : null,
             estado: status?.state ?? null,
@@ -294,7 +324,9 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
             ...(status?.state === 'failed' ? { siguientePaso: 'Falló: el motivo está en detalle. Para reintentarla (sigue en su worktree) usa delegar con su taskId.' } : {}),
           });
         }
-        return reply(fleetSummary(await ports.proposals.list(), await ports.fleet.list()));
+        if (scope === undefined) return reply(fleetSummary(await ports.proposals.list(), await ports.fleet.list()));
+        const { entries, statuses } = await projectTasks(scope);
+        return reply({ proyecto: scope, ...fleetSummary(entries, statuses) });
       },
     ),
     define(
@@ -309,34 +341,42 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     ),
     define(
       'leer_memoria',
-      `Extracto de la memoria del proyecto (resumen vivo y sesiones pertinentes), con un tope fijo de ${budget} caracteres. ` +
-        'Úsala antes de planificar para no repetir contexto.',
+      `Extracto de la memoria de este proyecto (resumen vivo y sesiones pertinentes), con un tope fijo de ${budget} caracteres. ` +
+        'Úsala antes de planificar para no repetir contexto. Lee siempre la del proyecto de esta sesión: la de otro proyecto, solo si el usuario la pidió explícitamente.',
       {
-        proyecto: idSchema.describe('Id del proyecto.'),
+        proyecto: idSchema
+          .optional()
+          .describe('Omítelo: por omisión, el proyecto de esta sesión. Solo si el usuario pidió explícitamente la memoria de otro proyecto, su id.'),
         tarea: idSchema.optional().describe('Id de una tarea propuesta para traer lo pertinente a ella.'),
       },
       readOnly,
       async ({ proyecto, tarea }) => {
+        const projectId = memoryProject(proyecto);
+        if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
+        const foreign = defaultProjectId !== undefined && projectId !== defaultProjectId;
         let brief: TaskBrief;
         if (tarea !== undefined) {
           const entry = await ports.proposals.get(tarea);
           if (!entry) return fail(`no conozco la tarea ${tarea}; omite tarea para leer el contexto general.`);
-          if (entry.task.projectId !== proyecto) return fail(`la tarea ${tarea} es del proyecto ${entry.task.projectId}, no de ${proyecto}.`);
+          if (entry.task.projectId !== projectId) return fail(`la tarea ${tarea} es del proyecto ${entry.task.projectId}, no de ${projectId}.`);
           brief = entry.task;
         } else {
-          brief = generalBrief(proyecto);
+          brief = generalBrief(projectId);
         }
-        const context = truncate((await ports.memory.buildContext(proyecto, brief, budget)).trim(), budget);
-        if (!context) return reply(`Sin memoria guardada para ${proyecto}.`);
-        return reply(`Memoria de ${proyecto}${tarea ? ` para ${tarea}` : ''} (máx. ${budget} caracteres):\n${context}`);
+        const context = truncate((await ports.memory.buildContext(projectId, brief, budget)).trim(), budget);
+        if (!context) return reply(`Sin memoria guardada para ${projectId}.`);
+        const head = foreign
+          ? `Memoria de OTRO proyecto (${projectId}), no de este (${defaultProjectId}): úsala solo para lo que pidió el usuario y no la mezcles con las tareas de este proyecto`
+          : `Memoria de ${projectId}${tarea ? ` para ${tarea}` : ''}`;
+        return reply(`${head} (máx. ${budget} caracteres):\n${context}`);
       },
     ),
     define(
       'escribir_memoria',
-      'Guarda en la memoria del proyecto una decisión (nota nueva con título) o el resumen vivo del proyecto ' +
-        '(reemplaza el anterior: incluye todo lo vigente). Breve y sin claves ni secretos.',
+      'Guarda en la memoria de este proyecto una decisión (nota nueva con título) o el resumen vivo del proyecto ' +
+        '(reemplaza el anterior: incluye todo lo vigente). Breve y sin claves ni secretos. Solo escribe en la memoria del proyecto de esta sesión.',
       {
-        proyecto: idSchema.describe('Id del proyecto.'),
+        proyecto: idSchema.optional().describe('Omítelo: siempre es el proyecto de esta sesión (otro proyecto da error).'),
         nota: z
           .discriminatedUnion('tipo', [
             z.strictObject({
@@ -351,13 +391,18 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
       writes,
       async ({ proyecto, nota }) => {
         if (standalone) return noFleet('escribir_memoria');
+        const projectId = memoryProject(proyecto);
+        if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
+        if (defaultProjectId !== undefined && projectId !== defaultProjectId) {
+          return fail(`solo puedes escribir en la memoria de este proyecto (${defaultProjectId}), no en la de ${projectId}. Omite proyecto; para otro proyecto, el usuario debe abrir un chat de ese proyecto.`);
+        }
         const at = now().toISOString();
         if (nota.tipo === 'decision') {
-          const notePath = await ports.memory.recordDecision({ projectId: proyecto, title: redact(nota.titulo), text: redact(nota.texto), at, agentId });
-          return reply({ ok: true, tipo: 'decision', proyecto, nota: notePath });
+          const notePath = await ports.memory.recordDecision({ projectId, title: redact(nota.titulo), text: redact(nota.texto), at, agentId });
+          return reply({ ok: true, tipo: 'decision', proyecto: projectId, nota: notePath });
         }
-        await ports.memory.writeProjectSummary(proyecto, redact(nota.texto), at);
-        return reply({ ok: true, tipo: 'resumen', proyecto });
+        await ports.memory.writeProjectSummary(projectId, redact(nota.texto), at);
+        return reply({ ok: true, tipo: 'resumen', proyecto: projectId });
       },
     ),
     define(

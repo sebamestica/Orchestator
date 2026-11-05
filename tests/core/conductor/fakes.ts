@@ -13,6 +13,7 @@ import type {
   PlannerPort,
   PlannerResult,
   PlanRequest,
+  ProjectTaskStatus,
   QuotaPort,
   SkillCatalogPort,
   SkillInfo,
@@ -56,21 +57,22 @@ export class FakePlanner implements PlannerPort {
   }
 }
 
+/** Flota falsa: como los puertos del núcleo (`withTaskProjects`), cada estado lleva el proyecto de su tarea. */
 export class FakeFleet implements FleetPort {
   readonly delegated: TaskBrief[] = [];
-  readonly statuses = new Map<string, FleetTaskStatus>();
+  readonly statuses = new Map<string, ProjectTaskStatus>();
   reject: string | undefined;
   async delegate(task: TaskBrief): Promise<DelegateResult> {
     if (this.reject) return { accepted: false, reason: this.reject };
     this.delegated.push(task);
     const agentId = task.suggestedAgent ?? 'claude-worker';
-    this.statuses.set(task.id, { taskId: task.id, state: 'pending', agentId, updatedAt: NOW.toISOString() });
+    this.statuses.set(task.id, { taskId: task.id, projectId: task.projectId, state: 'pending', agentId, updatedAt: NOW.toISOString() });
     return { accepted: true, agentId, state: 'pending' };
   }
-  status(taskId: string): FleetTaskStatus | undefined {
+  status(taskId: string): ProjectTaskStatus | undefined {
     return this.statuses.get(taskId);
   }
-  list(): FleetTaskStatus[] {
+  list(): ProjectTaskStatus[] {
     return [...this.statuses.values()];
   }
   /** Simula el avance que harían cola y supervisor. */

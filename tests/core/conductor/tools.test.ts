@@ -64,7 +64,7 @@ describe('servidor MCP del orquestador', () => {
 describe('crear_tareas', () => {
   it('deja las tareas propuestas (pendientes de aprobación) y devuelve la lista resumida', async () => {
     const { tools, ports } = setup();
-    ports.fleet.statuses.set('previa', { taskId: 'previa', state: 'integrated' });
+    ports.fleet.statuses.set('previa', { taskId: 'previa', projectId: 'demo', state: 'integrated' });
     const result = await tools.call('crear_tareas', { plan: 'Agregar la API y luego la interfaz' });
     expect(result.isError).toBeFalsy();
     const body = jsonOf(result);
@@ -248,8 +248,9 @@ describe('estado', () => {
     await tools.call('crear_tareas', { plan: 'plan' });
     ports.proposals.approve(['api']);
     await tools.call('delegar', { taskId: 'api' });
-    ports.fleet.statuses.set('externa', { taskId: 'externa', state: 'review', agentId: 'agy' });
+    ports.fleet.statuses.set('externa', { taskId: 'externa', projectId: 'demo', state: 'review', agentId: 'agy' });
     expect(jsonOf(await tools.call('estado', {}))).toEqual({
+      proyecto: 'demo',
       total: 3,
       porAprobacion: { delegated: 1, proposed: 1 },
       porEstado: { pending: 1, review: 1 },
@@ -263,7 +264,7 @@ describe('estado', () => {
 
   it('acota la lista de la flota', async () => {
     const { tools, ports } = setup();
-    for (let i = 0; i < 45; i++) ports.fleet.statuses.set(`t-${String(i).padStart(2, '0')}`, { taskId: `t-${String(i).padStart(2, '0')}`, state: 'running' });
+    for (let i = 0; i < 45; i++) ports.fleet.statuses.set(`t-${String(i).padStart(2, '0')}`, { taskId: `t-${String(i).padStart(2, '0')}`, projectId: 'demo', state: 'running' });
     const body = jsonOf(await tools.call('estado', {}));
     expect(body.total).toBe(45);
     expect(body.tareas).toHaveLength(40);
@@ -353,7 +354,6 @@ describe('leer_memoria', () => {
   it('dice si no hay memoria y valida la entrada', async () => {
     const { tools } = setup();
     expect(textOf(await tools.call('leer_memoria', { proyecto: 'demo' }))).toBe('Sin memoria guardada para demo.');
-    await expectInvalid(tools, 'leer_memoria', {});
     await expectInvalid(tools, 'leer_memoria', { proyecto: 'demo', presupuesto: 100_000 });
     await expectInvalid(tools, 'leer_memoria', { proyecto: 'C:\\x' });
   });

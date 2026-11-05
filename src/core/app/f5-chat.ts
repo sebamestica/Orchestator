@@ -17,7 +17,7 @@ import { CONDUCTOR_AGENT_ID, type ConductorQueryFn, type FleetPort, type FleetTa
 import type { QueueEntry } from '../orchestrator/index.ts';
 import type { RouteModule } from '../server/index.ts';
 import type { Composition } from './compose.ts';
-import { plannerPort } from './conductor.ts';
+import { mindDenyPaths, plannerPort, projectSkillsPort, taskProjectOf, withTaskProjects } from './conductor.ts';
 import { withoutHostCredentials } from './env.ts';
 
 export interface ChatWiring {
@@ -39,10 +39,11 @@ function toStatus(e: QueueEntry): FleetTaskStatus {
 
 /**
  * Flota de la composición sin armarla antes de tiempo: `status`/`list` leen la cola; `delegate` arma la flota (carga
- * los adaptadores) la primera vez que se entrega una tarea.
+ * los adaptadores) la primera vez que se entrega una tarea. Cada estado lleva el proyecto de su tarea
+ * (`withTaskProjects`): la cola es de todos los proyectos y la mente de un chat solo ve las del suyo.
  */
-export function lazyFleetPort(comp: Pick<Composition, 'fleet'>): FleetPort {
-  return {
+export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Composition, 'store'>>): FleetPort {
+  const port: FleetPort = {
     delegate: async (task) => (await comp.fleet.port()).delegate(task),
     // Desde la base además de la cola: trae el motivo de un fallo y sirve tras reiniciar el núcleo.
     status: (taskId) => comp.fleet.status(taskId),
@@ -56,6 +57,7 @@ export function lazyFleetPort(comp: Pick<Composition, 'fleet'>): FleetPort {
       }
     },
   };
+  return withTaskProjects(port, taskProjectOf(comp));
 }
 
 /**
@@ -86,7 +88,6 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
     const plugins = wiring.mcpServersFor ? undefined : mindPlugins(comp);
     const db = ctx.store.database;
     const attachments = new AttachmentStore({ db, dir: join(comp.config.dataDir, 'attachments'), now: ctx.now });
-    const dbPath = comp.config.dbPath;
     const skillsRoot = comp.skills.installRoot;
     const service = new ChatService({
       db,
@@ -107,13 +108,15 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
         fleet: lazyFleetPort(comp),
         quotas: { all: () => ctx.store.latestQuotas().map((q) => q.snapshot) },
         memory: comp.memory,
-        skills: comp.skills,
+        // Solo las skills comunes del hub: las de `<carpeta del núcleo>/.agents/skills` son de otro proyecto.
+        skills: projectSkillsPort(comp.skills),
       },
       translator: (init) => new ClaudeSdkTranslator(init),
       attachments,
       mcpServersFor: wiring.mcpServersFor ?? ((agentId) => plugins?.servers(agentId) ?? {}),
       readRoots: existsSync(skillsRoot) ? [skillsRoot] : [],
-      denyPaths: [comp.config.vaultPath, dbPath, `${dbPath}-wal`, `${dbPath}-shm`],
+      // Bóveda de claves, base del núcleo y memoria de Obsidian (la de todos los proyectos; también en bypass).
+      denyPaths: mindDenyPaths(comp),
       ...(wiring.drives ? { drives: wiring.drives } : {}),
       ...(wiring.query ? { query: wiring.query } : {}),
       ...(wiring.idleMs !== undefined ? { idleMs: wiring.idleMs } : {}),
