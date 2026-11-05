@@ -2124,7 +2124,7 @@
     },
     {
       "name": "Uso",
-      "description": "Tokens y costo acumulados.",
+      "description": "Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5).",
       "item": [
         {
           "name": "/usage",
@@ -2237,6 +2237,220 @@
               ],
               "cookie": [],
               "body": "{\n  \"groupBy\": [\n    \"agent\",\n    \"day\"\n  ],\n  \"rows\": [\n    {\n      \"agentId\": \"claude-mi-clave\",\n      \"day\": \"2026-11-01\",\n      \"inputTokens\": 18250,\n      \"outputTokens\": 2140,\n      \"cachedInputTokens\": 12000,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 0.103,\n      \"entries\": 3\n    },\n    {\n      \"agentId\": \"codex\",\n      \"day\": \"2026-11-01\",\n      \"inputTokens\": 22572,\n      \"outputTokens\": 5,\n      \"cachedInputTokens\": 13440,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 0,\n      \"entries\": 1\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/usage/summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/summary?period=month",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usage",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "month"
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "tz",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Uso y gasto: totales de hoy, 7 días y el mes, y el rango por modelo, día, rol y proyecto\n\nTokens separados (entrada nueva, caché escrita, caché leída, salida) y costo en USD: «estimado» con precios públicos (lo informa el SDK) y «con tu tarifa» (× el multiplicador de cada modelo). Codex y agy van aparte como suscripción, sin costo. `period` (today, week, month) o `from`/`to` (AAAA-MM-DD, en `tz`); sin nada, el mes calendario."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/usage/summary?period=month",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "usage",
+                    "summary"
+                  ],
+                  "query": [
+                    {
+                      "key": "period",
+                      "value": "month"
+                    },
+                    {
+                      "key": "from",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "to",
+                      "value": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "tz",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"currency\": \"USD\",\n  \"timeZone\": \"America/Santiago\",\n  \"today\": \"2026-11-04\",\n  \"period\": \"month\",\n  \"from\": \"2026-11-01\",\n  \"to\": \"2026-11-04\",\n  \"periods\": {\n    \"today\": {\n      \"from\": \"2026-11-04\",\n      \"to\": \"2026-11-04\",\n      \"api\": {\n        \"inputTokens\": 11669759,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 90578547,\n        \"outputTokens\": 1868576,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 87.980337,\n        \"costWithRateUsd\": 114.374438,\n        \"entries\": 63,\n        \"totalTokens\": 104116882\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    },\n    \"week\": {\n      \"from\": \"2026-10-29\",\n      \"to\": \"2026-11-04\",\n      \"api\": {\n        \"inputTokens\": 11669759,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 90578547,\n        \"outputTokens\": 1868576,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 87.980337,\n        \"costWithRateUsd\": 114.374438,\n        \"entries\": 63,\n        \"totalTokens\": 104116882\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    },\n    \"month\": {\n      \"from\": \"2026-11-01\",\n      \"to\": \"2026-11-04\",\n      \"api\": {\n        \"inputTokens\": 11669759,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 90578547,\n        \"outputTokens\": 1868576,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 87.980337,\n        \"costWithRateUsd\": 114.374438,\n        \"entries\": 63,\n        \"totalTokens\": 104116882\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    }\n  },\n  \"totals\": {\n    \"api\": {\n      \"inputTokens\": 11669759,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 90578547,\n      \"outputTokens\": 1868576,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 87.980337,\n      \"costWithRateUsd\": 114.374438,\n      \"entries\": 63,\n      \"totalTokens\": 104116882\n    },\n    \"subscription\": {\n      \"inputTokens\": 1936306,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 40008176,\n      \"outputTokens\": 209999,\n      \"reasoningTokens\": 85216,\n      \"costUsd\": 0,\n      \"costWithRateUsd\": 0,\n      \"entries\": 432,\n      \"totalTokens\": 42154481\n    }\n  },\n  \"byModel\": [\n    {\n      \"inputTokens\": 9259059,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 45871974,\n      \"outputTokens\": 755319,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 66.67219,\n      \"costWithRateUsd\": 86.673847,\n      \"entries\": 58,\n      \"totalTokens\": 55886352,\n      \"billing\": \"api\",\n      \"model\": \"claude-opus-5-5\",\n      \"agentIds\": [\n        \"claude-mi-clave\",\n        \"orquestador\"\n      ],\n      \"multiplier\": 1.3,\n      \"withoutCost\": 0\n    },\n    {\n      \"inputTokens\": 2368450,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 44706573,\n      \"outputTokens\": 1090013,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 21.291244,\n      \"costWithRateUsd\": 27.678618,\n      \"entries\": 3,\n      \"totalTokens\": 48165036,\n      \"billing\": \"api\",\n      \"model\": \"claude-sonnet-5-5\",\n      \"agentIds\": [\n        \"orquestador\"\n      ],\n      \"multiplier\": 1.3,\n      \"withoutCost\": 0\n    },\n    {\n      \"inputTokens\": 42250,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 0,\n      \"outputTokens\": 23244,\n      \"reasoningTokens\": 0,\n      \"costUsd\": 0.016903,\n      \"costWithRateUsd\": 0.021974,\n      \"entries\": 2,\n      \"totalTokens\": 65494,\n      \"billing\": \"api\",\n      \"model\": \"claude-haiku-5-5\",\n      \"agentIds\": [\n        \"orquestador\"\n      ],\n      \"multiplier\": 1.3,\n      \"withoutCost\": 0\n    },\n    {\n      \"inputTokens\": 1936306,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 40008176,\n      \"outputTokens\": 209999,\n      \"reasoningTokens\": 85216,\n      \"costUsd\": 0,\n      \"costWithRateUsd\": 0,\n      \"entries\": 432,\n      \"totalTokens\": 42154481,\n      \"billing\": \"subscription\",\n      \"model\": null,\n      \"agentIds\": [\n        \"agy\",\n        \"codex\"\n      ],\n      \"multiplier\": 1,\n      \"withoutCost\": 0\n    }\n  ],\n  \"byDay\": [\n    {\n      \"day\": \"2026-11-01\",\n      \"api\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"day\": \"2026-11-02\",\n      \"api\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"day\": \"2026-11-03\",\n      \"api\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"day\": \"2026-11-04\",\n      \"api\": {\n        \"inputTokens\": 11669759,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 90578547,\n        \"outputTokens\": 1868576,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 87.980337,\n        \"costWithRateUsd\": 114.374438,\n        \"entries\": 63,\n        \"totalTokens\": 104116882\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    }\n  ],\n  \"byRole\": [\n    {\n      \"role\": \"mind\",\n      \"api\": {\n        \"inputTokens\": 5735757,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 67708621,\n        \"outputTokens\": 1630094,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 52.604748,\n        \"costWithRateUsd\": 68.386172,\n        \"entries\": 36,\n        \"totalTokens\": 75074472\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"role\": \"planner\",\n      \"api\": {\n        \"inputTokens\": 67615,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 21299,\n        \"outputTokens\": 70290,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 1.748103,\n        \"costWithRateUsd\": 2.272534,\n        \"entries\": 8,\n        \"totalTokens\": 159204\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"role\": \"other\",\n      \"api\": {\n        \"inputTokens\": 5866387,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 22848627,\n        \"outputTokens\": 168192,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 33.627486,\n        \"costWithRateUsd\": 43.715732,\n        \"entries\": 19,\n        \"totalTokens\": 28883206\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    }\n  ],\n  \"byProject\": [\n    {\n      \"projectId\": \"vetworld\",\n      \"name\": \"Vetworld\",\n      \"api\": {\n        \"inputTokens\": 5735757,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 67708621,\n        \"outputTokens\": 1630094,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 52.604748,\n        \"costWithRateUsd\": 68.386172,\n        \"entries\": 36,\n        \"totalTokens\": 75074472\n      },\n      \"subscription\": {\n        \"inputTokens\": 0,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 0,\n        \"outputTokens\": 0,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 0,\n        \"totalTokens\": 0\n      }\n    },\n    {\n      \"projectId\": null,\n      \"name\": null,\n      \"api\": {\n        \"inputTokens\": 5934002,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 22869926,\n        \"outputTokens\": 238482,\n        \"reasoningTokens\": 0,\n        \"costUsd\": 35.375589,\n        \"costWithRateUsd\": 45.988266,\n        \"entries\": 27,\n        \"totalTokens\": 29042410\n      },\n      \"subscription\": {\n        \"inputTokens\": 1936306,\n        \"cacheWriteTokens\": 0,\n        \"cacheReadTokens\": 40008176,\n        \"outputTokens\": 209999,\n        \"reasoningTokens\": 85216,\n        \"costUsd\": 0,\n        \"costWithRateUsd\": 0,\n        \"entries\": 432,\n        \"totalTokens\": 42154481\n      }\n    }\n  ],\n  \"subscriptions\": [\n    {\n      \"inputTokens\": 1333628,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 32218480,\n      \"outputTokens\": 144202,\n      \"reasoningTokens\": 79485,\n      \"costUsd\": 0,\n      \"costWithRateUsd\": 0,\n      \"entries\": 421,\n      \"totalTokens\": 33696310,\n      \"agentId\": \"agy\",\n      \"displayName\": \"Antigravity (agy)\",\n      \"kind\": \"agy-cli\",\n      \"models\": [],\n      \"quotaRemaining\": 0.79,\n      \"quotaTakenAt\": \"2026-11-05T01:38:10.355Z\",\n      \"quotaStale\": false\n    },\n    {\n      \"inputTokens\": 602678,\n      \"cacheWriteTokens\": 0,\n      \"cacheReadTokens\": 7789696,\n      \"outputTokens\": 65797,\n      \"reasoningTokens\": 5731,\n      \"costUsd\": 0,\n      \"costWithRateUsd\": 0,\n      \"entries\": 11,\n      \"totalTokens\": 8458171,\n      \"agentId\": \"codex\",\n      \"displayName\": \"Codex CLI\",\n      \"kind\": \"codex-cli\",\n      \"models\": [],\n      \"quotaRemaining\": 0.9,\n      \"quotaTakenAt\": \"2026-11-05T01:37:59.854Z\",\n      \"quotaStale\": false\n    }\n  ],\n  \"coverage\": {\n    \"withoutCacheWrite\": 63,\n    \"withoutCost\": 0,\n    \"unlinked\": 451\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/usage/rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/usage/rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usage",
+                "rates"
+              ]
+            },
+            "description": "Tarifa propia: multiplicador por modelo sobre los precios públicos"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/usage/rates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "usage",
+                    "rates"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rates\": [\n    {\n      \"model\": \"claude-opus-5-5\",\n      \"multiplier\": 1.3,\n      \"updatedAt\": \"2026-11-04T22:10:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/usage/rates",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/usage/rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "usage",
+                "rates"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rates\": {\n    \"claude-opus-5-5\": 1.3\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cambia el multiplicador de tu tarifa por modelo (null vuelve a 1)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/usage/rates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "usage",
+                    "rates"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rates\": {\n    \"claude-opus-5-5\": 1.3\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"rates\": [\n    {\n      \"model\": \"claude-opus-5-5\",\n      \"multiplier\": 1.3,\n      \"updatedAt\": \"2026-11-04T22:10:00.000Z\"\n    }\n  ]\n}"
             }
           ]
         }

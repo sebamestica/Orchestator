@@ -3,7 +3,7 @@ import { usageDeltas } from '../../../src/core/conductor/usage.ts';
 import type { AgentEvent } from '../../../src/shared/index.ts';
 
 function usage(payload: Extract<AgentEvent, { type: 'usage' }>['payload']): AgentEvent {
-  return { id: crypto.randomUUID(), sessionId: 's1', ts: '2026-11-04T00:00:00.000Z', type: 'usage', payload } as AgentEvent;
+  return { sessionId: 's1', agentId: 'orquestador', seq: 0, ts: '2026-11-04T00:00:00.000Z', type: 'usage', payload };
 }
 
 describe('usageDeltas: los acumulados del SDK se guardan como diferencias', () => {
