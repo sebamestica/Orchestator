@@ -139,6 +139,11 @@ interface Live {
   idle?: ReturnType<typeof setTimeout>;
   /** Carpetas de los archivos adjuntos (no imágenes): la mente las puede leer. */
   roots: Set<string>;
+  /**
+   * Subagentes de la mente que siguen trabajando (sesiones hijas con estado `starting`/`running`/`waiting`). Mientras
+   * haya alguno, la sesión no se cierra por inactividad ni se recrea por un cambio de ajustes: se los mataría.
+   */
+  background: Set<string>;
 }
 
 export interface SendInput {
@@ -151,6 +156,17 @@ export interface ApprovalOutcome extends DeliveryReport {
 }
 
 const resultSchema = z.object({ type: z.literal('result'), subtype: z.string(), is_error: z.boolean().optional(), result: z.string().optional() }).loose();
+
+/**
+ * Mensaje del SDK que abre un turno de la mente: el `init` de cada turno o un mensaje suyo (no de un subagente). Los
+ * avisos de progreso de los subagentes (`task_*`) no abren turno.
+ */
+export function startsMainTurn(message: unknown): boolean {
+  if (typeof message !== 'object' || message === null) return false;
+  const m = message as { type?: unknown; subtype?: unknown; parent_tool_use_id?: unknown };
+  if (m.type === 'system') return m.subtype === 'init';
+  return m.type === 'assistant' && (m.parent_tool_use_id === null || m.parent_tool_use_id === undefined);
+}
 
 /** Letras de unidad que existen (Windows); fuera de Windows, la raíz. */
 export function localDrives(platform: NodeJS.Platform = process.platform): string[] {
@@ -250,11 +266,17 @@ export class ChatService {
   // ---------------------------------------------------------------- chats
 
   list(projectId?: string | null): Chat[] {
-    return this.#repo.list(projectId);
+    return this.#repo.list(projectId).map((chat) => this.#withLive(chat));
   }
 
   get(chatId: string): Chat {
-    return this.#require(chatId).chat;
+    return this.#withLive(this.#require(chatId).chat);
+  }
+
+  /** El chat con lo que solo vive en memoria: los subagentes que siguen en segundo plano. */
+  #withLive(chat: Chat): Chat {
+    const n = this.#live.get(chat.id)?.background.size ?? 0;
+    return n > 0 ? { ...chat, backgroundTasks: n } : chat;
   }
 
   create(body: CreateChatBody): Chat {
@@ -529,8 +551,15 @@ export class ChatService {
 
   #update(chatId: string, patch: ChatUpdate): Chat {
     const { chat } = this.#repo.update(chatId, { ...patch, updatedAt: this.#iso() });
-    this.#deps.hub.publish({ type: 'chat', chat });
-    return chat;
+    const out = this.#withLive(chat);
+    this.#deps.hub.publish({ type: 'chat', chat: out });
+    return out;
+  }
+
+  /** Difunde el chat sin tocar la base (cambió algo que solo vive en memoria). */
+  #publishLive(chatId: string): void {
+    const stored = this.#repo.get(chatId);
+    if (stored) this.#deps.hub.publish({ type: 'chat', chat: this.#withLive(stored.chat) });
   }
 
   #attachment(id: string): Attachment {
@@ -563,7 +592,7 @@ export class ChatService {
         taken: (taskId) => (this.#deps.store.getTask(taskId) ? `La tarea ${taskId} ya existe en el tablero; usa otro id` : undefined),
       });
       const sessionId = this.#require(chatId).chat.sessionId;
-      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots };
+      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots, background: new Set() };
       this.#live.set(chatId, live);
     }
     return live;
@@ -589,20 +618,26 @@ export class ChatService {
     const mind = resolveMind(settings, this.#deps.mind.agents());
     const model = settings.mind.model ?? mind.model;
     const effort = settings.mind.effort;
-    const plugins = { ...(this.#deps.mcpServersFor?.(mind.id) ?? {}) };
     const roots = this.#rootsFor(chat, live);
-    const key = JSON.stringify({
-      mind: mind.id,
-      model: model ?? null,
-      effort,
-      mode: chat.mode,
-      cwd: chat.cwd,
-      extraRoots: chat.extraRoots,
-      roots: [...roots].sort(),
-      plugins: Object.keys(plugins).sort(),
-      quotaFloor: settings.quotaFloor,
-    });
+    const keyOf = (plugins: Readonly<Record<string, unknown>>) =>
+      JSON.stringify({
+        mind: mind.id,
+        model: model ?? null,
+        effort,
+        mode: chat.mode,
+        cwd: chat.cwd,
+        extraRoots: chat.extraRoots,
+        roots: [...roots].sort(),
+        plugins: Object.keys(plugins).sort(),
+        quotaFloor: settings.quotaFloor,
+      });
+    const key = keyOf(this.#deps.mcpServersFor?.(mind.id) ?? {});
     if (live.session && !live.session.closed && live.key === key) return live.session;
+    if (live.session && !live.session.closed && live.background.size > 0) {
+      // Recrear la sesión mataría a los subagentes que siguen trabajando: el cambio rige cuando terminen.
+      this.#log(`chat ${chatId}: los ajustes de la mente cambiaron, pero ${live.background.size} subagente(s) siguen trabajando; se aplican al terminar`);
+      return live.session;
+    }
     if (live.session) this.#dropSession(chatId, live);
 
     const left = this.#deps.mind.budgetLeftUsd?.(mind.id);
@@ -614,6 +649,9 @@ export class ChatService {
       throw new ChatError('not_configured', `No se pudo cargar la clave de ${mind.id}: ${oneLine(err)}`);
     }
     if (chat.mindAgentId !== mind.id) this.#update(chatId, { mindAgentId: mind.id });
+    // Cargar el entorno refresca los plugins de la mente: la sesión y su clave usan la lectura nueva (si no, el
+    // mensaje siguiente vería otra clave y recrearía la sesión sin motivo).
+    const plugins = { ...(this.#deps.mcpServersFor?.(mind.id) ?? {}) };
 
     const session = new ConductorSession({
       ports: { ...this.#deps.ports, planner: this.#planner, fleet: this.#fleet, proposals: live.proposals },
@@ -644,7 +682,12 @@ export class ChatService {
       onStderr: (line) => this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`),
     });
     live.session = session;
-    live.key = key;
+    live.key = keyOf(plugins);
+    // Los subagentes de un proceso anterior ya no existen.
+    if (live.background.size) {
+      live.background.clear();
+      this.#publishLive(chatId);
+    }
     // Un proceso del SDK nuevo cuenta el uso desde cero.
     live.delta = usageDeltas();
     void this.#read(chatId, live, session);
@@ -668,6 +711,10 @@ export class ChatService {
     const session = live.session;
     live.session = undefined;
     live.key = undefined;
+    if (live.background.size) {
+      live.background.clear();
+      this.#publishLive(chatId);
+    }
     if (session && !session.closed) {
       try {
         session.close();
@@ -690,6 +737,9 @@ export class ChatService {
             /* el chat se borró */
           }
         }
+        // La mente sigue sola (p. ej. terminó un subagente en segundo plano): es un turno más, con su respuesta
+        // guardada en el historial y el chat en `running`, aunque nadie esté mirando.
+        if (!live.turn && live.session === session && startsMainTurn(update.message)) this.#beginAutonomousTurn(chatId, live, session);
         for (const event of update.events) this.#emit(chatId, live, event);
         if (update.message.type === 'result' && live.turn?.session === session) this.#finishTurn(chatId, live, live.turn, update.message);
       }
@@ -720,6 +770,7 @@ export class ChatService {
     if (!delta) return;
     const out = { ...delta, seq: ++live.seq } as AgentEvent;
     const main = out.sessionId === stored.chat.sessionId && !out.parentSessionId;
+    if (out.type === 'status' && out.parentSessionId === stored.chat.sessionId) this.#trackBackground(chatId, live, out.sessionId, out.payload.state);
     if (main && out.type === 'text' && out.payload.role === 'assistant') live.turn?.texts.push(out.payload.text);
     try {
       this.#deps.hub.append(out);
@@ -758,12 +809,36 @@ export class ChatService {
     this.#scheduleIdle(chatId, live);
   }
 
+  /** Turno que arranca la mente sin mensaje del usuario: ocupa el chat y su respuesta se guarda como cualquier otra. */
+  #beginAutonomousTurn(chatId: string, live: Live, session: ConductorSession): void {
+    if (!this.#repo.get(chatId)) return;
+    live.turn = { session, texts: [], interrupted: false };
+    live.busy = true;
+    if (live.idle) clearTimeout(live.idle);
+    live.idle = undefined;
+    this.#update(chatId, { state: 'running' });
+  }
+
+  /** Lleva la cuenta de los subagentes de la mente que siguen trabajando y la difunde al cambiar. */
+  #trackBackground(chatId: string, live: Live, sessionId: string, state: string): void {
+    const before = live.background.size;
+    if (state === 'starting' || state === 'running' || state === 'waiting') live.background.add(sessionId);
+    else live.background.delete(sessionId);
+    if (live.background.size === before) return;
+    this.#publishLive(chatId);
+    // Terminó el último y la mente está libre: vuelve a correr el plazo de inactividad.
+    if (live.background.size === 0 && !live.busy) this.#scheduleIdle(chatId, live);
+  }
+
   #scheduleIdle(chatId: string, live: Live): void {
     if (live.idle) clearTimeout(live.idle);
     if (!live.session) return;
     live.idle = setTimeout(() => {
       live.idle = undefined;
-      if (!live.busy) this.#dropSession(chatId, live);
+      if (live.busy) return;
+      // Con subagentes trabajando no se cierra: se vuelve a mirar en otro plazo.
+      if (live.background.size > 0) return this.#scheduleIdle(chatId, live);
+      this.#dropSession(chatId, live);
     }, this.#idleMs);
     live.idle.unref?.();
   }

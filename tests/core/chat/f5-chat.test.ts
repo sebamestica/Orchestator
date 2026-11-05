@@ -96,7 +96,8 @@ describe('f5-chat: cableado con la composición', () => {
     expect(o.effort).toBe('max');
     // Tope de la conversación: lo que queda del presupuesto del agente (2 USD, nada gastado).
     expect(o.maxBudgetUsd).toBe(2);
-    expect(asked).toEqual(['claude']);
+    // Se consulta al calcular la clave y otra vez tras cargar el entorno (que refresca la caché de plugins).
+    expect(new Set(asked)).toEqual(new Set(['claude']));
     const session = services[0]?.sessionOf(chat.id);
     expect(session).toBeDefined();
     const pre = (o.hooks?.PreToolUse as { hooks: ((...a: unknown[]) => Promise<unknown>)[] }[])[0]?.hooks[0];

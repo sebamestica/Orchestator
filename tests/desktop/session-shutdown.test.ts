@@ -77,8 +77,8 @@ describe('decideOnClose', () => {
   });
 
   it('lo deja vivo con tareas en curso', () => {
-    expect(decideOnClose('launched', { status: 'ok', running: 1 })).toEqual({ stop: false, reason: '1 tarea en curso: el núcleo sigue vivo' });
-    expect(decideOnClose('adopted', { status: 'ok', running: 3 })).toEqual({ stop: false, reason: '3 tareas en curso: el núcleo sigue vivo' });
+    expect(decideOnClose('launched', { status: 'ok', running: 1 })).toEqual({ stop: false, reason: '1 trabajo en curso (tareas o la mente): el núcleo sigue vivo' });
+    expect(decideOnClose('adopted', { status: 'ok', running: 3 })).toEqual({ stop: false, reason: '3 trabajos en curso (tareas o la mente): el núcleo sigue vivo' });
   });
 
   it('ante la duda (sin respuesta o token rechazado) no lo apaga', () => {

@@ -145,6 +145,11 @@ export const chatSchema = z.strictObject({
   costUsd: z.number().nonnegative(),
   createdAt: isoSchema,
   updatedAt: isoSchema,
+  /**
+   * Subagentes de la mente que siguen trabajando en segundo plano (p. ej. investigadores), aunque el turno ya haya
+   * terminado. Solo en memoria: falta o es 0 si no hay ninguno.
+   */
+  backgroundTasks: z.number().int().nonnegative().optional(),
 });
 export type Chat = z.infer<typeof chatSchema>;
 

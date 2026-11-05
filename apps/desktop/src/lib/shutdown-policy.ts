@@ -23,7 +23,7 @@ export function decideOnClose(ownership: CoreOwnership | null, check: RunningChe
   if (ownership === 'external') return { stop: false, reason: 'el núcleo no lo abrió Berland: sigue vivo' };
   if (check === null || check.status !== 'ok') return { stop: false, reason: 'no se pudo saber si hay tareas en curso: el núcleo sigue vivo' };
   if (check.running > 0) {
-    return { stop: false, reason: `${check.running} ${check.running === 1 ? 'tarea en curso' : 'tareas en curso'}: el núcleo sigue vivo` };
+    return { stop: false, reason: `${check.running} ${check.running === 1 ? 'trabajo en curso' : 'trabajos en curso'} (tareas o la mente): el núcleo sigue vivo` };
   }
   return { stop: true, reason: 'sin tareas en curso: el núcleo se apaga con la ventana' };
 }

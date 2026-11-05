@@ -48,12 +48,24 @@ describe('probeCore', () => {
 });
 
 describe('runningTasks', () => {
-  it('cuenta las tareas en curso con el token solo en el encabezado', async () => {
-    const f = fakeFetch(() => ({ status: 200, body: { tasks: [{ task: { id: 'a' } }, { task: { id: 'b' } }] } }));
+  it('cuenta las tareas activas (lista, en curso, en revisión, en traspaso) con el token solo en el encabezado', async () => {
+    const tasks = ['running', 'review', 'handed_off', 'ready', 'integrated', 'failed', 'pending'].map((state, i) => ({ task: { id: `t${i}` }, state }));
+    const f = fakeFetch((url) => ({ status: 200, body: url.endsWith('/chats') ? { chats: [] } : { tasks } }));
+    expect(await runningTasks(ORIGIN, TOKEN, f)).toEqual({ status: 'ok', running: 4 });
+    expect(f.calls.map((c) => c.url)).toEqual([`${ORIGIN}/tasks`, `${ORIGIN}/chats`]);
+    for (const c of f.calls) {
+      expect(c.url).not.toContain(TOKEN);
+      expect(c.headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    }
+  });
+
+  it('cuenta también la mente: un chat respondiendo o con subagentes en segundo plano mantiene vivo el núcleo', async () => {
+    const chats = [{ state: 'running' }, { state: 'idle', backgroundTasks: 3 }, { state: 'idle' }, { state: 'idle', backgroundTasks: 0 }];
+    const f = fakeFetch((url) => ({ status: 200, body: url.endsWith('/chats') ? { chats } : { tasks: [] } }));
     expect(await runningTasks(ORIGIN, TOKEN, f)).toEqual({ status: 'ok', running: 2 });
-    expect(f.calls[0]?.url).toBe(`${ORIGIN}/tasks?state=running`);
-    expect(f.calls[0]?.url).not.toContain(TOKEN);
-    expect(f.calls[0]?.headers).toEqual({ Authorization: `Bearer ${TOKEN}` });
+    // Sin poder leer los chats no se sabe: error (y el núcleo no se apaga).
+    const noChats = fakeFetch((url) => (url.endsWith('/chats') ? { status: 500, body: {} } : { status: 200, body: { tasks: [] } }));
+    expect(await runningTasks(ORIGIN, TOKEN, noChats)).toEqual({ status: 'error' });
   });
 
   it('401 significa que el token no es de este núcleo', async () => {

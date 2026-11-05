@@ -52,9 +52,10 @@ function fakeFetch(state: { up: boolean; running: number; token?: string }): Fet
     if (!state.up) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
     const auth = init.headers?.Authorization;
     if (url.endsWith('/health')) return { status: 401, json: async () => ({ error: { code: 'unauthorized', message: 'x' } }) };
-    if (url.endsWith('/tasks?state=running')) {
+    if (url.endsWith('/tasks') || url.endsWith('/chats')) {
       if (auth !== `Bearer ${state.token ?? TOKEN}`) return { status: 401, json: async () => ({ error: { code: 'unauthorized' } }) };
-      return { status: 200, json: async () => ({ tasks: Array.from({ length: state.running }, (_, i) => ({ id: i })) }) };
+      if (url.endsWith('/chats')) return { status: 200, json: async () => ({ chats: [] }) };
+      return { status: 200, json: async () => ({ tasks: Array.from({ length: state.running }, (_, i) => ({ task: { id: `t${i}` }, state: 'running' })) }) };
     }
     return { status: 404, json: async () => ({}) };
   };
@@ -153,7 +154,7 @@ describe('CoreSupervisor', () => {
     expect((await sup.connect()).ok).toBe(true);
     Object.assign(net, { up: true, running: 2 });
     const d = await sup.onAppClose();
-    expect(d).toEqual({ stop: false, reason: '2 tareas en curso: el núcleo sigue vivo' });
+    expect(d).toEqual({ stop: false, reason: '2 trabajos en curso (tareas o la mente): el núcleo sigue vivo' });
     expect(killed).toEqual([]);
     expect(existsSync(config.sessionPath)).toBe(true);
   });
