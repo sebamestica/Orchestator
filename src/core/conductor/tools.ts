@@ -214,7 +214,8 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     define(
       'delegar',
       'Entrega a la flota una tarea APROBADA por el usuario (la cola elige agente y worktree). ' +
-        'Si la tarea no está aprobada devuelve un error: en ese caso pide la aprobación al usuario.',
+        'Si la tarea no está aprobada devuelve un error: en ese caso pide la aprobación al usuario. ' +
+        'Con una tarea ya delegada que FALLÓ, la reintenta: sigue en su mismo worktree con el último motivo.',
       { taskId: idSchema.describe('Id de la tarea aprobada.') },
       writes,
       async ({ taskId }) => {
@@ -231,7 +232,27 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
             return fail(`la tarea ${taskId} no está aprobada: está propuesta y espera la aprobación del usuario. Pídele que la revise y la apruebe; tú no puedes aprobarla.`);
           }
           if (entry.approval === 'rejected') return fail(`la tarea ${taskId} no está aprobada: el usuario la rechazó. No la delegues; propón otra si hace falta.`);
-          if (entry.approval === 'delegated') return fail(`la tarea ${taskId} ya fue delegada; consulta su avance con estado.`);
+          if (entry.approval === 'delegated') {
+            // Ya delegada: si falló (también tras reiniciar el núcleo, cuando la cola ya no la tiene), se reintenta.
+            const status = await ports.fleet.status(taskId);
+            if (ports.fleet.retry && (status === undefined || status.state === 'failed')) {
+              const retried = await ports.fleet.retry(taskId);
+              if (retried.accepted) {
+                return reply({
+                  tarea: taskId,
+                  aprobacion: 'delegated',
+                  reintento: true,
+                  motivoAnterior: status?.detail ?? null,
+                  estado: retried.state ?? null,
+                  agente: retried.agentId ?? null,
+                  detalle: retried.detail,
+                });
+              }
+              if (status?.state === 'failed') return fail(`la tarea ${taskId} falló y la flota no pudo reintentarla: ${oneLine(retried.reason)}`);
+            }
+            const now = status ? ` (estado: ${status.state}${status.detail ? `; ${oneLine(status.detail)}` : ''})` : '';
+            return fail(`la tarea ${taskId} ya fue delegada${now}; consulta su avance con estado. Solo se reintenta una tarea fallida.`);
+          }
           const missing: string[] = [];
           for (const dep of entry.task.dependsOn) {
             const depEntry = await ports.proposals.get(dep);
@@ -251,7 +272,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     ),
     define(
       'estado',
-      'Estado de una tarea (aprobación y avance en la flota) o, sin taskId, resumen de toda la flota.',
+      'Estado de una tarea (aprobación, avance en la flota y motivo del último cambio, p. ej. por qué falló) o, sin taskId, resumen de toda la flota.',
       { taskId: idSchema.optional().describe('Id de la tarea; omítelo para ver la flota completa.') },
       readOnly,
       async ({ taskId }) => {
@@ -269,7 +290,8 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
             estado: status?.state ?? null,
             agente: status?.agentId ?? null,
             actualizado: status?.updatedAt ?? entry?.delegatedAt ?? entry?.decidedAt ?? entry?.proposedAt ?? null,
-            detalle: status?.detail,
+            detalle: status?.detail ?? null,
+            ...(status?.state === 'failed' ? { siguientePaso: 'Falló: el motivo está en detalle. Para reintentarla (sigue en su worktree) usa delegar con su taskId.' } : {}),
           });
         }
         return reply(fleetSummary(await ports.proposals.list(), await ports.fleet.list()));

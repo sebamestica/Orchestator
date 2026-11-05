@@ -117,9 +117,10 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
     responseExample: { task: ex.looseTask },
     postmanTest: ["if (pm.response.code === 201) pm.collectionVariables.set('taskId', pm.response.json().task.task.id);"],
   },
-  'GET /tasks/:id': { paramVars: taskId, responseExample: { task: ex.pendingTask } },
+  'GET /tasks/:id': { paramVars: taskId, responseExample: { task: ex.failedTask } },
   'POST /tasks/:id/approve': { paramVars: taskId, responseExample: { task: ex.readyTask } },
   'POST /tasks/:id/cancel': { paramVars: taskId, responseExample: { task: ex.cancelledTask } },
+  'POST /tasks/:id/retry': { paramVars: taskId, responseExample: { task: ex.retriedTask } },
   'POST /tasks/manual': { responseExample: { task: ex.manualTask } },
 
   'GET /sessions': { responseExample: { sessions: [ex.session] } },

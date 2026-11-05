@@ -42,6 +42,16 @@ export interface TaskHooks {
    * entonces el servidor no la marca `cancelled`. Sin valor, se da por cancelada.
    */
   onCancel?(task: TaskRecord, reason?: string): boolean | undefined | Promise<boolean | undefined>;
+  /**
+   * Reintenta una tarea `failed` (`POST /tasks/:id/retry`): vuelve a la flota, desde la cola o, tras un reinicio,
+   * desde la base. Un error con `code: 'conflict'` responde 409.
+   */
+  onRetry?(task: TaskRecord): void | Promise<void>;
+  /**
+   * Al crear el servidor (arranque del núcleo): la orquestación pone en orden lo que quedó a medias del arranque
+   * anterior (p. ej. tareas en curso que ya nadie mueve pasan a `failed`). Un error se registra y no impide arrancar.
+   */
+  recover?(): void;
   /** Tareas del proyecto que la orquestación tiene realmente en curso (aunque el almacén diga otra cosa). */
   activeTasks?(projectId: string): readonly string[];
 }
@@ -565,7 +575,30 @@ export function createApp(deps: AppDeps): CoreApp {
       if (accepted === false) {
         throw new ApiError(409, 'conflict', `La tarea ${task.task.id} se está integrando: la cancelación solo se aplica si la integración falla`);
       }
-      const saved = store.setTaskState(task.task.id, 'cancelled');
+      const saved = store.setTaskState(task.task.id, 'cancelled', undefined, { detail: body.reason ?? 'cancelada por el usuario' });
+      hub.publishTask(saved);
+      return { task: saved };
+    },
+  );
+  r.add(
+    {
+      method: 'post',
+      path: '/tasks/:id/retry',
+      tag: 'Planes y tareas',
+      summary: 'Reintenta una tarea fallida (vuelve a la flota)',
+      description:
+        'Solo una tarea `failed`: si la flota la tiene, vuelve a `ready`; si no (el núcleo se reinició), se reencola desde la base con su encargo guardado. El encargo lleva una sección «Continuación» con el último motivo (`detail`) y el agente sigue en el mismo worktree conservado (o la carpeta local con su `.orq/`). 409 si la tarea no está `failed` o la flota no la acepta (p. ej. una dependencia sin integrar).',
+      params: { id: s.taskIdParam },
+      response: s.taskResponse,
+      errors: [404, 409, 501],
+    },
+    async ({ params }) => {
+      const task = requireTask(params.id ?? '');
+      if (task.state !== 'failed') throw new ApiError(409, 'conflict', `La tarea ${task.task.id} está en estado ${task.state}: solo se reintenta una tarea fallida`);
+      const onRetry = deps.tasks?.onRetry;
+      if (!onRetry) throw notConfigured('La flota');
+      await callService('orquestación', async () => onRetry(task));
+      const saved = requireTask(task.task.id);
       hub.publishTask(saved);
       return { task: saved };
     },
@@ -737,6 +770,13 @@ export function createApp(deps: AppDeps): CoreApp {
     },
     ...createWsHandlers({ hub, store, version: API_VERSION, now }),
   );
+
+  // Arranque: lo que quedó a medias del núcleo anterior (tareas huérfanas en curso) queda fallido y reintentable.
+  try {
+    deps.tasks?.recover?.();
+  } catch (err) {
+    log?.(redactSecrets(`arranque: no se pudo revisar las tareas interrumpidas: ${err instanceof Error ? err.message : String(err)}`).slice(0, 500));
+  }
 
   return { app, routes: r.specs };
 }

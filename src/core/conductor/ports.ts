@@ -87,6 +87,8 @@ export interface FleetPort {
   delegate(task: TaskBrief): Promise<DelegateResult>;
   status(taskId: string): Awaitable<FleetTaskStatus | undefined>;
   list(): Awaitable<readonly FleetTaskStatus[]>;
+  /** Reintenta una tarea fallida (también tras reiniciar el núcleo). Sin él, `delegar` no reintenta. */
+  retry?(taskId: string): Promise<DelegateResult>;
 }
 
 // ---------- cupos, memoria y skills ----------

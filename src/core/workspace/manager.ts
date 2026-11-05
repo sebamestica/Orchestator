@@ -78,10 +78,16 @@ export class WorktreeManager implements WorkspaceManager {
     throw new WorkspaceError(`el worktree ${workspace.path} no pertenece a ningún proyecto configurado`);
   }
 
+  /**
+   * Worktree de la tarea en `orq/<tarea>`. Si ya existe uno registrado de esa misma rama (la flota conserva el de una
+   * tarea fallida o cancelada), se reutiliza tal cual para que un reintento siga donde quedó: con sus cambios, sin
+   * volver a correr `postCreate` (ya corrió al crearlo) y completando los enlaces que falten.
+   */
   async create(projectId: string, task: TaskBrief): Promise<Workspace> {
     const project = this.project(projectId);
     const brief = taskBriefSchema.parse(task);
-    const workspace = await this.exclusive(project, () => this.addWorktree(project, brief));
+    const { workspace, reused } = await this.exclusive(project, () => this.addWorktree(project, brief));
+    if (reused) return workspace;
     try {
       // postCreate (p. ej. `npm ci`) no escribe en el repo: corre fuera de la sección exclusiva.
       const results = await runCommands(project.postCreate, workspace.path, undefined, { untrustedRoots: [project.worktreesRoot] });
@@ -95,11 +101,23 @@ export class WorktreeManager implements WorkspaceManager {
     return workspace;
   }
 
-  /** `worktree add` (reutiliza `orq/<tarea>` si ya existe: las ramas nunca se borran), bloqueo de push y enlaces. */
-  private async addWorktree(project: WorkspaceProject, brief: TaskBrief): Promise<Workspace> {
+  /**
+   * `worktree add` (reutiliza `orq/<tarea>` si ya existe: las ramas nunca se borran), bloqueo de push y enlaces. Si la
+   * carpeta ya es el worktree registrado de esa rama, la reutiliza (`reused`); cualquier otra carpeta en esa ruta es
+   * un error.
+   */
+  private async addWorktree(project: WorkspaceProject, brief: TaskBrief): Promise<{ workspace: Workspace; reused: boolean }> {
     const path = join(project.worktreesRoot, brief.id);
     const branch = `${TASK_BRANCH_PREFIX}${brief.id}`;
-    if (existsSync(path)) throw new WorkspaceError(`ya existe el worktree de la tarea: ${path}`);
+    if (existsSync(path)) {
+      if ((await this.registeredBranch(project, path)) !== branch) throw new WorkspaceError(`ya existe el worktree de la tarea: ${path}`);
+      const workspace: Workspace = { taskId: brief.id, path, branch };
+      // Sin `discardFresh` si algo falla: la carpeta tiene el trabajo del intento anterior.
+      await blockPush(this.git, path, project.hooksDir);
+      await createLinks(project.repoPath, path, project.links.filter((rel) => !existsSync(join(path, rel))));
+      await excludeLinks(this.git, path, project.links);
+      return { workspace, reused: true };
+    }
     await ensureIntegrationBranch(this.git, project);
     await mkdir(project.worktreesRoot, { recursive: true });
     const reuse = await branchExists(this.git, project.repoPath, branch);
@@ -116,7 +134,20 @@ export class WorktreeManager implements WorkspaceManager {
       await this.discardFresh(project, workspace).catch(() => undefined);
       throw err;
     }
-    return workspace;
+    return { workspace, reused: false };
+  }
+
+  /** Rama (`orq/<tarea>`) del worktree registrado en `path`; `undefined` si no está registrado o no tiene rama. */
+  private async registeredBranch(project: WorkspaceProject, path: string): Promise<string | undefined> {
+    const list = (await this.git(project.repoPath, ['worktree', 'list', '--porcelain'])).stdout;
+    for (const block of list.split(/\r?\n\r?\n/)) {
+      const lines = block.split(/\r?\n/);
+      const where = lines.find((l) => l.startsWith('worktree '));
+      if (!where || !samePath(where.slice('worktree '.length), path)) continue;
+      const ref = lines.find((l) => l.startsWith('branch '))?.slice('branch '.length).trim();
+      return ref?.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : undefined;
+    }
+    return undefined;
   }
 
   /**

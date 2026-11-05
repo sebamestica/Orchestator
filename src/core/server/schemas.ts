@@ -134,8 +134,14 @@ export const taskRecordSchema = z.strictObject({
   state: taskStateSchema,
   planId: z.string().nullable(),
   agentId: z.string().nullable(),
+  /** Motivo del último cambio de estado (p. ej. por qué falló o «interrumpida al reiniciar el núcleo»). */
+  detail: z.string().nullable(),
+  /** Veces que la flota empezó la tarea (la primera y cada reintento). */
+  attempts: z.number().int().nonnegative(),
   createdAt: isoTs,
   updatedAt: isoTs,
+  /** Hora del último evento de sus agentes (autor o revisor): muestra el avance aunque el estado no cambie. */
+  lastEventAt: isoTs.nullable(),
 });
 export const planRecordSchema = z.strictObject({
   id: idSchema,

@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
-import { DEFAULT_SETTINGS } from '../../shared/index.ts';
+import { DEFAULT_SETTINGS, redactSecrets } from '../../shared/index.ts';
 import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
@@ -44,11 +44,17 @@ function toStatus(e: QueueEntry): FleetTaskStatus {
 export function lazyFleetPort(comp: Pick<Composition, 'fleet'>): FleetPort {
   return {
     delegate: async (task) => (await comp.fleet.port()).delegate(task),
-    status: (taskId) => {
-      const e = comp.fleet.queue.get(taskId);
-      return e && toStatus(e);
-    },
+    // Desde la base además de la cola: trae el motivo de un fallo y sirve tras reiniciar el núcleo.
+    status: (taskId) => comp.fleet.status(taskId),
     list: () => comp.fleet.queue.list().map(toStatus),
+    retry: async (taskId) => {
+      try {
+        const record = await comp.fleet.retry(taskId, 'reintento pedido por la mente');
+        return { accepted: true, ...(record ? { state: record.state } : {}), ...(record?.agentId ? { agentId: record.agentId } : {}) };
+      } catch (err) {
+        return { accepted: false, reason: redactSecrets(err instanceof Error ? err.message : String(err)).slice(0, 300) };
+      }
+    },
   };
 }
 

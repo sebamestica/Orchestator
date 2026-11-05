@@ -1,16 +1,35 @@
-import type { AgentAdapter, AgentEvent, EventSink, QuotaProvider, Settings, TaskBrief } from '../../shared/index.ts';
+import type { AgentAdapter, AgentEvent, EventSink, QuotaProvider, Settings, TaskBrief, TaskState } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
-import { Fleet, PlanRegistry, Router, Supervisor, TaskQueue, combinedPlanFor, type ExecuteOptions, type ExecuteResult, type SupervisorOptions } from '../orchestrator/index.ts';
+import { CONDUCTOR_AGENT_ID, type DelegateResult, type FleetTaskStatus } from '../conductor/index.ts';
+import {
+  Fleet,
+  PlanRegistry,
+  Router,
+  Supervisor,
+  TaskQueue,
+  buildReviewTask,
+  combinedPlanFor,
+  type ExecuteOptions,
+  type ExecuteResult,
+  type SupervisorOptions,
+  type TaskStateChange,
+} from '../orchestrator/index.ts';
 import type { TaskHooks } from '../server/index.ts';
+import type { TaskRecord } from '../store/index.ts';
 import type { CommittingWorkspaces } from './commit-step.ts';
 import type { Composition } from './compose.ts';
-import { FleetRuntime } from './fleet-port.ts';
+import { FleetRuntime, RETRY_DETAIL, fleetTaskStatus, type SavedTask } from './fleet-port.ts';
 
 export interface FleetTuning {
   /** Tareas simultáneas en la cola (por defecto 3). Con ajustes (`useSettings`) manda `settings.concurrency`. */
   concurrency?: number;
-  /** Plazo por ejecución de un agente (por defecto el del Supervisor: 60 min). */
+  /**
+   * Plazo por inactividad de cada ejecución de un agente: se corta si pasa este tiempo sin eventos (por defecto el
+   * del Supervisor: 60 min). Cada evento lo reinicia.
+   */
   timeoutMs?: number;
+  /** Tope absoluto de cada ejecución aunque el agente siga activo (por defecto el del Supervisor: 3 h). */
+  maxRunMs?: number;
   maxRounds?: number;
   /** Cada ejecución (autor o revisor) al terminar: pruebas, tablas de consumo. */
   onExecuted?: (task: TaskBrief, opts: ExecuteOptions, result: ExecuteResult) => void;
@@ -39,6 +58,30 @@ type FleetDeps = Pick<Composition, 'loadAdapters' | 'registry' | 'quotaProviderF
 /** Estados de la cola con trabajo en curso o por empezar. */
 const LIVE_STATES: ReadonlySet<string> = new Set(['ready', 'running', 'review', 'handed_off']);
 
+/** Tareas de la base que, al arrancar el núcleo sin tenerlas en la cola, quedaron huérfanas (nadie las va a mover). */
+const ORPHAN_STATES: ReadonlySet<TaskState> = new Set(['ready', 'running', 'review', 'handed_off']);
+/** Motivo de las tareas huérfanas al arrancar: quedan `failed` y se pueden reintentar. */
+export const INTERRUPTED_DETAIL = 'interrumpida al reiniciar el núcleo';
+/** Cada cuánto, como mucho, se difunde por `/ws` el avance (hora del último evento) de una tarea. */
+export const ACTIVITY_PUBLISH_MS = 15_000;
+/** Sesiones de agentes ya enlazadas a su tarea que se recuerdan (después se vuelven a enlazar, sin daño). */
+const MAX_LINKED_SESSIONS = 5_000;
+
+/** Quien difunde las tareas por `/ws` (`EventHub`). */
+export interface TaskPublisher {
+  publishTask(task: TaskRecord): void;
+}
+
+/** Por qué no se pudo reintentar una tarea (el servidor lo traduce: `not_found` → 404, `conflict` → 409). */
+export class RetryError extends Error {
+  override readonly name = 'RetryError';
+  readonly code: 'not_found' | 'conflict';
+  constructor(code: 'not_found' | 'conflict', message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 /**
  * La flota real de c2 armada con las piezas de la composición: adaptadores con su clave cargada, `Router` con los
  * cupos, `Supervisor` con `envFor`, worktrees de c3 con el paso de commit y la memoria. Se arma al primer uso (carga
@@ -55,7 +98,15 @@ export class FleetService {
   /** La flota ya armada (para consultas síncronas). */
   #built: { fleet: Fleet } | undefined;
   #sink: EventSink;
+  /** Difusión de las tareas por `/ws` (el hub que llega por `attachSink`). */
+  #publisher: TaskPublisher | undefined;
   #settings: (() => Settings) | undefined;
+  /** Id del encargo de revisión → tarea revisada (los eventos del revisor también son avance de la tarea). */
+  readonly #reviewOf = new Map<string, string>();
+  /** Sesión de agente → tarea a la que ya se enlazó en el almacén (`null`: no es de una tarea del tablero). */
+  readonly #linked = new Map<string, string | null>();
+  /** Última difusión del avance de cada tarea (ms). */
+  readonly #activityAt = new Map<string, number>();
 
   constructor(deps: FleetDeps, workspaces: CommittingWorkspaces, tuning: FleetTuning = {}, log: (line: string) => void = () => undefined) {
     this.#deps = deps;
@@ -64,18 +115,144 @@ export class FleetService {
     this.#log = log;
     this.#sink = deps.store;
     this.queue = new TaskQueue({ concurrency: tuning.concurrency ?? 3 });
-    this.queue.on((change) => {
-      try {
-        if (deps.store.getTask(change.taskId)) deps.store.setTaskState(change.taskId, change.to, change.agentId);
-      } catch (err) {
-        log(redactSecrets(`flota: no se pudo guardar el estado de ${change.taskId}: ${err instanceof Error ? err.message : String(err)}`));
-      }
-    });
+    this.queue.on((change) => this.#copyChange(change));
   }
 
-  /** Destino de los eventos de los agentes (p. ej. `core.hub` para difundirlos por `/ws`); por defecto SQLite. */
-  attachSink(sink: EventSink): void {
+  /**
+   * Destino de los eventos de los agentes (p. ej. `core.hub` para difundirlos por `/ws`); por defecto SQLite. Si el
+   * destino difunde tareas (`publishTask`, como el hub), cada cambio de estado de la cola y el avance de las tareas
+   * también llegan a la interfaz.
+   */
+  attachSink(sink: EventSink & Partial<TaskPublisher>): void {
     this.#sink = sink;
+    this.#publisher = typeof sink.publishTask === 'function' ? { publishTask: (task) => sink.publishTask?.(task) } : undefined;
+  }
+
+  /**
+   * Copia un cambio de la cola a la tarea del almacén: estado, agente, motivo (tachado; un cambio sin motivo lo
+   * borra) y un intento más cada vez que la flota la empieza. Después lo difunde.
+   */
+  #copyChange(change: TaskStateChange): void {
+    const store = this.#deps.store;
+    try {
+      if (change.to === 'review') {
+        const entry = this.queue.get(change.taskId);
+        if (entry) this.#reviewOf.set(buildReviewTask(entry.task, [], '').id, change.taskId);
+      }
+      if (!store.getTask(change.taskId)) return;
+      const saved = store.setTaskState(change.taskId, change.to, change.agentId, {
+        detail: change.detail ?? null,
+        ...(change.from === 'ready' && change.to === 'running' ? { countAttempt: true } : {}),
+      });
+      this.#publish(saved);
+    } catch (err) {
+      this.#log(redactSecrets(`flota: no se pudo guardar el estado de ${change.taskId}: ${err instanceof Error ? err.message : String(err)}`));
+    }
+  }
+
+  #publish(task: TaskRecord): void {
+    try {
+      this.#publisher?.publishTask(task);
+    } catch {
+      /* la difusión nunca rompe la flota */
+    }
+  }
+
+  /**
+   * Cada evento de un agente de la flota: la primera vez que aparece su sesión se enlaza a la tarea en el almacén (de
+   * ahí sale `lastEventAt`), y el avance se difunde como mucho cada `ACTIVITY_PUBLISH_MS` por tarea.
+   */
+  #activity(event: AgentEvent, task: TaskBrief): void {
+    const store = this.#deps.store;
+    try {
+      let owner = this.#linked.get(event.sessionId);
+      const firstSeen = owner === undefined;
+      if (owner === undefined) {
+        const candidate = this.#reviewOf.get(task.id) ?? task.id;
+        owner = store.getTask(candidate) ? candidate : null;
+        if (owner) {
+          store.startSession({
+            id: event.sessionId,
+            agentId: event.agentId,
+            taskId: owner,
+            ...(event.parentSessionId ? { parentSessionId: event.parentSessionId } : {}),
+          });
+        }
+        if (this.#linked.size >= MAX_LINKED_SESSIONS) this.#linked.clear();
+        this.#linked.set(event.sessionId, owner);
+      }
+      if (!owner || !this.#publisher) return;
+      const now = Date.now();
+      const last = this.#activityAt.get(owner);
+      if (!firstSeen && last !== undefined && now - last < ACTIVITY_PUBLISH_MS) return;
+      this.#activityAt.set(owner, now);
+      const record = store.getTask(owner);
+      if (record) this.#publish(record);
+    } catch (err) {
+      this.#log(redactSecrets(`flota: no se pudo anotar el avance de ${task.id}: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
+    }
+  }
+
+  /** Tarea guardada en la forma que necesita `FleetRuntime` (reintento y estado tras un reinicio). */
+  #savedTask(taskId: string): SavedTask | undefined {
+    const t = this.#deps.store.getTask(taskId);
+    return t && { task: t.task, state: t.state, agentId: t.agentId, detail: t.detail, attempts: t.attempts, updatedAt: t.updatedAt };
+  }
+
+  /** Estado para la mente sin armar la flota: la cola, o la base si la tarea ya terminó o falló (con su motivo). */
+  status(taskId: string): FleetTaskStatus | undefined {
+    return fleetTaskStatus(this.queue.get(taskId), this.#savedTask(taskId));
+  }
+
+  /**
+   * Reintenta una tarea fallida (botón «Reintentar», `POST /tasks/:id/retry` y `delegar` de la mente): la cola la
+   * vuelve a `ready`, o la reencola desde la base si el núcleo se reinició. Lanza `RetryError` si no existe o no está
+   * `failed`, o si la flota no la acepta.
+   */
+  async retry(taskId: string, reason: string = RETRY_DETAIL): Promise<TaskRecord | undefined> {
+    const record = this.#deps.store.getTask(taskId);
+    const entry = this.queue.get(taskId);
+    if (!record && !entry) throw new RetryError('not_found', `No existe la tarea ${taskId}`);
+    const state = entry?.state ?? record?.state;
+    if (state !== 'failed') throw new RetryError('conflict', `La tarea ${taskId} está en estado ${state ?? 'desconocido'}: solo se reintenta una tarea fallida`);
+    const result: DelegateResult = await (await this.port()).retry(taskId, reason);
+    if (!result.accepted) throw new RetryError('conflict', result.reason);
+    return this.#deps.store.getTask(taskId);
+  }
+
+  /**
+   * Al arrancar el núcleo: las tareas de la base que la cola no tiene y que figuran en curso (`ready`, `running`,
+   * `review` o `handed_off`) ya no las mueve nadie. Pasan a `failed` con «interrumpida al reiniciar el núcleo» y
+   * quedan reintentables. Si la flota no tiene nada en curso, las sesiones de agentes que quedaron abiertas se cierran
+   * como `cancelled` (salvo las de la mente, que cada chat retoma).
+   */
+  recoverOrphans(): TaskRecord[] {
+    const store = this.#deps.store;
+    const recovered: TaskRecord[] = [];
+    for (const t of store.listTasks()) {
+      if (!ORPHAN_STATES.has(t.state) || this.queue.get(t.task.id)) continue;
+      try {
+        const saved = store.setTaskState(t.task.id, 'failed', undefined, { detail: INTERRUPTED_DETAIL });
+        recovered.push(saved);
+        this.#publish(saved);
+      } catch (err) {
+        this.#log(redactSecrets(`flota: no se pudo marcar ${t.task.id} como interrumpida: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+    if (recovered.length) {
+      const ids = recovered.map((t) => t.task.id);
+      this.#log(`flota: ${ids.length} tarea(s) ${INTERRUPTED_DETAIL}, ahora fallidas y reintentables: ${ids.slice(0, 10).join(', ')}${ids.length > 10 ? '…' : ''}`);
+    }
+    const busy = this.queue.list().some((e) => LIVE_STATES.has(e.state)) || (this.#built?.fleet.inFlight().length ?? 0) > 0;
+    if (!busy) {
+      try {
+        const closed = store.cancelOpenSessions({ exceptAgents: [CONDUCTOR_AGENT_ID] });
+        if (closed) this.#log(`flota: ${closed} sesión(es) de agentes abiertas al reiniciar quedan canceladas`);
+      } catch (err) {
+        this.#log(redactSecrets(`flota: no se pudieron cerrar las sesiones abiertas: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+    return recovered;
   }
 
   /**
@@ -144,6 +321,12 @@ export class FleetService {
         // false: ya terminó o pasó el punto de compromiso de la integración (la flota la cancela solo si falla).
         return fleet.cancel(record.task.id, reason ?? 'cancelada por el usuario');
       },
+      onRetry: async (record) => {
+        await this.retry(record.task.id, 'reintento pedido por el usuario');
+      },
+      recover: () => {
+        this.recoverOrphans();
+      },
       activeTasks: (projectId) => this.activeTasks(projectId),
     };
   }
@@ -171,7 +354,16 @@ export class FleetService {
     }
     const router = new Router({ agents: adapters.map((a) => a.config), quotas, settings: () => this.#readSettings() });
     const supervisor = new ObservedSupervisor(
-      { adapters, router, sink: { append: (e: AgentEvent) => this.#sink.append(e) }, queue: this.queue, env: d.envFor, ...(this.#tuning.timeoutMs ? { timeoutMs: this.#tuning.timeoutMs } : {}) },
+      {
+        adapters,
+        router,
+        sink: { append: (e: AgentEvent) => this.#sink.append(e) },
+        queue: this.queue,
+        env: d.envFor,
+        onEvent: (event, task) => this.#activity(event, task),
+        ...(this.#tuning.timeoutMs ? { timeoutMs: this.#tuning.timeoutMs } : {}),
+        ...(this.#tuning.maxRunMs ? { maxRunMs: this.#tuning.maxRunMs } : {}),
+      },
       this.#tuning.onExecuted,
     );
     const workspaces = this.workspaces;
@@ -192,6 +384,6 @@ export class FleetService {
       ...(this.#tuning.maxRounds ? { maxRounds: this.#tuning.maxRounds } : {}),
     });
     this.#built = { fleet };
-    return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log }) };
+    return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log, saved: (id) => this.#savedTask(id) }) };
   }
 }

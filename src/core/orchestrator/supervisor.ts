@@ -5,7 +5,13 @@ import { agentEventSchema, handoffSchema, redactSecrets } from '../../shared/ind
 import type { TaskQueue } from './queue.ts';
 import { RoutingError, type Router } from './router.ts';
 
+/**
+ * Plazo por inactividad de una ejecución: se corta si el agente pasa este tiempo sin emitir eventos. Cada evento lo
+ * reinicia, así un agente que avanza no se corta (antes era un plazo total de 60 min).
+ */
 export const DEFAULT_TIMEOUT_MS = 60 * 60_000;
+/** Tope absoluto de una ejecución, aunque el agente siga emitiendo eventos. */
+export const DEFAULT_MAX_RUN_MS = 3 * 60 * 60_000;
 /** Tras cancelar o vencer el plazo, tiempo que se espera a que el adaptador cierre por su cuenta. */
 export const DEFAULT_GRACE_MS = 5_000;
 /** Intentos de ejecución por tarea (incluye traspasos y reasignaciones). */
@@ -46,7 +52,10 @@ export interface AttemptResult {
 export interface AttemptOptions {
   worktreePath: string;
   signal?: AbortSignal;
+  /** Plazo por inactividad (sin eventos del agente); por defecto el del Supervisor. */
   timeoutMs?: number;
+  /** Tope absoluto de la ejecución; por defecto el del Supervisor. Es el `ctx.timeoutMs` que recibe el adaptador. */
+  maxRunMs?: number;
   handoff?: Handoff;
   /** Número de intento (para identificar la sesión sintética si el adaptador no emitió ninguna). */
   attempt?: number;
@@ -65,7 +74,10 @@ export interface ExecuteOptions {
   agentId: string;
   worktreePath: string;
   signal?: AbortSignal;
+  /** Plazo por inactividad de cada intento (ver `AttemptOptions.timeoutMs`). */
   timeoutMs?: number;
+  /** Tope absoluto de cada intento (ver `AttemptOptions.maxRunMs`). */
+  maxRunMs?: number;
   /** Traspaso con el que empieza (p. ej. reasignación tras fallos de integración). */
   handoff?: Handoff;
   /** Agentes que no pueden recibir la tarea en un traspaso (p. ej. los autores, si es una revisión). */
@@ -102,7 +114,15 @@ export interface SupervisorOptions {
   /** Lee un archivo del worktree; `undefined` si no existe. Por defecto, `fs.readFile` en UTF-8. */
   readFile?: (path: string) => Promise<string | undefined>;
   onHandoff?: (handoff: Handoff) => void | Promise<void>;
+  /**
+   * Cada evento ya guardado en el sink (validado y tachado), con la tarea de la ejecución: avance en vivo de la tarea.
+   * Un error del observador no afecta a la ejecución.
+   */
+  onEvent?: (event: AgentEvent, task: TaskBrief) => void;
+  /** Plazo por inactividad por ejecución (por defecto `DEFAULT_TIMEOUT_MS`): cada evento del agente lo reinicia. */
   timeoutMs?: number;
+  /** Tope absoluto por ejecución (por defecto `DEFAULT_MAX_RUN_MS`). */
+  maxRunMs?: number;
   graceMs?: number;
   maxAttempts?: number;
   summaryChars?: number;
@@ -124,7 +144,9 @@ export class Supervisor {
   readonly #env: (agentId: string) => Readonly<Record<string, string>>;
   readonly #readFile: (path: string) => Promise<string | undefined>;
   readonly #onHandoff: ((handoff: Handoff) => void | Promise<void>) | undefined;
+  readonly #onEvent: ((event: AgentEvent, task: TaskBrief) => void) | undefined;
   readonly #timeoutMs: number;
+  readonly #maxRunMs: number;
   readonly #graceMs: number;
   readonly #maxAttempts: number;
   readonly #summaryChars: number;
@@ -138,7 +160,9 @@ export class Supervisor {
     this.#env = opts.env ?? (() => ({}));
     this.#readFile = opts.readFile ?? readUtf8IfExists;
     this.#onHandoff = opts.onHandoff;
+    this.#onEvent = opts.onEvent;
     this.#timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.#maxRunMs = opts.maxRunMs ?? DEFAULT_MAX_RUN_MS;
     this.#graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
     this.#maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.#summaryChars = opts.summaryChars ?? DEFAULT_SUMMARY_CHARS;
@@ -169,7 +193,9 @@ export class Supervisor {
       for (let n = 1; n <= maxAttempts; n++) {
         if (opts.signal?.aborted) return result('cancelled', 'cancelada');
         await opts.beforeAttempt?.({ task, agentId, worktreePath: opts.worktreePath, attempt: n, handoff });
-        const attempt = await this.runAttempt(task, agentId, { worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, handoff, attempt: n });
+        const attempt = await this.runAttempt(task, agentId, {
+          worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, maxRunMs: opts.maxRunMs, handoff, attempt: n,
+        });
         attempts.push(attempt);
         if (attempt.ok) return result('ok');
         if (attempt.outcome === 'cancelled') return result('cancelled', attempt.error?.message ?? 'cancelada');
@@ -218,7 +244,10 @@ export class Supervisor {
     }
   }
 
-  /** Una ejecución de un adaptador: eventos al sink, plazo, cancelación y clasificación del resultado. */
+  /**
+   * Una ejecución de un adaptador: eventos al sink, plazos (inactividad y tope absoluto), cancelación y clasificación
+   * del resultado.
+   */
   async runAttempt(task: TaskBrief, agentId: string, opts: AttemptOptions): Promise<AttemptResult> {
     const adapter = this.#adapters.get(agentId);
     const env = this.#env(agentId);
@@ -229,17 +258,20 @@ export class Supervisor {
       return state.finish(this.#iso());
     }
 
-    const timeoutMs = opts.timeoutMs ?? this.#timeoutMs;
+    const idleMs = opts.timeoutMs ?? this.#timeoutMs;
+    const maxRunMs = opts.maxRunMs ?? this.#maxRunMs;
     const controller = new AbortController();
-    let abortReason: 'timeout' | 'cancelled' | undefined;
-    const abort = (why: 'timeout' | 'cancelled') => {
+    let abortReason: 'idle' | 'max' | 'cancelled' | undefined;
+    const abort = (why: 'idle' | 'max' | 'cancelled') => {
       abortReason ??= why;
       controller.abort();
     };
     const onExternalAbort = () => abort('cancelled');
     opts.signal?.addEventListener('abort', onExternalAbort, { once: true });
     if (opts.signal?.aborted) abort('cancelled');
-    const timer = setTimeout(() => abort('timeout'), timeoutMs);
+    // Inactividad: cada evento del agente reinicia el plazo (`refresh`). El tope absoluto no se reinicia.
+    const idleTimer = setTimeout(() => abort('idle'), timerMs(idleMs));
+    const maxTimer = setTimeout(() => abort('max'), timerMs(maxRunMs));
     const aborted = new Promise<'abort'>((resolve) => {
       if (controller.signal.aborted) resolve('abort');
       else controller.signal.addEventListener('abort', () => resolve('abort'), { once: true });
@@ -247,7 +279,8 @@ export class Supervisor {
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     let grace: Promise<'grace'> | undefined;
 
-    const ctx: RunContext = { worktreePath: opts.worktreePath, env, signal: controller.signal, timeoutMs };
+    // El adaptador recibe el tope absoluto (lo usa como plazo total propio); la inactividad la vigila el Supervisor.
+    const ctx: RunContext = { worktreePath: opts.worktreePath, env, signal: controller.signal, timeoutMs: maxRunMs };
     if (opts.handoff) ctx.handoff = opts.handoff;
 
     let iterator: AsyncIterator<AgentEvent> | undefined;
@@ -272,13 +305,15 @@ export class Supervisor {
         }
         pending = undefined;
         if (winner.done) break;
-        this.#forward(winner.value, state, secrets);
+        if (!abortReason) idleTimer.refresh();
+        this.#forward(winner.value, state, secrets, task);
         if (state.done) break;
       }
     } catch (err) {
       state.fail('crash', `El adaptador ${agentId} falló: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      clearTimeout(timer);
+      clearTimeout(idleTimer);
+      clearTimeout(maxTimer);
       if (graceTimer) clearTimeout(graceTimer);
       opts.signal?.removeEventListener('abort', onExternalAbort);
       if (iterator?.return) {
@@ -295,16 +330,21 @@ export class Supervisor {
     }
 
     if (abortReason) {
-      const message = abortReason === 'timeout' ? `Plazo de ${timeoutMs} ms vencido.` : 'Ejecución cancelada.';
-      state.abort(abortReason, message);
+      const message =
+        abortReason === 'idle'
+          ? `Sin actividad del agente durante ${formatDuration(idleMs)} (plazo por inactividad).`
+          : abortReason === 'max'
+            ? `Tope de ${formatDuration(maxRunMs)} por ejecución vencido.`
+            : 'Ejecución cancelada.';
+      state.abort(abortReason === 'cancelled' ? 'cancelled' : 'timeout', message);
     } else if (!state.done && !state.error) {
       state.fail('crash', `El adaptador ${agentId} terminó sin evento done.`);
     }
     // Cierra la sesión en el sink si el adaptador no lo hizo.
     if (!state.done) {
       const error = state.error;
-      if (error && !state.errorEmitted) this.#emitSynthetic(state, { type: 'error', payload: { code: error.code, message: error.message } }, secrets);
-      this.#emitSynthetic(state, { type: 'done', payload: error ? { ok: false, summary: error.message } : { ok: false } }, secrets);
+      if (error && !state.errorEmitted) this.#emitSynthetic(state, { type: 'error', payload: { code: error.code, message: error.message } }, secrets, task);
+      this.#emitSynthetic(state, { type: 'done', payload: error ? { ok: false, summary: error.message } : { ok: false } }, secrets, task);
     }
     return state.finish(this.#iso());
   }
@@ -364,29 +404,35 @@ export class Supervisor {
     }
   }
 
-  #forward(raw: AgentEvent, state: AttemptState, secrets: readonly string[]): void {
+  #forward(raw: AgentEvent, state: AttemptState, secrets: readonly string[], task: TaskBrief): void {
     const parsed = agentEventSchema.safeParse(redactDeep(raw, secrets));
     if (!parsed.success) {
       // Un evento mal formado se muestra como texto en lugar de romper la sesión.
       const line = redactSecrets(safeStringify(raw), secrets).slice(0, 2_000);
-      this.#emitSynthetic(state, { type: 'raw', payload: { source: 'supervisor:evento-invalido', line } }, secrets);
+      this.#emitSynthetic(state, { type: 'raw', payload: { source: 'supervisor:evento-invalido', line } }, secrets, task);
       return;
     }
     state.observe(parsed.data);
-    this.#append(parsed.data);
+    this.#append(parsed.data, task);
   }
 
-  #emitSynthetic(state: AttemptState, body: SyntheticBody, secrets: readonly string[]): void {
+  #emitSynthetic(state: AttemptState, body: SyntheticBody, secrets: readonly string[], task: TaskBrief): void {
     const event = agentEventSchema.parse(redactDeep(state.synthetic(body, this.#iso()), secrets));
     state.observe(event);
-    this.#append(event);
+    this.#append(event, task);
   }
 
-  #append(event: AgentEvent): void {
+  #append(event: AgentEvent, task: TaskBrief): void {
     try {
       this.#sink.append(event);
     } catch (err) {
       console.error(`Error al guardar un evento: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    try {
+      this.#onEvent?.(event, task);
+    } catch {
+      /* el observador nunca rompe la ejecución */
     }
   }
 
@@ -520,6 +566,22 @@ function describeAttempt(attempt: AttemptResult | undefined): string {
   if (attempt.ok) return 'terminó bien';
   const error = attempt.error ? `${attempt.error.code}: ${attempt.error.message}` : 'sin detalle';
   return `${attempt.outcome} (${error})`;
+}
+
+/** Plazo válido para `setTimeout` (más de ~24,8 días dispararía enseguida). */
+function timerMs(ms: number): number {
+  return Math.min(Math.max(0, ms), 2_147_483_647);
+}
+
+/** Duración legible para los motivos: «40 ms», «30 s», «60 min», «3 h», «1 h 30 min». */
+export function formatDuration(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1_000)} s`;
+  const totalMin = Math.round(ms / 60_000);
+  if (totalMin <= 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  return min ? `${h} h ${min} min` : `${h} h`;
 }
 
 /** Espera `promise` como mucho `ms` (sin dejar temporizadores vivos). */

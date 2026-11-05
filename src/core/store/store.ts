@@ -85,9 +85,26 @@ export interface TaskRecord {
   state: TaskState;
   planId: string | null;
   agentId: string | null;
+  /** Motivo del último cambio de estado (p. ej. por qué falló), ya tachado; `null` si no lo hubo. */
+  detail: string | null;
+  /** Veces que la flota empezó la tarea (la primera y cada reintento). */
+  attempts: number;
   createdAt: string;
   updatedAt: string;
+  /** Hora del último evento de sus agentes (autor o revisor); `null` si aún no hubo ninguno. */
+  lastEventAt: string | null;
 }
+
+/** Cambios de `setTaskState` además del estado. */
+export interface TaskStateUpdate {
+  /** Motivo del cambio: `null` lo borra; sin valor se conserva el anterior. Se tacha y se recorta. */
+  detail?: string | null;
+  /** Suma un intento (la flota empieza la tarea). */
+  countAttempt?: boolean;
+}
+
+/** Tope del motivo guardado de una tarea. */
+export const MAX_TASK_DETAIL_CHARS = 2_000;
 
 export interface SessionRecord {
   id: string;
@@ -160,7 +177,20 @@ const int = z.union([z.number(), z.bigint()]).transform(Number);
 const agentRow = z.object({ config_json: text, quota_method: optText, last_probe_json: optText, created_at: text, updated_at: text });
 const projectRow = z.object({ id: text, name: text, repo_path: text, workspace_json: optText, created_at: text });
 const planRow = z.object({ id: text, project_id: text, text, warnings_json: text, created_at: text });
-const taskRow = z.object({ brief_json: text, state: text, plan_id: optText, agent_id: optText, created_at: text, updated_at: text });
+const taskRow = z.object({
+  brief_json: text,
+  state: text,
+  plan_id: optText,
+  agent_id: optText,
+  detail: optText,
+  attempts: int,
+  created_at: text,
+  updated_at: text,
+  last_event_at: optText,
+});
+/** Columnas de una tarea; la hora del último evento sale de sus sesiones (autor y revisor). */
+const TASK_COLUMNS =
+  'brief_json, state, plan_id, agent_id, detail, attempts, created_at, updated_at, (SELECT MAX(s.updated_at) FROM sessions s WHERE s.task_id = tasks.id) AS last_event_at';
 const sessionRow = z.object({
   id: text,
   agent_id: text,
@@ -406,7 +436,7 @@ export class SqliteStore implements EventSink {
   }
 
   getTask(id: string): TaskRecord | undefined {
-    const raw = this.stmt('SELECT brief_json, state, plan_id, agent_id, created_at, updated_at FROM tasks WHERE id = ?').get(id);
+    const raw = this.stmt(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`).get(id);
     return raw ? toTask(raw) : undefined;
   }
 
@@ -416,16 +446,29 @@ export class SqliteStore implements EventSink {
     if (filter.projectId) addWhere(where, params, 'project_id = ?', filter.projectId);
     if (filter.state) addWhere(where, params, 'state = ?', filter.state);
     if (filter.planId) addWhere(where, params, 'plan_id = ?', filter.planId);
-    const sql = `SELECT brief_json, state, plan_id, agent_id, created_at, updated_at FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, rowid`;
+    const sql = `SELECT ${TASK_COLUMNS} FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, rowid`;
     return this.stmt(sql).all(...params).map(toTask);
   }
 
-  setTaskState(id: string, state: TaskState, agentId?: string | null): TaskRecord {
+  /**
+   * Cambia el estado. `agentId` sin valor conserva el agente; `update.detail` guarda el motivo (tachado) y
+   * `update.countAttempt` suma un intento.
+   */
+  setTaskState(id: string, state: TaskState, agentId?: string | null, update: TaskStateUpdate = {}): TaskRecord {
     const s = taskStateSchema.parse(state);
     if (agentId !== undefined && agentId !== null) cleanId(agentId, 'agente');
-    const res = agentId === undefined
-      ? this.stmt('UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?').run(s, this.iso(), id)
-      : this.stmt('UPDATE tasks SET state = ?, agent_id = ?, updated_at = ? WHERE id = ?').run(s, agentId, this.iso(), id);
+    const sets = ['state = ?', 'updated_at = ?'];
+    const params: SQLInputValue[] = [s, this.iso()];
+    if (agentId !== undefined) {
+      sets.push('agent_id = ?');
+      params.push(agentId);
+    }
+    if (update.detail !== undefined) {
+      sets.push('detail = ?');
+      params.push(update.detail === null ? null : cleanDetail(update.detail));
+    }
+    if (update.countAttempt) sets.push('attempts = attempts + 1');
+    const res = this.stmt(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`).run(...params, id);
     if (Number(res.changes) === 0) throw new StoreError('not_found', `No existe la tarea ${id}`);
     const saved = this.getTask(id);
     if (!saved) throw new StoreError('not_found', `No existe la tarea ${id}`);
@@ -467,6 +510,20 @@ export class SqliteStore implements EventSink {
     params.push(Math.min(Math.max(filter.limit ?? 200, 1), 1000));
     const sql = `SELECT * FROM sessions ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY started_at DESC, rowid DESC LIMIT ?`;
     return this.stmt(sql).all(...params).map(toSession);
+  }
+
+  /**
+   * Cierra como `cancelled` las sesiones que quedaron abiertas (`starting`, `running` o `waiting`), p. ej. al
+   * arrancar el núcleo tras un cierre: sus procesos ya no existen. `exceptAgents`: agentes cuyas sesiones se
+   * retoman (la mente reutiliza la sesión de cada chat). No toca `updated_at`: sigue siendo la hora del último evento.
+   */
+  cancelOpenSessions(opts: { exceptAgents?: readonly string[] } = {}): number {
+    const except = [...new Set(opts.exceptAgents ?? [])];
+    const notIn = except.length ? ` AND agent_id NOT IN (${except.map(() => '?').join(', ')})` : '';
+    const res = this.stmt(
+      `UPDATE sessions SET state = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE state IN ('starting', 'running', 'waiting')${notIn}`,
+    ).run(this.iso(), ...except);
+    return Number(res.changes);
   }
 
   // ---------------------------------------------------------------- eventos
@@ -742,9 +799,19 @@ function toTask(raw: unknown): TaskRecord {
     state: taskStateSchema.parse(r.state),
     planId: r.plan_id,
     agentId: r.agent_id,
+    detail: r.detail,
+    attempts: r.attempts,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    lastEventAt: r.last_event_at,
   };
+}
+
+/** Motivo de una tarea listo para guardar: tachado y recortado (vacío: sin motivo). */
+function cleanDetail(detail: string): string | null {
+  const text = redactSecrets(detail).trim();
+  if (!text) return null;
+  return text.length <= MAX_TASK_DETAIL_CHARS ? text : `${text.slice(0, MAX_TASK_DETAIL_CHARS - 1)}…`;
 }
 
 function toSession(raw: unknown): SessionRecord {

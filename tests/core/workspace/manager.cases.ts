@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitGuardError, WorkspaceError, WorktreeManager, createGitRunner } from '../../../src/core/workspace/index.ts';
@@ -63,11 +63,30 @@ describe('WorktreeManager.create', () => {
     await expect(mgr.create('demo', brief('tarea-3'))).rejects.toThrow(/tiempo agotado/);
   });
 
-  it('rechaza proyectos sin configuración y tareas repetidas', async () => {
-    const { mgr } = setup();
+  it('rechaza proyectos sin configuración y, en la ruta de la tarea, una carpeta ajena o el worktree de otra rama', async () => {
+    const { t, mgr } = setup();
     await expect(mgr.create('otro', brief('tarea-4'))).rejects.toThrow(WorkspaceError);
-    await mgr.create('demo', brief('tarea-4'));
+    mkdirSync(join(t.worktreesRoot, 'tarea-4'), { recursive: true });
+    writeFileSync(join(t.worktreesRoot, 'tarea-4', 'ajeno.txt'), 'no tocar\n');
     await expect(mgr.create('demo', brief('tarea-4'))).rejects.toThrow(/ya existe/);
+    expect(readFileSync(join(t.worktreesRoot, 'tarea-4', 'ajeno.txt'), 'utf8')).toBe('no tocar\n');
+    t.git(t.repo, 'worktree', 'add', '-q', join(t.worktreesRoot, 'tarea-4c'), '-b', 'otra-rama', 'main');
+    await expect(mgr.create('demo', brief('tarea-4c'))).rejects.toThrow(/ya existe/);
+  });
+
+  it('reintento: reutiliza el worktree conservado de la tarea con su trabajo, sin repetir postCreate', async () => {
+    const { t, mgr } = setup({ postCreate: [nodeCmd("require('fs').appendFileSync('.postcreate-ok', 'x')")] });
+    const first = await mgr.create('demo', brief('tarea-4b'));
+    // La tarea falló con trabajo a medias (la flota conserva el worktree y no llama a remove).
+    writeFileSync(join(first.path, 'a.txt'), 'trabajo a medias\n');
+    const again = await mgr.create('demo', brief('tarea-4b'));
+    expect(again).toEqual(first);
+    expect(readFileSync(join(again.path, 'a.txt'), 'utf8')).toBe('trabajo a medias\n');
+    expect(readFileSync(join(again.path, '.postcreate-ok'), 'utf8')).toBe('x');
+    expect(lstatSync(join(again.path, 'node_modules')).isSymbolicLink()).toBe(true);
+    expect(t.git(again.path, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe('orq/tarea-4b');
+    // El push sigue bloqueado en el worktree reutilizado.
+    expect(t.git(again.path, 'config', '--get', 'remote.pushDefault').trim()).toBe('orquestador-bloqueado');
   });
 });
 

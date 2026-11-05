@@ -163,20 +163,46 @@ export const task2: TaskBrief = {
   skillRefs: [],
 };
 
-const taskRecord = (task: TaskBrief, state: 'pending' | 'ready' | 'cancelled', agentId: string | null, updatedAt = T_PLAN) => ({
+const taskRecord = (
+  task: TaskBrief,
+  state: 'pending' | 'ready' | 'cancelled' | 'failed',
+  agentId: string | null,
+  updatedAt = T_PLAN,
+  extra: { detail?: string; attempts?: number; lastEventAt?: string } = {},
+) => ({
   task,
   state,
   planId: ids.plan,
   agentId,
+  detail: extra.detail ?? null,
+  attempts: extra.attempts ?? 0,
   createdAt: T_PLAN,
   updatedAt,
+  lastEventAt: extra.lastEventAt ?? null,
 });
 export const pendingTask = taskRecord(task1, 'pending', null);
 export const pendingTask2 = taskRecord(task2, 'pending', null);
 export const readyTask = taskRecord(task1, 'ready', null, T_RUN);
 export const readyTask2 = taskRecord(task2, 'ready', null, T_RUN);
-export const cancelledTask = taskRecord(task1, 'cancelled', null, T_RUN);
-export const looseTask = { task: { ...taskInput, contextRefs: [], skillRefs: [] }, state: 'pending' as const, planId: null, agentId: null, createdAt: T_PLAN, updatedAt: T_PLAN };
+export const cancelledTask = taskRecord(task1, 'cancelled', null, T_RUN, { detail: 'Ya no hace falta' });
+/** Tarea fallida (motivo guardado) y la misma tras `POST /tasks/:id/retry`: vuelve a la flota. */
+export const failedTask = taskRecord(task1, 'failed', ids.codex, T_END, {
+  detail: 'validar-citas: sin éxito tras 4 intentos (último: timeout (timeout: Sin actividad del agente durante 60 min (plazo por inactividad).)).',
+  attempts: 1,
+  lastEventAt: T_END,
+});
+export const retriedTask = taskRecord(task1, 'ready', ids.codex, T_QUOTA, { detail: 'reintento pedido por el usuario', attempts: 1, lastEventAt: T_END });
+export const looseTask = {
+  task: { ...taskInput, contextRefs: [], skillRefs: [] },
+  state: 'pending' as const,
+  planId: null,
+  agentId: null,
+  detail: null,
+  attempts: 0,
+  createdAt: T_PLAN,
+  updatedAt: T_PLAN,
+  lastEventAt: null,
+};
 
 export const plan = { id: ids.plan, projectId: ids.project, text: planText, warnings: [], createdAt: T_PLAN, taskIds: [ids.task, ids.task2] };
 
@@ -360,6 +386,9 @@ export const manualTask = {
   state: 'pending' as const,
   planId: null,
   agentId: null,
+  detail: null,
+  attempts: 0,
   createdAt: T_PLAN,
   updatedAt: T_PLAN,
+  lastEventAt: null,
 };

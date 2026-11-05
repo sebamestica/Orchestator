@@ -10,9 +10,10 @@ import {
   ModalHeader,
   ModalHeading,
 } from '@heroui/react';
-import { AlertCircle, CheckCircle, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, XCircle } from 'lucide-react';
 import { useState } from 'react';
 import { api, ApiError } from '../../api/client.ts';
+import { retryTask, taskActionError } from '../../api/tasks.ts';
 import type { AgentRecord, TaskRecord } from '../../api/types.ts';
 import { difficultyLabel, formatRelativeTime } from './types.ts';
 
@@ -35,6 +36,7 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
 
   const brief = task.task;
   const isPending = task.state === 'pending';
+  const isFailed = task.state === 'failed';
   const isCancellable = CANCELLABLE_STATES.includes(task.state as (typeof CANCELLABLE_STATES)[number]);
   const currentAgent = agents.find((a) => a.config.id === (task.agentId || brief.suggestedAgent));
   const agentDisplayName = currentAgent?.config.displayName || task.agentId || brief.suggestedAgent || 'Sin asignar';
@@ -76,6 +78,20 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
     }
   };
 
+  const handleRetry = async () => {
+    try {
+      setSubmitting(true);
+      setErrorNotice(null);
+      await retryTask(brief.id);
+      onTaskUpdated();
+      onClose();
+    } catch (err) {
+      setErrorNotice(taskActionError('al reintentar la tarea', err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <ModalBackdrop isOpen={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <ModalContainer size="lg">
@@ -95,13 +111,33 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
             <ModalHeading className="text-base font-semibold text-foreground break-words">
               {brief.title}
             </ModalHeading>
-            <div className="flex items-center gap-3 text-xs text-muted">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
               <span>Proyecto: <strong className="text-foreground">{brief.projectId}</strong></span>
               <span>Actualizada: {formatRelativeTime(task.updatedAt || task.createdAt)}</span>
+              {task.lastEventAt && (
+                <span title={new Date(task.lastEventAt).toLocaleString()}>Último evento: {formatRelativeTime(task.lastEventAt)}</span>
+              )}
+              {task.attempts > 0 && <span>Intentos: {task.attempts}</span>}
             </div>
           </ModalHeader>
 
           <ModalBody className="flex flex-col gap-4 py-4 max-h-[60vh] overflow-y-auto">
+            {isFailed && (
+              <section
+                aria-label="Motivo del fallo"
+                className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-danger"
+              >
+                <AlertCircle className="size-4 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">Por qué se detuvo</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words">{task.detail || 'Falló sin motivo guardado.'}</p>
+                  <p className="mt-1.5 text-danger/80">
+                    Al reintentar, el agente sigue en el mismo worktree (o carpeta) con este motivo y el plan de la tarea.
+                  </p>
+                </div>
+              </section>
+            )}
+
             {errorNotice && (
               <div
                 role="alert"
@@ -234,6 +270,18 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
               >
                 Cerrar
               </Button>
+              {isFailed && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  isDisabled={submitting}
+                  onPress={handleRetry}
+                  aria-label="Reintentar tarea"
+                >
+                  <RefreshCw className="size-4 mr-1.5" aria-hidden="true" />
+                  Reintentar
+                </Button>
+              )}
               {isPending && (
                 <Button
                   variant="primary"

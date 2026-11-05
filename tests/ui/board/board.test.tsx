@@ -64,8 +64,11 @@ function makeTask(
     state,
     planId: 'plan-123',
     agentId,
+    detail: null,
+    attempts: 0,
     createdAt: '2026-11-04T08:00:00.000Z',
     updatedAt: '2026-11-04T09:30:00.000Z',
+    lastEventAt: null,
     task: {
       id,
       projectId,

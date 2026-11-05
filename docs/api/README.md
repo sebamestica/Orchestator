@@ -79,9 +79,10 @@ Codex y agy no necesitan clave: **Agentes → /agents/detect** los busca y regis
 1. `POST /projects`: registra el repo (`id`, `name`, `repoPath`) y, para que la flota pueda trabajar en él, `workspace` con los enlaces, `postCreate` y el `gate` (obligatorio). Sin `workspace`, la flota rechaza las tareas del proyecto. Receta completa: [docs/proyectos/vetworld.md](../proyectos/vetworld.md).
 2. `POST /plans`: envía `{ "projectId", "text" }` con el plan en texto. Devuelve las tareas propuestas en estado `pending` y guarda `planId` y `taskId`.
 3. `GET /plans/:id` revisa el plan. Después, `POST /plans/:id/approve` aprueba todas las tareas, o `POST /tasks/:id/approve` aprueba una (con `agentId` opcional para fijar el agente).
-4. `GET /sessions?taskId=…` y después `GET /sessions/:id/events?since=-1` muestran los eventos. Para pedir solo los nuevos, repite con `since` igual al `lastSeq` de la respuesta anterior mientras `hasMore` sea `true`.
-5. `GET /quotas` muestra el cupo restante, y `POST /quotas/refresh` lo vuelve a leer en el momento.
-6. `GET /usage?groupBy=agent,day` da los tokens y el costo por agente y por día (`groupBy` acepta `agent`, `day`, `session` y `model`).
+4. `GET /sessions?taskId=…` y después `GET /sessions/:id/events?since=-1` muestran los eventos. Para pedir solo los nuevos, repite con `since` igual al `lastSeq` de la respuesta anterior mientras `hasMore` sea `true`. `GET /tasks/:id` trae `lastEventAt` (último evento de sus agentes) aunque el estado no cambie.
+5. Si una tarea queda `failed`, `GET /tasks/:id` dice por qué en `detail` (también «interrumpida al reiniciar el núcleo» si el núcleo se cerró con ella en curso), y `POST /tasks/:id/retry` la vuelve a poner en marcha en el mismo worktree.
+6. `GET /quotas` muestra el cupo restante, y `POST /quotas/refresh` lo vuelve a leer en el momento.
+7. `GET /usage?groupBy=agent,day` da los tokens y el costo por agente y por día (`groupBy` acepta `agent`, `day`, `session` y `model`).
 
 ## 6. WebSocket `/ws`
 

@@ -182,8 +182,16 @@ export class TaskQueue {
     return true;
   }
 
-  /** Reintenta una tarea fallida. */
-  retry(taskId: string, detail?: string): void {
+  /**
+   * Reintenta una tarea fallida (`failed → ready`). `task`: encargo con el que vuelve (p. ej. con la sección
+   * «Continuación»); debe ser la misma tarea y conserva las dependencias que ya tenía en la cola.
+   */
+  retry(taskId: string, detail?: string, task?: TaskBrief): void {
+    const entry = this.#require(taskId);
+    if (task && (task.id !== taskId || task.projectId !== entry.task.projectId)) throw new QueueError(`El encargo del reintento no es de la tarea ${taskId}.`);
+    // Solo una fallida: una pendiente pasa a `ready` cuando se integran sus dependencias, no por reintento.
+    if (entry.state !== 'failed') throw new QueueError(`Transición no permitida para ${taskId}: ${entry.state} → ready (solo se reintenta una tarea fallida).`);
+    if (task) entry.task = { ...task, dependsOn: entry.task.dependsOn };
     this.transition(taskId, 'ready', { detail });
   }
 

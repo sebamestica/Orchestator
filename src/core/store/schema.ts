@@ -90,4 +90,9 @@ export const MIGRATIONS: readonly string[] = [
   `
   ALTER TABLE projects ADD COLUMN workspace_json TEXT;
   `,
+  // v3: motivo del último cambio de estado de cada tarea (p. ej. por qué falló) y veces que la flota la empezó.
+  `
+  ALTER TABLE tasks ADD COLUMN detail TEXT;
+  ALTER TABLE tasks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+  `,
 ];

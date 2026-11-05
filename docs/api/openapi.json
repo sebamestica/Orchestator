@@ -1170,8 +1170,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     },
                     {
                       "task": {
@@ -1198,8 +1201,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     }
                   ]
                 }
@@ -1297,8 +1303,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     },
                     {
                       "task": {
@@ -1325,8 +1334,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     }
                   ]
                 }
@@ -1406,8 +1418,11 @@
                       "state": "ready",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:42:00.000Z"
+                      "updatedAt": "2026-11-01T21:42:00.000Z",
+                      "lastEventAt": null
                     },
                     {
                       "task": {
@@ -1434,8 +1449,11 @@
                       "state": "ready",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:42:00.000Z"
+                      "updatedAt": "2026-11-01T21:42:00.000Z",
+                      "lastEventAt": null
                     }
                   ]
                 }
@@ -1532,8 +1550,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     },
                     {
                       "task": {
@@ -1560,8 +1581,11 @@
                       "state": "pending",
                       "planId": "plan-20261101-a1b2c3",
                       "agentId": null,
+                      "detail": null,
+                      "attempts": 0,
                       "createdAt": "2026-11-01T21:40:05.000Z",
-                      "updatedAt": "2026-11-01T21:40:05.000Z"
+                      "updatedAt": "2026-11-01T21:40:05.000Z",
+                      "lastEventAt": null
                     }
                   ]
                 }
@@ -1638,8 +1662,11 @@
                     "state": "pending",
                     "planId": null,
                     "agentId": null,
+                    "detail": null,
+                    "attempts": 0,
                     "createdAt": "2026-11-01T21:40:05.000Z",
-                    "updatedAt": "2026-11-01T21:40:05.000Z"
+                    "updatedAt": "2026-11-01T21:40:05.000Z",
+                    "lastEventAt": null
                   }
                 }
               }
@@ -1715,11 +1742,14 @@
                       "contextRefs": [],
                       "skillRefs": []
                     },
-                    "state": "pending",
+                    "state": "failed",
                     "planId": "plan-20261101-a1b2c3",
-                    "agentId": null,
+                    "agentId": "codex",
+                    "detail": "validar-citas: sin éxito tras 4 intentos (último: timeout (timeout: Sin actividad del agente durante 60 min (plazo por inactividad).)).",
+                    "attempts": 1,
                     "createdAt": "2026-11-01T21:40:05.000Z",
-                    "updatedAt": "2026-11-01T21:40:05.000Z"
+                    "updatedAt": "2026-11-01T21:43:30.000Z",
+                    "lastEventAt": "2026-11-01T21:43:30.000Z"
                   }
                 }
               }
@@ -1797,8 +1827,11 @@
                     "state": "ready",
                     "planId": "plan-20261101-a1b2c3",
                     "agentId": null,
+                    "detail": null,
+                    "attempts": 0,
                     "createdAt": "2026-11-01T21:40:05.000Z",
-                    "updatedAt": "2026-11-01T21:42:00.000Z"
+                    "updatedAt": "2026-11-01T21:42:00.000Z",
+                    "lastEventAt": null
                   }
                 }
               }
@@ -1887,8 +1920,11 @@
                     "state": "cancelled",
                     "planId": "plan-20261101-a1b2c3",
                     "agentId": null,
+                    "detail": "Ya no hace falta",
+                    "attempts": 0,
                     "createdAt": "2026-11-01T21:40:05.000Z",
-                    "updatedAt": "2026-11-01T21:42:00.000Z"
+                    "updatedAt": "2026-11-01T21:42:00.000Z",
+                    "lastEventAt": null
                   }
                 }
               }
@@ -1911,6 +1947,84 @@
           },
           "415": {
             "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/tasks/{id}/retry": {
+      "post": {
+        "tags": [
+          "Planes y tareas"
+        ],
+        "summary": "Reintenta una tarea fallida (vuelve a la flota)",
+        "operationId": "postTasksByIdRetry",
+        "description": "Solo una tarea `failed`: si la flota la tiene, vuelve a `ready`; si no (el núcleo se reinició), se reencola desde la base con su encargo guardado. El encargo lleva una sección «Continuación» con el último motivo (`detail`) y el agente sigue en el mismo worktree conservado (o la carpeta local con su `.orq/`). 409 si la tarea no está `failed` o la flota no la acepta (p. ej. una dependencia sin integrar).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+            },
+            "example": "validar-citas"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskResponse"
+                },
+                "example": {
+                  "task": {
+                    "task": {
+                      "id": "validar-citas",
+                      "projectId": "vetworld",
+                      "title": "Validar el formulario de citas",
+                      "objective": "Agregar validación con Zod al formulario de citas.",
+                      "ownedPaths": [
+                        "src/citas/**"
+                      ],
+                      "dependsOn": [],
+                      "acceptance": [
+                        "Pruebas del formulario en verde"
+                      ],
+                      "difficulty": "low",
+                      "suggestedAgent": "codex",
+                      "contextRefs": [],
+                      "skillRefs": []
+                    },
+                    "state": "ready",
+                    "planId": "plan-20261101-a1b2c3",
+                    "agentId": "codex",
+                    "detail": "reintento pedido por el usuario",
+                    "attempts": 1,
+                    "createdAt": "2026-11-01T21:40:05.000Z",
+                    "updatedAt": "2026-11-01T21:45:00.000Z",
+                    "lastEventAt": "2026-11-01T21:43:30.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "501": {
+            "$ref": "#/components/responses/E501"
           }
         }
       }
@@ -3726,8 +3840,11 @@
                     "state": "pending",
                     "planId": null,
                     "agentId": null,
+                    "detail": null,
+                    "attempts": 0,
                     "createdAt": "2026-11-01T21:40:05.000Z",
-                    "updatedAt": "2026-11-01T21:40:05.000Z"
+                    "updatedAt": "2026-11-01T21:40:05.000Z",
+                    "lastEventAt": null
                   }
                 }
               }
@@ -6169,6 +6286,16 @@
               "null"
             ]
           },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -6176,6 +6303,17 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "lastEventAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6183,8 +6321,11 @@
           "state",
           "planId",
           "agentId",
+          "detail",
+          "attempts",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "lastEventAt"
         ],
         "additionalProperties": false
       },

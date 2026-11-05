@@ -244,10 +244,12 @@ export class ChatService {
     this.#repo.resetRunning(this.#iso());
 
     const base = deps.ports.fleet;
+    const retry = base.retry?.bind(base);
     this.#fleet = {
       delegate: (task) => this.#deliver(task),
       status: (taskId) => base.status(taskId),
       list: () => base.list(),
+      ...(retry ? { retry } : {}),
     };
     const store = deps.store;
     const db = this.#db;
