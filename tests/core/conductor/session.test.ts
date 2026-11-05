@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BUILTIN_TOOL_NAMES, LEGACY_TOOL_NAME_ALIASES } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, HookCallbackMatcher, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   BLOCKED_TOOLS,
+  BYPASS_TOOLS,
   CONDUCTOR_PROMPT_PREFIX,
   CONDUCTOR_TOOL_NAMES,
   ConductorSession,
@@ -376,6 +380,127 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     expect(second.value?.events[0]).toMatchObject({ type: 'done', sessionId: 'chat-1', payload: { summary: '[REDACTADO]' } });
     expect(sdkSessionIdOf(second.value?.message as SDKMessage)).toBe('sdk-session-1');
     expect(s.redact(`clave ${PROXY_KEY}`)).toBe('clave [REDACTADO]');
+    s.close();
+  });
+});
+
+describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)', () => {
+  let base = '';
+  let project = '';
+  let extra = '';
+  let outside = '';
+  let vault = '';
+  beforeAll(() => {
+    base = mkdtempSync(join(tmpdir(), 'orq-bypass-'));
+    project = join(base, 'proyecto');
+    extra = join(base, 'extra');
+    outside = join(base, 'fuera');
+    for (const dir of [project, extra, outside, join(base, 'datos')]) mkdirSync(dir, { recursive: true });
+    vault = join(base, 'datos', 'vault.json');
+  });
+  afterAll(() => {
+    if (base) rmSync(base, { recursive: true, force: true });
+  });
+
+  const guardAt = (o: Options, cwd: string) => {
+    const hook = (o.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
+    if (!hook) throw new Error('falta la guardia');
+    const signal = new AbortController().signal;
+    return async (tool_name: string, tool_input: unknown): Promise<string> =>
+      JSON.stringify(await hook({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd }, 't', { signal }));
+  };
+  const open = (mode: ConductorSessionOptions['mode'], extraOpts: Partial<ConductorSessionOptions> = {}) =>
+    session({ cwd: project, mode, extraRoots: [extra], readRoots: ['C:\\'], denyPaths: [vault, join(project, 'nucleo.db')], ...extraOpts });
+
+  it('el SDK recibe edición y ejecución; el resto de BLOCKED_TOOLS sigue bloqueado', () => {
+    const { s, q } = open('bypass');
+    s.send('haz los guiones');
+    const o = optionsOf(q);
+    expect(BYPASS_TOOLS).toEqual(['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell']);
+    for (const t of BYPASS_TOOLS) {
+      expect(o.tools).toContain(t);
+      expect(o.allowedTools).toContain(t);
+      expect(o.disallowedTools).not.toContain(t);
+      expect(BUILTIN_TOOL_NAMES).toContain(t);
+    }
+    expect(o.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent', ...BYPASS_TOOLS]);
+    expect(o.disallowedTools).toEqual(BLOCKED_TOOLS.filter((t) => !(BYPASS_TOOLS as readonly string[]).includes(t)));
+    for (const t of ['Monitor', 'EnterWorktree', 'Workflow', 'CronCreate', 'RemoteTrigger']) expect(o.disallowedTools).toContain(t);
+    expect(o.allowedTools).toContain('mcp__orquestador__delegar');
+    expect(o.permissionMode).toBe('dontAsk');
+    expect(o.allowDangerouslySkipPermissions).toBeUndefined();
+    // Bash y los MCP stdio no heredan la clave; el proceso del SDK sí la tiene.
+    expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    expect(o.env?.ANTHROPIC_API_KEY).toBe(PROXY_KEY);
+    expect((o.systemPrompt as string[])[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: bypass[\s\S]*Hazlo tú mismo[\s\S]*No preguntes/);
+    // El investigador sigue siendo de solo lectura.
+    expect((o.agents as Record<string, AgentDefinition>).investigador?.tools).not.toContain('Bash');
+    s.close();
+  });
+
+  it('la guardia escribe dentro del proyecto y de las carpetas extra; niega fuera, denyPaths, git push y rm -rf fuera', async () => {
+    const { s, q } = open('bypass');
+    s.send('hola');
+    const pre = guardAt(optionsOf(q), project);
+    expect(await pre('Write', { file_path: join(project, 'GUIONES.md'), content: '# Guiones' })).toBe('{}');
+    expect(await pre('Edit', { file_path: join(project, 'src', 'a.ts'), old_string: 'a', new_string: 'b' })).toBe('{}');
+    expect(await pre('Write', { file_path: join(extra, 'notas.md'), content: 'x' })).toBe('{}');
+    expect(await pre('Write', { file_path: join(outside, 'x.md'), content: 'x' })).toMatch(/"deny".*solo puedes escribir dentro del proyecto/);
+    expect(await pre('Write', { file_path: vault, content: '{}' })).toMatch(/"deny"/);
+    expect(await pre('Write', { file_path: join(project, 'nucleo.db'), content: 'x' })).toMatch(/"deny".*datos del núcleo/);
+    expect(await pre('Bash', { command: 'git status' })).toBe('{}');
+    expect(await pre('Bash', { command: 'npm run -s check' })).toBe('{}');
+    expect(await pre('Bash', { command: 'git push' })).toMatch(/"deny".*git push necesita la aprobación del usuario/);
+    expect(await pre('PowerShell', { command: 'git push origin main' })).toMatch(/"deny"/);
+    expect(await pre('Bash', { command: `rm -rf ${outside.replace(/\\/g, '/')}` })).toMatch(/"deny".*fuera del worktree/);
+    expect(await pre('Bash', { command: 'rm -rf ../fuera' })).toMatch(/"deny"/);
+    expect(await pre('Bash', { command: `type ${vault}` })).toMatch(/"deny".*datos del núcleo/);
+    // La lectura sigue abierta a las unidades en bypass, salvo denyPaths.
+    expect(await pre('Read', { file_path: join(outside, 'x.md') })).toBe('{}');
+    expect(await pre('Read', { file_path: vault })).toMatch(/"deny"/);
+    expect(await guardAt(optionsOf(q), outside)('Bash', { command: 'ls' })).toMatch(/"deny".*fuera del proyecto/);
+    s.close();
+  });
+
+  it('plan y auto: edición y ejecución siguen bloqueadas en las opciones y en la guardia', async () => {
+    for (const mode of ['plan', 'auto'] as const) {
+      const { s, q } = open(mode);
+      s.send('hola');
+      const o = optionsOf(q);
+      expect(o.tools, mode).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+      expect(o.disallowedTools, mode).toEqual([...BLOCKED_TOOLS]);
+      expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, mode).toBeUndefined();
+      const pre = guardAt(o, project);
+      for (const t of BYPASS_TOOLS) expect(o.allowedTools, `${mode} ${t}`).not.toContain(t);
+      expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' }), mode).toMatch(/"deny".*Write no está permitido/);
+      expect(await pre('Bash', { command: 'git status' }), mode).toMatch(/"deny".*Bash no está permitido/);
+      expect(await pre('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' }), mode).toBe('{}');
+      s.close();
+    }
+  });
+
+  it('si el modo sale de bypass a mitad de sesión, la guardia niega edición y shell al instante', async () => {
+    let mode: 'bypass' | 'plan' | 'auto' = 'bypass';
+    const { s, q } = open(() => mode);
+    s.send('hola');
+    const pre = guardAt(optionsOf(q), project);
+    expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' })).toBe('{}');
+    mode = 'auto';
+    expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' })).toMatch(/"deny".*solo está disponible en modo bypass/);
+    mode = 'plan';
+    expect(await pre('Bash', { command: 'git status' })).toMatch(/"deny".*solo está disponible en modo bypass/);
+    mode = 'bypass';
+    expect(await pre('Bash', { command: 'git status' })).toBe('{}');
+    s.close();
+  });
+
+  it('agente suelto en bypass: sigue sin edición ni ejecución', () => {
+    const { s, q } = open('bypass', { projectId: null });
+    s.send('hola');
+    const o = optionsOf(q);
+    for (const t of BYPASS_TOOLS) expect(o.allowedTools).not.toContain(t);
+    expect(o.disallowedTools).toEqual([...BLOCKED_TOOLS]);
     s.close();
   });
 });

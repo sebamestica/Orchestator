@@ -337,10 +337,11 @@ describe('ChatService: modos', () => {
       expect(bypass.additionalDirectories).toEqual(expect.arrayContaining([extra, 'C:\\', 'D:\\']));
       expect(bypass.allowedTools).toContain('mcp__orquestador__delegar');
       expect((bypass.systemPrompt as string[])[2]).toMatch(/## Modo: bypass/);
-      // Sigue sin edición ni ejecución.
+      // Issue 8: en bypass la mente edita y ejecuta (la guardia niega una llamada sin ruta ni comando); en auto, no.
       for (const t of ['Bash', 'PowerShell', 'Edit', 'Write']) {
-        expect(bypass.allowedTools).not.toContain(t);
-        expect(bypass.disallowedTools).toContain(t);
+        expect(bypass.allowedTools).toContain(t);
+        expect(bypass.disallowedTools).not.toContain(t);
+        expect(auto.allowedTools).not.toContain(t);
         expect(await guardOf(bypass)(t, {})).toBe(false);
       }
     } finally {

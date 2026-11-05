@@ -1,11 +1,13 @@
 /**
  * Sesión de chat con el orquestador: una conversación larga con el SDK de agentes (entrada en streaming),
- * herramientas propias por MCP en proceso, solo lectura + subagentes y ninguna herramienta de edición
- * o ejecución. La función `query` se inyecta (la del SDK por defecto) para probar las opciones sin red.
+ * herramientas propias por MCP en proceso, lectura + subagentes y, solo en `bypass`, edición y shell. La función
+ * `query` se inyecta (la del SDK por defecto) para probar las opciones sin red.
  *
- * Modos de la mente (docs/plan/F5-INTERFAZ.md §2): `plan` deja `delegar` fuera de `allowedTools` y la guardia la
- * bloquea; `auto`/`bypass` aprueban solas las tareas nuevas (`autoApprove`). El modo se lee en cada llamada de la
- * guardia y de las herramientas; su texto va en el contexto dinámico del prompt (el prefijo en caché no cambia).
+ * Modos de la mente (docs/plan/F5-INTERFAZ.md §2 y docs/plan/issues/08-bypass-autonomo.md): `plan` deja `delegar`
+ * fuera de `allowedTools` y la guardia la bloquea; `auto`/`bypass` aprueban solas las tareas nuevas (`autoApprove`).
+ * `bypass` con proyecto suma `BYPASS_TOOLS`: la mente escribe en el proyecto y en las carpetas extra del chat, y sus
+ * comandos pasan por la política de shell de los workers con el proyecto como raíz. El modo se lee en cada llamada de
+ * la guardia y de las herramientas; su texto va en el contexto dinámico del prompt (el prefijo en caché no cambia).
  */
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -31,7 +33,7 @@ export const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob'] as const;
  * aceptándose como alias (`LEGACY_TOOL_NAME_ALIASES.Task === 'Agent'`).
  */
 export const SUBAGENT_TOOL = 'Agent';
-/** Edición y ejecución: fuera del contexto del modelo aunque algún ajuste los habilitara. */
+/** Edición y ejecución: fuera del contexto del modelo aunque algún ajuste los habilitara (salvo `BYPASS_TOOLS` en bypass). */
 export const BLOCKED_TOOLS = [
   'Bash',
   'PowerShell',
@@ -45,6 +47,19 @@ export const BLOCKED_TOOLS = [
   'CronCreate',
   'RemoteTrigger',
 ] as const;
+
+/**
+ * Lo que la mente suma en `bypass` (con proyecto): editar y crear archivos y ejecutar comandos. La guardia limita la
+ * escritura al proyecto y a las carpetas extra del chat, y el shell a la política de los workers con el proyecto como
+ * raíz. El resto de `BLOCKED_TOOLS` (Monitor, worktrees, Workflow, Cron, RemoteTrigger) sigue bloqueado.
+ */
+export const BYPASS_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'] as const;
+
+/**
+ * Entorno extra de `bypass`: Claude Code quita las credenciales (ANTHROPIC_API_KEY y otras) del entorno de sus
+ * subprocesos (Bash, PowerShell, hooks y servidores MCP stdio); su propio proceso las conserva.
+ */
+export const BYPASS_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' };
 
 /** Subagente propio: investiga en paralelo con las mismas herramientas de lectura. */
 export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {
@@ -124,11 +139,11 @@ export interface ConductorSessionOptions {
   autoApprove?: (taskIds: readonly string[]) => Awaitable<readonly ProposedTask[]>;
   /** Guarda el destino de `crear_tareas.destino` (ver `ConductorToolsOptions.recordDestination`); con él, el prompt explica `destino`. */
   recordDestination?: ConductorToolsOptions['recordDestination'];
-  /** Carpetas extra que eligió el usuario: se pueden leer y se nombran en el prompt. */
+  /** Carpetas extra que eligió el usuario: se pueden leer, se nombran en el prompt y, en bypass, también se escriben. */
   extraRoots?: readonly string[];
   /** Modo de trabajo de la flota en el proyecto (worktrees o local), para el prompt. */
   workMode?: ConductorWorkMode;
-  /** Archivos o carpetas que nunca se leen (bóveda y base de datos del núcleo). */
+  /** Archivos o carpetas que nunca se leen ni se escriben (bóveda y base de datos del núcleo). */
   denyPaths?: readonly string[];
   /** Servidores MCP extra (plugins); sus herramientas entran en `allowedTools` como `mcp__<nombre>__*`. */
   mcpServers?: Readonly<Record<string, McpServerConfig>>;
@@ -200,7 +215,7 @@ export class ConductorSession {
   readonly model: string;
   /** Modo con el que se armó la sesión (`allowedTools` y prompt). */
   readonly mode: MindMode | undefined;
-  /** `allowedTools` del SDK (propias, lectura, subagentes y plugins). */
+  /** `allowedTools` del SDK (propias, lectura, subagentes, plugins y, en bypass, edición y shell). */
   readonly allowedTools: readonly string[];
   /** Raíces de lectura al crear la sesión (`additionalDirectories`). */
   readonly readRoots: readonly string[];
@@ -223,18 +238,20 @@ export class ConductorSession {
     this.id = o.sessionId ?? randomUUID();
     this.projectId = o.projectId;
     this.model = o.model;
+    const mode = typeof opts.mode === 'function' ? opts.mode : opts.mode === undefined ? undefined : (() => opts.mode as MindMode);
+    this.mode = mode?.();
+    const standalone = o.projectId === null;
+    // Bypass con proyecto: la mente edita y ejecuta como un Claude Code autónomo (el agente suelto no cambia).
+    const acts = this.mode === 'bypass' && !standalone;
     const env = buildEnv(opts.baseEnv ?? process.env, {
       ...o.env,
       ...(o.apiKey ? { ANTHROPIC_API_KEY: o.apiKey } : {}),
       ...(o.baseUrl ? { ANTHROPIC_BASE_URL: o.baseUrl } : {}),
+      ...(acts ? BYPASS_ENV : {}),
     });
     this.#secrets = credentialsOf(env);
     this.#query = opts.query ?? sdkQuery;
     const now = opts.now ?? (() => new Date());
-
-    const mode = typeof opts.mode === 'function' ? opts.mode : opts.mode === undefined ? undefined : (() => opts.mode as MindMode);
-    this.mode = mode?.();
-    const standalone = o.projectId === null;
 
     this.tools = createConductorTools(opts.ports, {
       ...(o.projectId !== null ? { defaultProjectId: o.projectId } : {}),
@@ -253,7 +270,7 @@ export class ConductorSession {
       ...(standalone ? FLEET_TOOL_NAMES.map(mcpToolName) : []),
       ...(this.mode === 'plan' ? [mcpToolName('delegar')] : []),
     ]);
-    const builtins = [...READ_ONLY_TOOLS, SUBAGENT_TOOL];
+    const builtins = [...READ_ONLY_TOOLS, SUBAGENT_TOOL, ...(acts ? BYPASS_TOOLS : [])];
     const allowedTools = [
       ...CONDUCTOR_TOOL_NAMES.map(mcpToolName).filter((n) => !unavailable.has(n)),
       ...builtins,
@@ -265,14 +282,19 @@ export class ConductorSession {
     const readRoots = (): string[] => [...extraRoots, ...(typeof rootsOption === 'function' ? rootsOption() : (rootsOption ?? []))];
     this.readRoots = [...new Set(readRoots())];
     const fleetTools = new Set(FLEET_TOOL_NAMES.map(mcpToolName));
+    const actTools = new Set<string>(BYPASS_TOOLS);
     const guard = createToolGuard({
       allowedTools,
       cwd: o.cwd,
       readRoots,
       denyPaths: [...(opts.denyPaths ?? [])],
+      // Escritura: el proyecto y las carpetas extra del chat. Shell: la política de los workers con el proyecto como raíz.
+      ...(acts ? { writeRoots: [o.cwd, ...extraRoots], shellRoot: o.cwd } : {}),
       deny: (name) => {
         if (standalone && fleetTools.has(name)) return `${name} no está disponible para un agente suelto (sin proyecto ni flota).`;
         if (name === mcpToolName('delegar') && mode?.() === 'plan') return 'delegar no está disponible en modo plan: el usuario aprueba y la tarea pasa sola a la flota.';
+        // La sesión sigue viva si el modo cambia con subagentes trabajando: edición y shell valen solo en bypass.
+        if (actTools.has(name) && mode?.() !== 'bypass') return `${name} solo está disponible en modo bypass: en el modo ${mode?.() ?? 'actual'} delega con crear_tareas y delegar.`;
         return undefined;
       },
     });
@@ -311,7 +333,7 @@ export class ConductorSession {
       strictMcpConfig: true,
       tools: builtins,
       allowedTools,
-      disallowedTools: [...BLOCKED_TOOLS],
+      disallowedTools: BLOCKED_TOOLS.filter((t) => !(acts && actTools.has(t))),
       permissionMode: 'dontAsk',
       // La barrera es el hook (ve también a los subagentes). `canUseTool` no se pasa: con `allowedTools`
       // completos el SDK nunca lo consultaría (aviso CLAUDE_SDK_CAN_USE_TOOL_SHADOWED).

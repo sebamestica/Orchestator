@@ -17,8 +17,11 @@ export const opaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{6,100}$/);
  * - `plan`: la mente lee, investiga y propone tareas; nada se ejecuta sin que el usuario apruebe.
  * - `auto`: la mente aprueba y delega sola sus tareas; integra en la rama de integración tras el gate.
  *   Pasar a `main` sigue pidiendo aprobación.
- * - `bypass`: como `auto`, más lectura fuera de la carpeta del proyecto y paso a `main` sin preguntar
- *   cuando el gate pasa. Push, despliegue, pagos y borrar ramas siguen bloqueados en todos los modos.
+ * - `bypass`: la mente trabaja sola, como un Claude Code autónomo con la flota a mano. Edita, crea archivos y ejecuta
+ *   comandos ella misma en la carpeta del proyecto y en las carpetas extra del chat; los comandos pasan por la
+ *   política de shell de los workers. No pregunta ni muestra planes: delega cuando conviene, elige lo razonable y
+ *   persiste. Además lee fuera de la carpeta del proyecto, y la flota pasa a `main` sin preguntar cuando el gate pasa.
+ * - En todos los modos siguen bloqueados el push, el despliegue, los pagos, borrar ramas y reescribir la historia.
  */
 export const mindModeSchema = z.enum(['plan', 'auto', 'bypass']);
 export type MindMode = z.infer<typeof mindModeSchema>;

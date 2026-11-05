@@ -5,6 +5,7 @@ import {
   CONDUCTOR_PROMPT_PREFIX,
   CONDUCTOR_TOOL_NAMES,
   ConductorSession,
+  MODE_TEXT,
   buildConductorSystemPrompt,
   renderSessionContext,
 } from '../../../src/core/conductor/index.ts';
@@ -80,6 +81,40 @@ describe('prompt de sistema del orquestador', () => {
     expect(solo).toMatch(/## Agente suelto/);
     expect(solo).toMatch(/Carpetas extra de lectura: D:\\fotos/);
     expect(solo).not.toMatch(/## Modo:/);
+  });
+
+  it('el prefijo es idéntico byte a byte en los tres modos y no contradice al bypass', () => {
+    const heads = (['plan', 'auto', 'bypass'] as const).map((mode) => buildConductorSystemPrompt({ projectId: 'demo', projectDir: 'C:\\dev\\demo', mode, workMode: 'local' })[0] ?? '');
+    expect(new Set(heads.map(sha)).size).toBe(1);
+    expect(heads[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    const p = CONDUCTOR_PROMPT_PREFIX;
+    expect(p).toMatch(/Fuera del modo bypass no editas código ni ejecutas comandos: delegas/);
+    expect(p).toMatch(/Solo en bypass editas archivos y ejecutas comandos/);
+    expect(p).toMatch(/En ningún modo haces push, pasas a main, despliegas, pagas, borras ramas ni reescribes la historia/);
+    // Ninguna frase del prefijo obliga a la mente a no actuar, preguntar o terminar pidiendo cosas en bypass.
+    expect(p).not.toMatch(/Tú no editas código/);
+    expect(p).not.toMatch(/En ningún modo editas/);
+    expect(p).not.toMatch(/lo que sigue y lo que necesitas del usuario/);
+    expect(p).toMatch(/en bypass no preguntas/);
+    expect(p).toMatch(/en bypass delegas sin presentarlas/);
+    expect(p).toMatch(/Salvo en bypass, muéstraselas al usuario/);
+  });
+
+  it('MODE_TEXT.bypass: autonomía, hacerlo ella misma, no preguntar, plan interno, persistir y límites', () => {
+    const text = MODE_TEXT.bypass.join('\n');
+    expect(text).toMatch(/Claude Code autónomo con la flota a mano/);
+    expect(text).toMatch(/Hazlo tú mismo cuando sea más rápido que delegar/);
+    expect(text).toMatch(/edita y crea archivos \(Read, Edit, Write\) y ejecuta comandos \(Bash, PowerShell\)/);
+    expect(text).toMatch(/carpeta del proyecto y en las carpetas extra del chat/);
+    expect(text).toMatch(/no preguntes ni pidas confirmación/i);
+    expect(text).toMatch(/Elige la opción razonable, aplícala y al final di .* qué decidiste/);
+    expect(text).toMatch(/bloqueo real: credenciales que no tienes, un pago o algo irreversible fuera del proyecto/);
+    expect(text).toMatch(/es interno: no se lo muestres al usuario/);
+    expect(text).toMatch(/No termines tus respuestas con listas de «Necesito de ti» ni «Pendiente de ti»/);
+    expect(text).toMatch(/Persiste: si algo falla, prueba otra vía \(otra herramienta, otro agente de la flota o hacerlo tú\)/);
+    expect(text).toMatch(/Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos/);
+    // Plan y auto no cambian: ni edición ni shell.
+    for (const mode of ['plan', 'auto'] as const) expect(MODE_TEXT[mode].join('\n'), mode).not.toMatch(/Edit|Bash|no preguntes/i);
   });
 
   it('el modo de trabajo del proyecto va en el contexto: en local, la mente sabe que no hacen falta commits', () => {

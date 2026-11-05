@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createToolGuard } from '../../../src/core/conductor/index.ts';
+import type { ToolGuard } from '../../../src/core/conductor/index.ts';
 import type { HookInput } from '@anthropic-ai/claude-agent-sdk';
 
 const allowedTools = ['mcp__orquestador__estado', 'Read', 'Grep', 'Glob', 'Agent'];
@@ -121,5 +124,119 @@ describe('guardia dinámica (modos, raíces, plugins y rutas vetadas)', () => {
     expect(guard.check('mcp__chrome__', {}).allow).toBe(false);
     expect(guard.check('mcp__chromex__navigate_page', {}).allow).toBe(false);
     expect(guard.check('Bash', {}).allow).toBe(false);
+  });
+});
+
+describe('guardia de bypass: escritura y shell (disco real)', () => {
+  const tools = ['Read', 'Grep', 'Glob', 'Agent', 'Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'];
+  let base = '';
+  let root = '';
+  let extra = '';
+  let outside = '';
+  let data = '';
+  let vault = '';
+  let guard: ToolGuard;
+  const pre = (tool_name: string, tool_input: unknown, cwd = root): HookInput => ({
+    hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 'tu', session_id: 's', transcript_path: 't', cwd,
+  });
+  const signal = new AbortController().signal;
+  const allowed = async (tool: string, input: unknown, cwd?: string) => (await guard.decide(tool, input, cwd)).allow;
+  const reason = async (tool: string, input: unknown, cwd?: string) => {
+    const d = await guard.decide(tool, input, cwd);
+    return d.allow ? '' : d.reason;
+  };
+
+  beforeAll(() => {
+    base = mkdtempSync(path.join(tmpdir(), 'orq-guardia-'));
+    root = path.join(base, 'proyecto');
+    extra = path.join(base, 'extra');
+    outside = path.join(base, 'fuera');
+    data = path.join(base, 'datos-nucleo');
+    for (const dir of [root, extra, outside, data, path.join(root, 'src'), path.join(root, '.git')]) mkdirSync(dir, { recursive: true });
+    vault = path.join(data, 'vault.json');
+    symlinkSync(outside, path.join(root, 'enlace'), 'junction');
+    guard = createToolGuard({
+      allowedTools: tools,
+      cwd: root,
+      readRoots: [extra, 'C:\\'],
+      writeRoots: [root, extra],
+      shellRoot: root,
+      denyPaths: [vault, path.join(root, 'nucleo.db')],
+    });
+  });
+  afterAll(() => {
+    if (base) rmSync(base, { recursive: true, force: true });
+  });
+
+  it('permite escribir dentro del proyecto y de las carpetas extra', async () => {
+    expect(await allowed('Write', { file_path: path.join(root, 'GUIONES.md'), content: '# Guiones' })).toBe(true);
+    expect(await allowed('Write', { file_path: 'src/nuevo/modulo.ts', content: 'x' })).toBe(true);
+    expect(await allowed('Edit', { file_path: path.join(root, 'src', 'a.ts'), old_string: 'a', new_string: 'b' })).toBe(true);
+    expect(await allowed('NotebookEdit', { notebook_path: path.join(root, 'analisis.ipynb'), new_source: 'x' })).toBe(true);
+    expect(await allowed('Write', { file_path: path.join(extra, 'notas.md'), content: 'x' })).toBe(true);
+  });
+
+  it('niega escribir fuera, en denyPaths, en .git, en credenciales y a través de una junction', async () => {
+    expect(await reason('Write', { file_path: path.join(outside, 'x.md'), content: 'x' })).toMatch(/solo puedes escribir dentro del proyecto/);
+    expect(await reason('Write', { file_path: '../fuera/x.md', content: 'x' })).toMatch(/solo puedes escribir dentro del proyecto/);
+    // La bóveda queda fuera de las raíces de escritura aunque se pueda leer el disco entero.
+    expect(await allowed('Write', { file_path: vault, content: '{}' })).toBe(false);
+    // denyPaths gana aunque la ruta esté dentro del proyecto.
+    expect(await reason('Write', { file_path: path.join(root, 'nucleo.db'), content: 'x' })).toMatch(/datos del núcleo/);
+    expect(await reason('Edit', { file_path: path.join(root, '.git', 'config'), old_string: 'a', new_string: 'b' })).toMatch(/protegida/);
+    expect(await reason('Write', { file_path: path.join(root, '.env'), content: 'X=1' })).toMatch(/credenciales/);
+    expect(await reason('Write', { file_path: path.join(root, 'enlace', 'x.md'), content: 'x' })).toMatch(/ruta real/);
+    expect(await allowed('Write', { content: 'sin ruta' })).toBe(false);
+    expect(await allowed('Write', { file_path: 42 })).toBe(false);
+  });
+
+  it('el shell pasa por la política de los workers con el proyecto como raíz', async () => {
+    for (const command of ['git status', 'git diff --stat', 'npm run -s check', 'npx vitest run', 'echo hola > notas.txt', 'rm -rf build', 'mkdir -p docs/guiones']) {
+      expect(await allowed('Bash', { command }), command).toBe(true);
+    }
+    expect(await allowed('PowerShell', { command: 'Get-ChildItem src' })).toBe(true);
+    expect(await reason('Bash', { command: 'git push' })).toMatch(/Bash bloqueado por la guardia: git push necesita la aprobación del usuario/);
+    expect(await reason('Bash', { command: 'git add -A && git push origin main --force' })).toMatch(/git push/);
+    expect(await reason('PowerShell', { command: 'git push origin flota/x' })).toMatch(/git push/);
+    expect(await reason('Bash', { command: `rm -rf ${outside.replace(/\\/g, '/')}` })).toMatch(/fuera del worktree/);
+    expect(await reason('Bash', { command: 'rm -rf ../fuera' })).toMatch(/fuera del worktree/);
+    expect(await reason('PowerShell', { command: `Remove-Item -Recurse -Force ${outside}` })).toMatch(/fuera del worktree/);
+    for (const command of ['git reset --hard HEAD~1', 'git rebase main', 'git branch -D vieja', 'npm publish', 'npx vercel deploy --prod']) {
+      expect(await allowed('Bash', { command }), command).toBe(false);
+    }
+    expect(await allowed('Bash', { command: '' })).toBe(false);
+  });
+
+  it('el shell no nombra la bóveda ni la carpeta de datos del núcleo, ni trabaja fuera del proyecto', async () => {
+    expect(await reason('PowerShell', { command: `Get-Content ${vault}` })).toMatch(/datos del núcleo/);
+    expect(await reason('Bash', { command: `cat ${vault.replace(/\\/g, '/')}` })).toMatch(/datos del núcleo/);
+    expect(await reason('Bash', { command: `cd ${data} && cat vault.json` })).toMatch(/datos del núcleo/);
+    expect(await reason('Bash', { command: 'git status' }, outside)).toMatch(/fuera del proyecto/);
+    expect(await allowed('Bash', { command: 'git status' }, path.join(root, 'src'))).toBe(true);
+  });
+
+  it('check síncrono nunca aprueba edición ni shell; el hook y canUseTool usan la decisión completa', async () => {
+    expect(guard.check('Write', { file_path: path.join(root, 'a.md'), content: 'x' }).allow).toBe(false);
+    expect(guard.check('Bash', { command: 'git status' }).allow).toBe(false);
+    expect(guard.check('Read', { file_path: path.join(root, 'a.md') })).toEqual({ allow: true });
+    expect(await guard.hook(pre('Write', { file_path: path.join(root, 'a.md'), content: 'x' }), 'tu', { signal })).toEqual({});
+    expect(await guard.hook(pre('Bash', { command: 'git status' }), 'tu', { signal })).toEqual({});
+    expect(JSON.stringify(await guard.hook(pre('Bash', { command: 'git push' }), 'tu', { signal }))).toMatch(/"permissionDecision":"deny"/);
+    expect(JSON.stringify(await guard.hook(pre('Bash', { command: 'ls' }, outside), 'tu', { signal }))).toMatch(/fuera del proyecto/);
+    expect(await guard.canUseTool('Write', { file_path: path.join(outside, 'x'), content: 'x' }, { signal, toolUseID: 'a', requestId: 'r' })).toMatchObject({ behavior: 'deny' });
+    expect(await guard.canUseTool('Bash', { command: 'git status' }, { signal, toolUseID: 'b', requestId: 'r' })).toEqual({ behavior: 'allow', updatedInput: { command: 'git status' } });
+  });
+
+  it('con escritura, los subagentes no se van a un worktree propio; sin escritura no cambia nada', async () => {
+    expect(await reason('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' })).toMatch(/sin worktree propio/);
+    expect(await allowed('Agent', { description: 'x', prompt: 'y' })).toBe(true);
+    const readOnly = createToolGuard({ allowedTools: ['Read', 'Agent'], cwd: root });
+    expect(readOnly.check('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' }).allow).toBe(true);
+  });
+
+  it('sin writeRoots ni shellRoot, Edit y Bash se niegan aunque estén permitidos', async () => {
+    const bare = createToolGuard({ allowedTools: tools, cwd: root });
+    expect((await bare.decide('Write', { file_path: path.join(root, 'a.md'), content: 'x' })).allow).toBe(false);
+    expect((await bare.decide('Bash', { command: 'git status' })).allow).toBe(false);
   });
 });
