@@ -3764,7 +3764,7 @@
         ],
         "summary": "WebSocket: eventos en vivo, cambios de cupo, tareas y agentes",
         "operationId": "getWs",
-        "description": "Handshake con `Authorization: Bearer <token>` o, desde el navegador, con el subprotocolo `Sec-WebSocket-Protocol: orq, orq.bearer.<token>` (el servidor responde `orq`). Mensajes del servidor: `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error` y, de F5, `settings`, `chat`, `chat_message`, `chat_deleted`, `proposals`, `plugin`. Del cliente: `{\"type\":\"replay\",\"sessionId\":\"…\",\"since\":<seq>}` y `{\"type\":\"ping\"}`.",
+        "description": "Handshake con `Authorization: Bearer <token>` o, desde el navegador, con el subprotocolo `Sec-WebSocket-Protocol: orq, orq.bearer.<token>` (el servidor responde `orq`). Mensajes del servidor: `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error` y, de F5, `settings`, `chat`, `chat_message`, `chat_deleted`, `chat_target`, `proposals`, `plugin`. Del cliente: `{\"type\":\"replay\",\"sessionId\":\"…\",\"since\":<seq>}` y `{\"type\":\"ping\"}`.",
         "responses": {
           "101": {
             "description": "Cambio a WebSocket"
@@ -7048,6 +7048,108 @@
             "required": [
               "type",
               "plugin"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "chat_target"
+              },
+              "chatId": {
+                "type": "string"
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "local"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "git": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "local",
+                          "remote"
+                        ]
+                      },
+                      "worktrees": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "git",
+                      "worktrees"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "remote"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "remote": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "url"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "branch": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "configured": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "path",
+                      "remote",
+                      "branch",
+                      "configured"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "chatId",
+              "target"
             ],
             "additionalProperties": false
           }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AgentEvent, Chat, ChatMessage, EventSink, Plugin, Proposal, QuotaSnapshot, Settings } from '../../shared/index.ts';
+import type { AgentEvent, ChangesTarget, Chat, ChatMessage, EventSink, Plugin, Proposal, QuotaSnapshot, Settings } from '../../shared/index.ts';
 import type { AgentRecord, QuotaRecord, SqliteStore, TaskRecord } from '../store/index.ts';
 
 /** Mensajes que el servidor envía por `/ws`. */
@@ -22,7 +22,9 @@ export type F5HubMessage =
   | { type: 'chat_message'; message: ChatMessage }
   | { type: 'chat_deleted'; chatId: string }
   | { type: 'proposals'; chatId: string; proposals: Proposal[] }
-  | { type: 'plugin'; plugin: Plugin };
+  | { type: 'plugin'; plugin: Plugin }
+  /** Cambió el destino de los cambios del chat (`crear_tareas.destino`): `GET /chats/:id/target` daría lo mismo. */
+  | { type: 'chat_target'; chatId: string; target: ChangesTarget };
 
 /** Mensajes que acepta el servidor por `/ws` (validados con Zod). */
 export const clientMessageSchema = z.discriminatedUnion('type', [

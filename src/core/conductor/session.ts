@@ -18,7 +18,7 @@ import type { Awaitable, ConductorPorts, ProposedTask, SdkMessageTranslator, Tra
 import { buildConductorSystemPrompt, type ConductorWorkMode } from './prompt.ts';
 import { redactDeep } from './redact.ts';
 import { CONDUCTOR_SERVER_NAME, CONDUCTOR_TOOL_NAMES, FLEET_TOOL_NAMES, createConductorTools, mcpToolName } from './tools.ts';
-import type { ConductorTools } from './tools.ts';
+import type { ConductorTools, ConductorToolsOptions } from './tools.ts';
 
 export const DEFAULT_CONDUCTOR_MODEL = 'claude-opus-5-5';
 export const DEFAULT_CONDUCTOR_EFFORT: EffortLevel = 'high';
@@ -59,6 +59,18 @@ export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {
     permissionMode: 'dontAsk',
   },
 };
+
+/**
+ * Destino de los cambios (`crear_tareas.destino`). Va como bloque propio después del contexto de la sesión (tras el
+ * marcador dinámico: el prefijo en caché no cambia) y solo si la sesión guarda destinos (`recordDestination`).
+ */
+export const DESTINATION_PROMPT_TEXT = [
+  '## Destino de los cambios',
+  '- Por defecto los cambios quedan en local, en la carpeta del proyecto, y no se suben a ningún repositorio. La interfaz lo muestra encima del input.',
+  '- Solo si el usuario indicó explícitamente un repositorio donde subir los cambios, pásalo en crear_tareas como destino: { remoto, rama? }, con el nombre del remoto (p. ej. origin) o su URL. Si no lo indicó, omite destino: no lo deduzcas de git remote ni de la carpeta.',
+  '- Un plan nuevo sin destino conserva el destino anterior del chat. Para volver a local, destino: null, y solo si el usuario lo pide.',
+  '- Anotar el destino no sube nada: el push solo se hace con la aprobación explícita del usuario. Si crear_tareas avisa que el remoto no está configurado en la carpeta, díselo.',
+].join('\n');
 
 /** Tope de una imagen en base64 que acepta la API de Mensajes (5 MB del texto codificado ≈ 3,75 MB de archivo). */
 export const MAX_IMAGE_BASE64_BYTES = 5 * 1024 * 1024;
@@ -110,6 +122,8 @@ export interface ConductorSessionOptions {
   mode?: MindMode | (() => MindMode);
   /** Aprobación automática de `auto`/`bypass` (ver `ConductorToolsOptions.autoApprove`). */
   autoApprove?: (taskIds: readonly string[]) => Awaitable<readonly ProposedTask[]>;
+  /** Guarda el destino de `crear_tareas.destino` (ver `ConductorToolsOptions.recordDestination`); con él, el prompt explica `destino`. */
+  recordDestination?: ConductorToolsOptions['recordDestination'];
   /** Carpetas extra que eligió el usuario: se pueden leer y se nombran en el prompt. */
   extraRoots?: readonly string[];
   /** Modo de trabajo de la flota en el proyecto (worktrees o local), para el prompt. */
@@ -230,6 +244,7 @@ export class ConductorSession {
       signal: this.#abort.signal,
       ...(mode ? { mode } : {}),
       ...(opts.autoApprove ? { autoApprove: opts.autoApprove } : {}),
+      ...(opts.recordDestination && !standalone ? { recordDestination: opts.recordDestination } : {}),
       standalone,
     });
 
@@ -277,18 +292,21 @@ export class ConductorSession {
       cwd: o.cwd,
       env,
       abortController: this.#abort,
-      systemPrompt: buildConductorSystemPrompt({
-        projectId: o.projectId,
-        projectDir: o.cwd,
-        ...(this.mode ? { mode: this.mode } : {}),
-        ...(extraRoots.length ? { extraRoots } : {}),
-        ...(opts.workMode ? { workMode: opts.workMode } : {}),
-        date: now(),
-        quotas: opts.ports.quotas.all(),
-        quotaFloor: o.quotaFloor,
-        notes: opts.notes,
-        secrets: this.#secrets,
-      }),
+      systemPrompt: [
+        ...buildConductorSystemPrompt({
+          projectId: o.projectId,
+          projectDir: o.cwd,
+          ...(this.mode ? { mode: this.mode } : {}),
+          ...(extraRoots.length ? { extraRoots } : {}),
+          ...(opts.workMode ? { workMode: opts.workMode } : {}),
+          date: now(),
+          quotas: opts.ports.quotas.all(),
+          quotaFloor: o.quotaFloor,
+          notes: opts.notes,
+          secrets: this.#secrets,
+        }),
+        ...(opts.recordDestination && !standalone ? [DESTINATION_PROMPT_TEXT] : []),
+      ],
       mcpServers: { ...Object.fromEntries(plugins), [this.tools.serverName]: this.tools.server },
       strictMcpConfig: true,
       tools: builtins,

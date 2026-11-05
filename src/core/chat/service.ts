@@ -8,6 +8,8 @@
  *   en cada llamada de la guardia y de las herramientas.
  * - Los eventos de la sesión van al hub (`hub.append`, SQLite + `/ws`) con `sessionId = chat.sessionId`, en
  *   diferencias de uso (`usageDeltas`) y con `seq` continuo entre sesiones reanudadas.
+ * - Destino de los cambios (`target`): local salvo que la mente haya anotado con `crear_tareas.destino` el repositorio
+ *   que indicó el usuario; cada cambio se difunde como `chat_target`.
  */
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
@@ -20,6 +22,7 @@ import type {
   AgentConfig,
   AgentEvent,
   Attachment,
+  ChangesTarget,
   Chat,
   ChatMessage,
   CreateChatBody,
@@ -44,6 +47,7 @@ import type {
   ConductorQueryFn,
   DelegateResult,
   DeliveryReport,
+  DestinationRequest,
   FleetPort,
   ImageInput,
   PlannerPort,
@@ -55,6 +59,7 @@ import type { SqliteStore } from '../store/index.ts';
 import { AttachmentError, sniffImage, type AttachmentStore } from './attachments.ts';
 import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
 import { ChatProposals, toProposal } from './proposals.ts';
+import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
 
 /** Sesión ociosa: se cierra y se reanuda con el próximo mensaje. */
 export const CHAT_IDLE_MS = 15 * 60 * 1000;
@@ -199,6 +204,7 @@ export class ChatService {
   readonly #deps: ChatServiceDeps;
   readonly #db: ChatDb;
   readonly #repo: ChatRepo;
+  readonly #targets: ChatTargets;
   readonly #live = new Map<string, Live>();
   readonly #now: () => Date;
   readonly #newId: () => string;
@@ -213,6 +219,7 @@ export class ChatService {
     this.#deps = deps;
     this.#db = new ChatDb(deps.db);
     this.#repo = new ChatRepo(this.#db);
+    this.#targets = new ChatTargets(this.#db);
     this.#now = deps.now ?? (() => new Date());
     this.#newId = deps.newId ?? randomUUID;
     this.#idleMs = deps.idleMs ?? CHAT_IDLE_MS;
@@ -316,6 +323,7 @@ export class ChatService {
     const used = this.#repo.attachmentIdsUsedOutside(chatId);
     const own = this.#repo.attachmentsOf(chatId).filter((a) => a.source === 'upload' && !used.has(a.id));
     this.#repo.delete(chatId);
+    this.#targets.clear(chatId);
     this.#live.delete(chatId);
     for (const a of own) {
       try {
@@ -330,6 +338,17 @@ export class ChatService {
   messages(chatId: string, limit?: number): ChatMessage[] {
     this.#require(chatId);
     return this.#repo.messages(chatId, limit);
+  }
+
+  /**
+   * Dónde quedan los cambios del chat: en local (la carpeta del proyecto o, sin proyecto, la del chat) salvo que la
+   * mente haya anotado el repositorio que indicó el usuario. Lee el git de la carpeta (solo lectura) en cada llamada.
+   */
+  async target(chatId: string): Promise<ChangesTarget> {
+    const { chat } = this.#require(chatId);
+    const project = chat.projectId === null ? undefined : this.#deps.store.getProject(chat.projectId);
+    const place = { path: project?.repoPath ?? chat.cwd, worktrees: project?.workspace !== undefined };
+    return resolveChangesTarget(place, this.#targets.get(chatId));
   }
 
   // ------------------------------------------------------------- mensajes
@@ -605,6 +624,7 @@ export class ChatService {
       ...(chat.projectId ? { workMode: this.#deps.store.getProject(chat.projectId)?.workspace ? 'worktrees' as const : 'local' as const } : {}),
       mode: () => this.#modeOf(chatId),
       autoApprove: (ids) => live.proposals.approve(ids),
+      recordDestination: (input) => this.#recordDestination(chatId, input),
       readRoots: () => {
         const current = this.#repo.get(chatId)?.chat;
         return current ? [...current.extraRoots, ...this.#rootsFor(current, live)] : roots;
@@ -629,6 +649,19 @@ export class ChatService {
     live.delta = usageDeltas();
     void this.#read(chatId, live, session);
     return session;
+  }
+
+  /** `crear_tareas.destino`: lo guarda (o vuelve a local con `null`), lo difunde como `chat_target` y lo devuelve resuelto. */
+  async #recordDestination(chatId: string, input: { projectId: string; destination: DestinationRequest | null }): Promise<ChangesTarget> {
+    const { chat } = this.#require(chatId);
+    if (chat.projectId !== input.projectId) {
+      throw new ChatError('invalid', `El destino se guarda por chat y solo para su proyecto (${chat.projectId ?? 'ninguno'}), no para ${input.projectId}`);
+    }
+    if (input.destination === null) this.#targets.clear(chatId);
+    else this.#targets.set(chatId, normalizeDestination(input.destination), this.#iso());
+    const target = await this.target(chatId);
+    this.#deps.hub.publish({ type: 'chat_target', chatId, target });
+    return target;
   }
 
   #dropSession(chatId: string, live: Live): void {

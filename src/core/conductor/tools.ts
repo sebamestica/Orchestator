@@ -8,7 +8,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { idSchema, minRemainingFraction, quotaSnapshotSchema, redactSecrets, taskBriefSchema } from '../../shared/index.ts';
-import type { MindMode, QuotaSnapshot, TaskBrief } from '../../shared/index.ts';
+import type { ChangesTarget, MindMode, QuotaSnapshot, TaskBrief } from '../../shared/index.ts';
 import type { Awaitable, ConductorPorts, FleetTaskStatus, ProposedTask } from './ports.ts';
 import { label } from './proposals.ts';
 import { redactDeep } from './redact.ts';
@@ -28,6 +28,10 @@ export const MEMORY_BUDGET_CHARS = 4_000;
 /** Tope de cualquier salida de herramienta. */
 export const MAX_OUTPUT_CHARS = 8_000;
 export const MAX_SKILLS = 5;
+/** Tope de `crear_tareas.destino.remoto` (nombre o URL). */
+export const MAX_DESTINATION_CHARS = 2_000;
+/** Rama de `destino`: sin espacios, sin «..» ni «//», sin empezar por «-». */
+const BRANCH_NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._/-]{1,200}$/;
 const MAX_LISTED_TASKS = 40;
 const MAX_ISSUES = 10;
 
@@ -63,6 +67,19 @@ export interface ConductorToolsOptions {
   autoApprove?: (taskIds: readonly string[]) => Awaitable<readonly ProposedTask[]>;
   /** Agente suelto: sin proyecto ni flota (crear_tareas, delegar, estado y escribir_memoria fallan). */
   standalone?: boolean;
+  /**
+   * Guarda el destino de los cambios que el usuario indicó en el plan (`crear_tareas.destino`); `null`: el usuario pidió
+   * volver a local. Lo pone quien arma la sesión (el chat) y devuelve el destino resuelto. Se llama solo después de que
+   * las tareas quedaron propuestas. Sin él, `destino` no se guarda (la respuesta lo avisa).
+   */
+  recordDestination?: (input: { projectId: string; destination: DestinationRequest | null }) => Awaitable<ChangesTarget>;
+}
+
+/** `crear_tareas.destino`: repositorio donde subir los cambios, tal como lo indicó el usuario. */
+export interface DestinationRequest {
+  /** Nombre de un remoto de la carpeta (`origin`) o URL del repositorio. */
+  remoto: string;
+  rama?: string;
 }
 
 export interface ConductorTools {
@@ -114,6 +131,17 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
   const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
   const writes = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
+  /** Guarda el destino de `crear_tareas` y lo resume para la mente; un fallo no deshace las tareas propuestas. */
+  async function noteDestination(projectId: string, destino: DestinationRequest | null): Promise<Record<string, unknown>> {
+    if (!opts.recordDestination) return { guardado: false, aviso: 'Esta sesión no guarda el destino: los cambios quedan en local.' };
+    const destination = destino === null ? null : { remoto: redact(destino.remoto), ...(destino.rama ? { rama: redact(destino.rama) } : {}) };
+    try {
+      return summarizeTarget(await opts.recordDestination({ projectId, destination }));
+    } catch (err) {
+      return { guardado: false, aviso: `No se pudo guardar el destino: ${oneLine(err instanceof Error ? err.message : String(err)).slice(0, 300)}` };
+    }
+  }
+
   async function knownTaskIds(): Promise<string[]> {
     const ids = new Set<string>();
     for (const e of await ports.proposals.list()) ids.add(e.task.id);
@@ -125,7 +153,8 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     define(
       'crear_tareas',
       'Convierte un plan de implementación en tareas con rutas propias sin solapes, dependencias y criterios de aceptación. ' +
-        'Las tareas quedan PROPUESTAS hasta que el usuario las apruebe (en los modos auto y bypass se aprueban solas). Devuelve la lista resumida.',
+        'Las tareas quedan PROPUESTAS hasta que el usuario las apruebe (en los modos auto y bypass se aprueban solas). Devuelve la lista resumida. ' +
+        'Los cambios quedan en local salvo que el usuario haya indicado un repositorio donde subirlos: entonces va en destino (solo se anota; no se sube nada).',
       {
         plan: z
           .string()
@@ -134,9 +163,25 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
           .max(MAX_PLAN_CHARS)
           .describe('Plan de implementación completo: objetivo, pasos, rutas propias por tarea, riesgos y verificación. Va íntegro a los agentes.'),
         proyecto: idSchema.optional().describe('Id del proyecto; por omisión, el de la sesión.'),
+        destino: z
+          .strictObject({
+            remoto: z
+              .string()
+              .trim()
+              .min(1)
+              .max(MAX_DESTINATION_CHARS)
+              .describe('Nombre del remoto de la carpeta (p. ej. origin) o URL del repositorio, tal como lo indicó el usuario.'),
+            rama: z.string().trim().regex(BRANCH_NAME).optional().describe('Rama de destino, solo si el usuario la indicó.'),
+          })
+          .nullable()
+          .optional()
+          .describe(
+            'Repositorio donde subir los cambios: solo si el usuario indicó explícitamente un repositorio donde subir los cambios; si no, omítelo. ' +
+              'Un plan sin destino conserva el anterior. null: el usuario pidió explícitamente volver a local.',
+          ),
       },
       writes,
-      async ({ plan, proyecto }) => {
+      async ({ plan, proyecto, destino }) => {
         if (standalone) return noFleet('crear_tareas');
         const projectId = proyecto ?? defaultProjectId;
         if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
@@ -153,12 +198,15 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
         const current = mode();
         if ((current === 'auto' || current === 'bypass') && opts.autoApprove) proposed = await opts.autoApprove(proposed.map((e) => e.task.id));
         const approved = proposed.filter((e) => e.approval === 'approved').length;
+        // El destino se anota solo con las tareas ya propuestas: un plan que falla no lo cambia.
+        const target = destino === undefined ? undefined : await noteDestination(projectId, destino);
         return reply({
           estado: approved === proposed.length ? 'aprobadas' : 'propuestas',
           proyecto: projectId,
           pendientesDeAprobacion: proposed.filter((e) => e.approval === 'proposed').length,
           ...(approved ? { aprobadas: approved, modo: current } : {}),
           tareas: proposed.map((e) => summarizeTask(e.task)),
+          ...(target ? { destino: target } : {}),
           siguientePaso: nextStep(current, approved === proposed.length),
         });
       },
@@ -350,6 +398,23 @@ function nextStep(mode: MindMode | undefined, allApproved: boolean): string {
   if (allApproved) return `Quedaron aprobadas (modo ${mode ?? 'auto'}): delégalas con delegar, primero las dependencias, e informa al usuario.`;
   if (mode === 'plan') return 'Muestra estas tareas al usuario y pide su aprobación: al aprobarlas pasan solas a la flota. No intentes aprobarlas ni delegarlas tú.';
   return 'Muestra estas tareas al usuario y espera su aprobación. No las delegues antes ni intentes aprobarlas tú.';
+}
+
+/** Destino resuelto, en breve para la mente (la URL ya viene saneada). */
+function summarizeTarget(target: ChangesTarget): Record<string, unknown> {
+  if (target.kind === 'local') {
+    return { guardado: true, tipo: 'local', carpeta: target.path, nota: 'Los cambios quedan en la carpeta; no se suben a ningún repositorio.' };
+  }
+  return {
+    guardado: true,
+    tipo: 'remoto',
+    remoto: target.remote.url || target.remote.name,
+    nombre: target.remote.name,
+    rama: target.branch,
+    configurado: target.configured,
+    nota: 'Queda anotado: no se sube nada por ahora y subir siempre necesita la aprobación explícita del usuario.',
+    ...(target.configured ? {} : { aviso: 'El remoto no está configurado en la carpeta (git remote): díselo al usuario.' }),
+  };
 }
 
 function summarizeTask(task: TaskBrief) {

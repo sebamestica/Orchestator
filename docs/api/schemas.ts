@@ -12,6 +12,7 @@ import { apiSchemas as s, clientMessageSchema, type HubMessage } from '../../src
 import {
   agentConfigSchema,
   agentEventSchema,
+  changesTargetSchema,
   chatMessageSchema,
   chatSchema,
   pluginSchema,
@@ -56,6 +57,7 @@ export const wsServerMessageSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('chat_deleted'), chatId: z.string() }),
   z.strictObject({ type: z.literal('proposals'), chatId: z.string(), proposals: z.array(proposalSchema) }),
   z.strictObject({ type: z.literal('plugin'), plugin: pluginSchema }),
+  z.strictObject({ type: z.literal('chat_target'), chatId: z.string(), target: changesTargetSchema }),
 ]);
 /** Mensajes del cliente por `/ws`: el esquema real del servidor. */
 export const wsClientMessageSchema = clientMessageSchema;

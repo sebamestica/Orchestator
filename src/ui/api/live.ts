@@ -3,7 +3,7 @@
  * el token va como subprotocolo `orq.bearer.<token>` junto a `orq` (el núcleo responde `orq`).
  * Reconecta sola con espera creciente. Un solo socket para toda la interfaz.
  */
-import type { AgentEvent, Chat, ChatMessage, Plugin, Proposal, Settings } from '../../shared/index.ts';
+import type { AgentEvent, Chat, ChatMessage, ChatTargetMessage, Plugin, Proposal, Settings } from '../../shared/index.ts';
 import type { CoreEndpoint } from './bridge.ts';
 import type { AgentRecord, QuotaRecord, TaskRecord } from './types.ts';
 
@@ -22,7 +22,8 @@ export type LiveMessage =
   | { type: 'chat_message'; message: ChatMessage }
   | { type: 'chat_deleted'; chatId: string }
   | { type: 'proposals'; chatId: string; proposals: Proposal[] }
-  | { type: 'plugin'; plugin: Plugin };
+  | { type: 'plugin'; plugin: Plugin }
+  | ChatTargetMessage;
 
 export type LiveStatus = 'connecting' | 'open' | 'closed';
 type Listener = (message: LiveMessage) => void;

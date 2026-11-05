@@ -193,6 +193,45 @@ export const proposalSchema = z.strictObject({
 });
 export type Proposal = z.infer<typeof proposalSchema>;
 
+// ── Destino de los cambios del chat (GET /chats/:id/target, issue 2) ─────────────────────────
+
+/**
+ * Dónde quedan los cambios de un chat. `local` salvo que el usuario haya indicado en el plan un repositorio donde
+ * subirlos (`crear_tareas.destino`): entonces `remote`. Berland no sube nada; `remote` solo anota el destino.
+ * `url` siempre va saneada: sin usuario, contraseña, token, consulta ni fragmento; SSH como `host/ruta`.
+ */
+export const changesTargetSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('local'),
+    /** Carpeta donde quedan los cambios: la del proyecto o, sin proyecto, la del chat. */
+    path: z.string().min(1),
+    /** `none`: la carpeta no es git; `local`: git sin remoto; `remote`: git con remoto (igual no se sube). */
+    git: z.enum(['none', 'local', 'remote']),
+    /** El proyecto trabaja con worktrees y ramas `orq/…` (tiene `workspace`); sin él, directo en la carpeta. */
+    worktrees: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal('remote'),
+    /** Carpeta del proyecto. */
+    path: z.string().min(1),
+    /** `name`: el remoto de la carpeta que corresponde (`null` si la URL no es de ninguno). `url`: vacía si solo se dio un nombre que no existe. */
+    remote: z.strictObject({ name: z.string().nullable(), url: z.string() }),
+    /** Rama de destino: la indicada en el plan o la actual de la carpeta. */
+    branch: z.string().nullable(),
+    /** El remoto está en `git remote` de la carpeta. */
+    configured: z.boolean(),
+  }),
+]);
+export type ChangesTarget = z.infer<typeof changesTargetSchema>;
+
+/** Respuesta de `GET /chats/:id/target`. */
+export const chatTargetResponse = z.strictObject({ target: changesTargetSchema });
+export type ChatTargetResponse = z.infer<typeof chatTargetResponse>;
+
+/** Mensaje en vivo (`/ws`) cuando cambia el destino de un chat. */
+export const chatTargetMessageSchema = z.strictObject({ type: z.literal('chat_target'), chatId: z.string(), target: changesTargetSchema });
+export type ChatTargetMessage = z.infer<typeof chatTargetMessageSchema>;
+
 // ── Tarea manual (POST /tasks/manual) ────────────────────────────────────────────────────────
 
 /** Tarea que el usuario da directamente (casos puntuales): el núcleo completa el resto del encargo. */

@@ -17,6 +17,7 @@ import { LiveReply } from './components/LiveReply.tsx';
 import { MessageList } from './components/MessageList.tsx';
 import { ModeChip } from './components/ModeChip.tsx';
 import { ProposalsCard } from './components/ProposalsCard.tsx';
+import { TargetLine } from './components/TargetLine.tsx';
 import { APP_NAME } from './format.ts';
 import { attachFile, errorText, pickFolder, useChat } from './store.ts';
 import { anchorProposals, buildReply, PROPOSALS_AT_END, splitTurns } from './timeline.ts';
@@ -354,6 +355,11 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
             </button>
           </div>
         ) : null}
+        <TargetLine
+          chatId={chat?.id ?? null}
+          standalone={projectId === null}
+          draft={!chat && canWrite && project ? { path: project.repoPath, worktrees: project.workspace !== undefined } : null}
+        />
         <ModeChip mode={mode} onChange={setMode} mind={mind} isDisabled={unavailable} />
         <Composer
           placeholder={projectName ? `Pídele algo a ${APP_NAME} sobre ${projectName}…` : `Pídele algo a ${APP_NAME}…`}

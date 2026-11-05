@@ -1,7 +1,7 @@
 /**
  * Rutas del chat con la mente, adjuntos y propuestas (F5, c15). Toda entrada se valida con Zod (`ApiRouter`) y las
  * respuestas JSON salen tachadas. La respuesta de la mente llega por `/ws` (`event` con `sessionId = chat.sessionId`,
- * `chat`, `chat_message`, `proposals`).
+ * `chat`, `chat_message`, `proposals`, `chat_target`).
  */
 import { z } from 'zod';
 import {
@@ -10,6 +10,7 @@ import {
   attachmentSchema,
   chatMessageSchema,
   chatSchema,
+  chatTargetResponse,
   createChatBody,
   idSchema,
   opaqueIdSchema,
@@ -150,6 +151,20 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
         await service.delete(id);
         return { deleted: true as const, id };
       }),
+  );
+  r.add(
+    {
+      method: 'get',
+      path: '/chats/:id/target',
+      tag: 'Chats',
+      summary: 'Dónde quedan los cambios del chat: en local o en el repositorio que indicó el usuario',
+      description:
+        '`local` por defecto (carpeta del proyecto o, sin proyecto, la del chat), con `git` (`none`, `local` o `remote`) y `worktrees` (el proyecto usa ramas `orq/…`). `remote` solo si la mente anotó con `crear_tareas.destino` el repositorio que indicó el usuario: `url` saneada, rama y `configured` (el remoto está en `git remote` de la carpeta). Berland no sube nada. Los cambios llegan por `/ws` como `chat_target`.',
+      params: chatId,
+      response: chatTargetResponse,
+      errors: [400, 404],
+    },
+    ({ params }) => run(async () => ({ target: await service.target(params.id ?? '') })),
   );
   r.add(
     {

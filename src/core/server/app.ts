@@ -730,7 +730,7 @@ export function createApp(deps: AppDeps): CoreApp {
       tag: 'Tiempo real',
       summary: 'WebSocket: eventos en vivo, cambios de cupo, tareas y agentes',
       description:
-        'Handshake con `Authorization: Bearer <token>` o, desde el navegador, con el subprotocolo `Sec-WebSocket-Protocol: orq, orq.bearer.<token>` (el servidor responde `orq`). Mensajes del servidor: `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error` y, de F5, `settings`, `chat`, `chat_message`, `chat_deleted`, `proposals`, `plugin`. Del cliente: `{"type":"replay","sessionId":"…","since":<seq>}` y `{"type":"ping"}`.',
+        'Handshake con `Authorization: Bearer <token>` o, desde el navegador, con el subprotocolo `Sec-WebSocket-Protocol: orq, orq.bearer.<token>` (el servidor responde `orq`). Mensajes del servidor: `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error` y, de F5, `settings`, `chat`, `chat_message`, `chat_deleted`, `chat_target`, `proposals`, `plugin`. Del cliente: `{"type":"replay","sessionId":"…","since":<seq>}` y `{"type":"ping"}`.',
       status: 101,
       errors: [426, 501],
       websocket: true,

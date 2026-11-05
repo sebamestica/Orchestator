@@ -35,3 +35,5 @@ export { WorkspaceError, WorktreeManager } from './manager.ts';
 export type { WorktreeManagerOptions } from './manager.ts';
 export { BLOCKED_PUSH_URL, BLOCKED_REMOTE, blockPush, enableWorktreeConfig, ensureHooksDir } from './push-block.ts';
 export { removeUntracked } from './leftovers.ts';
+export { hasGitDir, parseRemoteUrls, readProjectStorage, remoteUrlKey, sameRemoteUrl, sanitizeRemoteUrl } from './storage.ts';
+export type { GitRemote, ProjectStorage, ProjectStorageKind, StorageReadOptions } from './storage.ts';
