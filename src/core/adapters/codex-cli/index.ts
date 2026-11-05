@@ -41,11 +41,21 @@ export function codexEffortArgs(task: TaskBrief, retries = 0): string[] {
  * Servidores neutros → `-c mcp_servers.<nombre>.…` de Codex y variables para su proceso. Ningún secreto va en los
  * argumentos: `Authorization: Bearer …` → `bearer_token_env_var`, otros encabezados → `env_http_headers` y las
  * variables de un servidor stdio → `env_vars` (Codex las reenvía desde su propio entorno).
+ *
+ * Cada servidor entregado va con `enabled=true` (por si el usuario tiene uno igual apagado) y
+ * `default_tools_approval_mode="approve"`: `codex exec` no pide aprobaciones, y sin esto las herramientas sin
+ * `readOnlyHint` (p. ej. `new_page` de Chrome) fallan con «MCP tool call requires approval, but approval policy is
+ * never». Es lo mismo que hace la política de Claude con `mcp__<servidor>__*`.
  */
 export function codexMcpArgs(servers: McpServerMap): { args: string[]; env: Record<string, string> } {
   const args: string[] = [];
   const env: Record<string, string> = {};
   const set = (name: string, key: string, toml: string) => args.push('-c', `mcp_servers.${name}.${key}=${toml}`);
+  const common = (name: string, spec: McpServerMap[string]) => {
+    set(name, 'enabled', 'true');
+    set(name, 'default_tools_approval_mode', '"approve"');
+    if (spec.toolTimeoutSec !== undefined) set(name, 'tool_timeout_sec', String(Math.max(1, Math.ceil(spec.toolTimeoutSec))));
+  };
   for (const [name, spec] of Object.entries(servers)) {
     if (spec.type === 'stdio') {
       set(name, 'command', tomlString(spec.command));
@@ -53,6 +63,7 @@ export function codexMcpArgs(servers: McpServerMap): { args: string[]; env: Reco
       const vars = Object.entries(spec.env ?? {});
       for (const [k, v] of vars) env[k] = v;
       if (vars.length) set(name, 'env_vars', `[${vars.map(([k]) => tomlString(k)).join(',')}]`);
+      common(name, spec);
       continue;
     }
     set(name, 'url', tomlString(spec.url));
@@ -70,8 +81,44 @@ export function codexMcpArgs(servers: McpServerMap): { args: string[]; env: Reco
       }
     }
     if (headerVars.length) set(name, 'env_http_headers', `{${headerVars.join(',')}}`);
+    common(name, spec);
   }
   return { args, env };
+}
+
+/** Plugins de Codex con navegador propio (marketplace `openai-bundled`). */
+export const CODEX_BROWSER_PLUGINS = ['browser@openai-bundled', 'chrome@openai-bundled', 'computer-use@openai-bundled', 'unified-computer-use@openai-bundled'] as const;
+/** Funciones de Codex de navegador y control del equipo. */
+export const CODEX_BROWSER_FEATURES = ['browser_use', 'browser_use_external', 'in_app_browser', 'computer_use'] as const;
+/** Servidores MCP de navegador que Codex puede tener en su configuración global y Berland no entrega. */
+export const CODEX_BROWSER_SERVERS = ['node_repl', 'chrome-personal', 'chrome-agente', 'chrome-devtools'] as const;
+
+/**
+ * Apaga los navegadores propios de Codex en una ejecución de Berland, solo por argumentos (`~/.codex/config.toml` no
+ * se toca). Comprobado con codex-cli 0.165.0 sin gastar cupo (issue 11):
+ * - `-c plugins.<id>.enabled=false` quita del prompt las skills `browser:control-in-app-browser` y
+ *   `chrome:control-chrome` (`codex debug prompt-input`). La ruta va sin comillas: `-c` la divide por puntos y
+ *   `plugins."chrome@…"` no tiene efecto.
+ * - `node_repl` es el motor de esos plugins (`BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab,mcpapps"`).
+ * - Los servidores de navegador que Berland no entrega (`chrome-personal` sin plugin, `chrome-agente`, …) quedan con
+ *   `command` + `enabled=false`: así son válidos y están apagados existan o no (con solo `enabled=false`, uno que no
+ *   existe rompe la configuración: «invalid transport»).
+ */
+export function codexBrowserOffArgs(granted: readonly string[] = []): string[] {
+  const args: string[] = [];
+  for (const id of CODEX_BROWSER_PLUGINS) args.push('-c', `plugins.${id}.enabled=false`);
+  for (const feature of CODEX_BROWSER_FEATURES) args.push('-c', `features.${feature}=false`);
+  for (const name of CODEX_BROWSER_SERVERS) {
+    if (granted.includes(name)) continue;
+    args.push('-c', `mcp_servers.${name}.command=${tomlString('cmd.exe')}`, '-c', `mcp_servers.${name}.enabled=false`);
+  }
+  return args;
+}
+
+/** Argumentos de navegador y plugins para `codex exec`: primero lo que se apaga, luego lo que entrega Berland. */
+export function codexPluginArgs(servers: McpServerMap): { args: string[]; env: Record<string, string> } {
+  const mcp = codexMcpArgs(servers);
+  return { args: [...codexBrowserOffArgs(Object.keys(servers)), ...mcp.args], env: mcp.env };
 }
 
 export class CodexCliAdapter implements AgentAdapter {
@@ -118,7 +165,7 @@ export class CodexCliAdapter implements AgentAdapter {
   }
 
   private async *runWith(task: TaskBrief, ctx: RunContext, grant: McpGrant): AsyncGenerator<AgentEvent> {
-    const plugins = codexMcpArgs(grant.servers);
+    const plugins = codexPluginArgs(grant.servers);
     const pluginNames = Object.keys(grant.servers);
     const childEnv = { ...ctx.env, ...plugins.env };
     const secrets = [...Object.values(ctx.env), ...mcpSecrets(grant.servers)];

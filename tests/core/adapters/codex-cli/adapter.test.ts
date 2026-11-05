@@ -2,7 +2,7 @@ import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexCliAdapter, codexEffortArgs } from '../../../../src/core/adapters/codex-cli/index.ts';
+import { CodexCliAdapter, codexBrowserOffArgs, codexEffortArgs } from '../../../../src/core/adapters/codex-cli/index.ts';
 import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import { buildReviewTask } from '../../../../src/core/orchestrator/fleet.ts';
 import { resolveCodexExecutable } from '../../../../src/core/adapters/codex-cli/executable.ts';
@@ -50,7 +50,7 @@ describe('Codex CLI', () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(new Set(events.map((e) => e.sessionId)).size).toBe(1);
     const opts = run.mock.calls[0]?.[0];
-    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-s', 'workspace-write', '-C', ctx.worktreePath,
+    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...codexBrowserOffArgs(), '-s', 'workspace-write', '-C', ctx.worktreePath,
       '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), '-']);
     expect(opts?.stdin).toContain(task.objective);
     expect(opts?.args).not.toContain(task.objective);

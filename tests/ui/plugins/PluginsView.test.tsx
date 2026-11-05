@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { LiveMessage } from '../../../src/ui/api/live.ts';
 import { setCoreEndpoint } from '../../../src/ui/api/client.ts';
-import PluginsView from '../../../src/ui/features/plugins/PluginsView.tsx';
+import PluginsView, { chromeLines, LIVE_REFRESH_MS } from '../../../src/ui/features/plugins/PluginsView.tsx';
 
 const live = vi.hoisted(() => ({ listener: null as ((message: LiveMessage) => void) | null, unsubscribe: vi.fn() }));
 vi.mock('../../../src/ui/api/live.ts', () => ({ getLive: () => ({ subscribe: (fn: (message: LiveMessage) => void) => { live.listener = fn; return live.unsubscribe; } }) }));
@@ -23,13 +23,15 @@ describe('Plugins', () => {
     expect(screen.getByText('Activa la depuración remota')).toBeTruthy();
     expect(screen.getByText('Más plugins pronto')).toBeTruthy();
   });
-  it('conecta Chrome con el perfil personal', async () => {
+  it('Probar conexión de Chrome: sin perfil en el cuerpo y luego permite desconectar', async () => {
     const fetcher = vi.mocked(fetch);
-    fetcher.mockResolvedValueOnce(reply({ plugins: [chrome] })).mockResolvedValueOnce(reply({ plugin: { ...chrome, status: 'connected' } }));
+    fetcher.mockResolvedValueOnce(reply({ plugins: [chrome] })).mockResolvedValueOnce(reply({ plugin: { ...chrome, status: 'connected', updatedAt: '2026-11-04T10:01:00Z' } }));
     render(<PluginsView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Conectar Chrome' }));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/plugins/chrome/connect', expect.objectContaining({ body: JSON.stringify({ profile: 'personal' }) })));
+    expect(screen.queryByRole('button', { name: 'Desconectar Chrome' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Probar conexión de Chrome' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/plugins/chrome/connect', expect.objectContaining({ body: JSON.stringify({}) })));
     expect(await screen.findByRole('button', { name: 'Desconectar Chrome' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Probar conexión de Chrome' })).toBeTruthy();
   });
   it('abre el authUrl de Canva', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
@@ -38,20 +40,49 @@ describe('Plugins', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Conectar Canva' }));
     await waitFor(() => expect(open).toHaveBeenCalledWith('https://www.canva.com/oauth', '_blank', 'noopener,noreferrer'));
   });
-  it('permite elegir el perfil propio de los agentes', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [chrome] })).mockResolvedValueOnce(reply({ plugin: { ...chrome, status: 'connected' } }));
+  it('no ofrece el perfil aislado de los agentes', async () => {
     render(<PluginsView />);
-    const selector = await screen.findByRole('button', { name: /Perfil de Chrome/ });
-    fireEvent.keyDown(selector, { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: 'Perfil propio de los agentes' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Conectar Chrome' }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/plugins/chrome/connect', expect.objectContaining({ body: JSON.stringify({ profile: 'agente' }) })));
+    await screen.findByText('Chrome');
+    expect(screen.queryByRole('button', { name: /Perfil de Chrome/ })).toBeNull();
+    expect(screen.queryByText(/Perfil propio de los agentes/)).toBeNull();
+  });
+
+  it('muestra el estado vivo de Chrome en líneas: conexión, depuración remota, perfil y quién lo usa', async () => {
+    const detail = 'Tu Chrome personal · 32 herramientas · conexión con tu Chrome comprobada · Depuración remota activa · Pestañas nuevas en tu perfil «S_» (Default), el último que usaste · En uso ahora por codex-main (tarea t-1), hace 3 min';
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [{ ...chrome, status: 'connected', detail }, canva] }));
+    render(<PluginsView />);
+    const status = await screen.findByRole('status', { name: 'Estado de tu Chrome' });
+    expect([...status.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'Tu Chrome personal · 32 herramientas', 'conexión con tu Chrome comprobada', 'Depuración remota activa',
+      'Pestañas nuevas en tu perfil «S_» (Default), el último que usaste', 'En uso ahora por codex-main (tarea t-1), hace 3 min',
+    ]);
+    expect(chromeLines('Desconectado.')).toEqual(['Desconectado.']);
+  });
+
+  it('relee el estado vivo cada cierto tiempo y deja de hacerlo al salir', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const fetcher = vi.mocked(fetch);
+      fetcher.mockResolvedValueOnce(reply({ plugins: [{ ...chrome, status: 'connected', detail: 'Tu Chrome personal · Libre ahora' }] }))
+        .mockResolvedValueOnce(reply({ plugins: [{ ...chrome, status: 'connected', detail: 'Tu Chrome personal · En uso ahora por claude-main (tarea t-9)' }] }));
+      const view = render(<PluginsView />);
+      expect(await screen.findByText('Libre ahora')).toBeTruthy();
+      act(() => { vi.advanceTimersByTime(LIVE_REFRESH_MS); });
+      await waitFor(() => expect(screen.getByText('En uso ahora por claude-main (tarea t-9)')).toBeTruthy());
+      view.unmount();
+      const calls = fetcher.mock.calls.length;
+      vi.advanceTimersByTime(LIVE_REFRESH_MS * 2);
+      expect(fetcher.mock.calls.length).toBe(calls);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('desconecta un plugin conectado', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [{ ...chrome, status: 'connected' }] })).mockResolvedValueOnce(reply({ plugin: chrome }));
     render(<PluginsView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Desconectar Chrome' }));
-    expect(await screen.findByRole('button', { name: 'Conectar Chrome' })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Desconectar Chrome' })).toBeNull());
+    expect(screen.getByRole('button', { name: 'Probar conexión de Chrome' })).toBeTruthy();
     expect(fetch).toHaveBeenCalledWith('/plugins/chrome/disconnect', expect.objectContaining({ method: 'POST' }));
   });
   it('agrupa eventos en vivo por cuadro y desconecta la suscripción', async () => {

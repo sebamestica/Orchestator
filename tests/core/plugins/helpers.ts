@@ -53,8 +53,11 @@ export async function pluginHarness(opts: PluginHarnessOptions = {}) {
   const { locksRoot: givenRoot, ...serviceOpts } = opts;
   const locksRoot = givenRoot ?? (await tempDir('orq-plugins-locks-'));
   const locks = new LockManager({ root: locksRoot });
+  // El estado vivo de Chrome lee una carpeta de datos vacía (no la del usuario), salvo que la prueba dé otra.
+  const userDataDir = opts.chrome?.userDataDir ?? (await tempDir('orq-plugins-chrome-'));
   const service = new PluginService({
     ...serviceOpts,
+    chrome: { ...opts.chrome, userDataDir },
     db: store.database,
     vault,
     locks,
@@ -94,7 +97,7 @@ export async function pluginHarness(opts: PluginHarnessOptions = {}) {
     }
     return { status: res.status, text, json, headers: res.headers };
   };
-  return { store, vault, registry, hub, messages, logs, locks, locksRoot, service, core, token, req };
+  return { store, vault, registry, hub, messages, logs, locks, locksRoot, userDataDir, service, core, token, req };
 }
 
 /** Volcado de todas las tablas de SQLite (para buscar secretos). */

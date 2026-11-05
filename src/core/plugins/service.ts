@@ -3,9 +3,13 @@
  * (DPAPI) y entrega de servidores MCP a los agentes.
  *
  * - `list()`, `status(id)`, `connect(id, body)`, `disconnect(id)`, `handleCanvaCallback(query)`.
+ * - `listLive()`: lo mismo con el estado vivo de Chrome (depuración remota, perfil, quién lo usa ahora).
  * - `mcpServersFor(agentId, kind)`: servidores en forma neutra (`McpServerMap`) que cada adaptador traduce.
- * - `grant(req)`: lo mismo para una ejecución, con los candados de Chrome tomados (`chrome-personal` /
- *   `chrome-agente`, carpeta de candados del hub) hasta `release()`. Es la `McpServerSource` de los adaptadores.
+ * - `grant(req)`: lo mismo para una ejecución, con notas para el encargo. Es la `McpServerSource` de los adaptadores.
+ *
+ * Chrome (issue 11): una sola vía, tu Chrome personal. Cada agente recibe `chrome-personal` a través de la puerta
+ * (`chrome-gate.ts`), que toma el candado `chrome-personal` en la primera llamada y espera si otro lo tiene. Así un
+ * agente que no navega no bloquea a nadie, y la mente queda bajo el mismo candado que la flota.
  *
  * Cada cambio visible se publica como `{type:'plugin', plugin}`.
  */
@@ -19,21 +23,27 @@ import {
   type Plugin,
   type PluginId,
 } from '../../shared/index.ts';
-import { LockError, LockManager, type LockHandle } from '../locks/index.ts';
-import { describeHolder } from '../locks/owner.ts';
+import { defaultLocksRoot, LockError, LockManager, type LockHandle } from '../locks/index.ts';
 import type { F5HubMessage } from '../server/hub.ts';
 import type { SecretVault } from '../vault/index.ts';
 import { CANVA_MCP_URL, CanvaConnector, type CallbackQuery } from './canva.ts';
 import {
+  BERLAND_CHROME_NOTE,
+  CHROME_LOCK,
   CHROME_SERVER,
   chromeLauncherPath,
   chromeServerSpec,
   chromeSteps,
   defaultChromeLauncher,
+  defaultChromeUserDataDir,
   DEFAULT_BROWSER_TOOLS_DIR,
+  describeChromeHolder,
   interpretChromeProbe,
+  isAbandonedChromeHolder,
+  NO_BROWSER_NOTE,
+  readChromeProfile,
+  remoteDebuggingOn,
   type ChromeLauncher,
-  type ChromeProfile,
 } from './chrome.ts';
 import { EMPTY_GRANT, type McpGrant, type McpGrantRequest, type McpServerMap, type McpServerSource, type McpServerSpec } from './mcp.ts';
 import { probeStdioMcp, type StdioProbeOptions, type StdioProbeResult } from './mcp-probe.ts';
@@ -49,7 +59,7 @@ export const PLUGIN_AGENT_KINDS: Readonly<Record<PluginId, readonly AgentKind[]>
 const INFO: Readonly<Record<PluginId, { name: string; description: string }>> = {
   chrome: {
     name: 'Chrome',
-    description: 'Navegador para los agentes por chrome-devtools-mcp: tu Chrome con tus sesiones (perfil personal) o un perfil propio de los agentes.',
+    description: 'Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.',
   },
   canva: {
     name: 'Canva',
@@ -62,7 +72,9 @@ const CANVA_CONNECTING_STEPS = [
   'Inicia sesión en Canva en la pestaña que se abrió y acepta los permisos.',
   'Si no se abrió, abre el enlace de autorización (vale 10 minutos y una sola vez).',
 ];
-const CANVA_NOTE = 'Usa Canva solo para los diseños que pide la tarea; no confirmes cambios (commit) ni borres diseños sin que el encargo lo pida.';
+const CANVA_NOTE =
+  'Usa Canva solo para los diseños que pide la tarea, con este servidor (tu cuenta, por OAuth); no confirmes cambios (commit) ni borres diseños sin que el encargo lo pida. Si algo solo se puede hacer en la web de Canva, hazlo en el Chrome personal (`chrome-personal`), nunca en otro navegador.';
+const AGENTE_RETIRED = 'Se quitó el perfil aislado de los agentes: ahora usan solo tu Chrome personal. Pulsa Probar conexión.';
 
 export class PluginError extends Error {
   override readonly name = 'PluginError';
@@ -75,16 +87,20 @@ export class PluginError extends Error {
 }
 
 export interface ChromePluginOptions {
-  /** Carpeta de los lanzadores (`chrome-personal.cmd`, `chrome-agente.cmd`). */
+  /** Carpeta del lanzador `chrome-personal.cmd`. */
   toolsDir?: string;
-  /** Comando de cada perfil (pruebas: un MCP falso). Por defecto `cmd.exe /c <toolsDir>\chrome-<perfil>.cmd`. */
-  launcher?: (profile: ChromeProfile) => ChromeLauncher;
+  /** Comando del MCP (pruebas: un MCP falso). Por defecto `cmd.exe /c <toolsDir>\chrome-personal.cmd`. */
+  launcher?: () => ChromeLauncher;
   probe?: (opts: StdioProbeOptions) => Promise<StdioProbeResult>;
   startTimeoutMs?: number;
-  /** Tiempo para `list_pages` (incluye aceptar el aviso de Chrome en el perfil personal). */
+  /** Tiempo para `list_pages` (incluye aceptar el aviso de Chrome). */
   browserTimeoutMs?: number;
   /** `false`: solo `initialize` + `tools/list` (no toca el navegador). */
   verifyBrowser?: boolean;
+  /** Carpeta de datos de Chrome para el estado vivo (por defecto `%LOCALAPPDATA%\Google\Chrome\User Data`). */
+  userDataDir?: string;
+  /** Puerta MCP: Node, script, espera por llamada y tiempo ocioso (por defecto los de `chrome.ts`). */
+  gate?: { node?: string; script?: string; waitMs?: number; idleMs?: number };
 }
 
 export interface CanvaPluginOptions {
@@ -105,10 +121,8 @@ export interface PluginServiceOptions {
   agentKind?: (agentId: string) => AgentKind | undefined;
   chrome?: ChromePluginOptions;
   canva?: CanvaPluginOptions;
-  /** Candados (por defecto la carpeta del hub, `C:\dev\agent-hub\locks`). */
-  locks?: Pick<LockManager, 'acquire'>;
-  /** Espera por el candado de Chrome al entregarlo (0: si está ocupado, la sesión no lo recibe). */
-  lockWaitMs?: number;
+  /** Candados (por defecto la carpeta del hub, `C:\dev\agent-hub\locks`). La puerta usa la misma `root`. */
+  locks?: Pick<LockManager, 'acquire' | 'read' | 'releaseAbandoned' | 'root'>;
 }
 
 /** Id válido para el dueño de un candado (`idSchema`). */
@@ -123,7 +137,7 @@ export class PluginService {
   readonly #store: PluginStateStore;
   readonly #canva: CanvaConnector;
   readonly #canvaUrl: string;
-  readonly #locks: Pick<LockManager, 'acquire'>;
+  readonly #locks: Pick<LockManager, 'acquire' | 'read' | 'releaseAbandoned' | 'root'>;
   #publish: ((message: F5HubMessage) => void) | undefined;
   #authUrl: string | undefined;
   #chromeProbe: Promise<Plugin> | undefined;
@@ -133,7 +147,7 @@ export class PluginService {
     this.#publish = opts.publish;
     this.#store = new PluginStateStore(opts.db);
     this.#canvaUrl = opts.canva?.mcpUrl ?? CANVA_MCP_URL;
-    this.#locks = opts.locks ?? new LockManager();
+    this.#locks = opts.locks ?? new LockManager({ root: defaultLocksRoot() });
     this.#canva = new CanvaConnector({
       vault: opts.vault,
       oauth: opts.canva?.oauth ?? new McpOAuthClient({ resourceUrl: this.#canvaUrl, clientName: 'Berland', ...(opts.canva?.fetch ? { fetch: opts.canva.fetch } : {}), ...(opts.now ? { now: opts.now } : {}) }),
@@ -147,7 +161,13 @@ export class PluginService {
     // Un intento a medias de un arranque anterior (Chrome probando, Canva esperando el callback) no sigue vivo.
     for (const id of ['chrome', 'canva'] as const) {
       const s = this.#store.get(id);
-      if (s?.status === 'connecting') this.#store.put({ ...s, status: 'disconnected', detail: 'La conexión quedó a medias al reiniciar el núcleo.', steps: this.#defaultSteps(id, s.profile), updatedAt: this.#iso() });
+      if (s?.status === 'connecting') this.#store.put({ ...s, status: 'disconnected', detail: 'La conexión quedó a medias al reiniciar el núcleo.', steps: this.#defaultSteps(id), updatedAt: this.#iso() });
+    }
+    // El perfil aislado de los agentes ya no existe (issue 11): quien lo tenía elegido vuelve a tu Chrome personal,
+    // desconectado hasta que pruebes la conexión (necesita la depuración remota activa).
+    const chrome = this.#store.get('chrome');
+    if (chrome?.profile === 'agente') {
+      this.#store.put({ ...chrome, profile: 'personal', status: 'disconnected', detail: AGENTE_RETIRED, steps: chromeSteps(), updatedAt: this.#iso() });
     }
   }
 
@@ -158,6 +178,29 @@ export class PluginService {
 
   list(): Plugin[] {
     return [this.status('chrome'), this.status('canva')];
+  }
+
+  /** `list()` con el estado vivo de Chrome en `detail`: depuración remota, perfil de las pestañas nuevas y quién lo usa. */
+  async listLive(): Promise<Plugin[]> {
+    const [chrome, canva] = this.list();
+    if (!chrome || !canva) return this.list();
+    const live = await this.chromeLive();
+    return [{ ...chrome, detail: [chrome.detail, ...live].filter((x): x is string => !!x).join(' · ') }, canva];
+  }
+
+  /** Estado vivo de tu Chrome, sin tocarlo: solo lee archivos (`DevToolsActivePort`, `Local State`, el candado). */
+  async chromeLive(): Promise<string[]> {
+    const dir = this.#opts.chrome?.userDataDir ?? defaultChromeUserDataDir();
+    const [on, profile, lock] = await Promise.all([remoteDebuggingOn(dir), readChromeProfile(dir), this.#locks.read(CHROME_LOCK).catch(() => undefined)]);
+    const parts = [on ? 'Depuración remota activa' : 'Depuración remota apagada: actívala en chrome://inspect/#remote-debugging'];
+    if (profile) {
+      const label = profile.name ? `«${profile.name}» (${profile.dir})` : `«${profile.dir}»`;
+      parts.push(`Pestañas nuevas en tu perfil ${label}${profile.count > 1 ? ', el último que usaste' : ''}`);
+    }
+    if (!lock) parts.push('Libre ahora');
+    else if (isAbandonedChromeHolder(lock.holder)) parts.push('Libre ahora (el último agente terminó sin soltarlo; se libera solo)');
+    else parts.push(`En uso ahora por ${describeChromeHolder(lock.holder, (this.#opts.now ?? (() => new Date()))())}`);
+    return parts;
   }
 
   status(id: PluginId): Plugin {
@@ -185,7 +228,10 @@ export class PluginService {
    * callback en este núcleo (`http://127.0.0.1:<puerto>/plugins/canva/callback`).
    */
   async connect(id: PluginId, body: ConnectPluginBody = {}, opts: { redirectUri?: string } = {}): Promise<Plugin> {
-    if (id === 'chrome') return this.#connectChrome(body);
+    if (id === 'chrome') {
+      if (body.profile === 'agente') throw new PluginError('invalid', 'El perfil aislado «agente» ya no existe: los agentes usan solo tu Chrome personal.');
+      return this.#connectChrome(body);
+    }
     if (body.profile !== undefined) throw new PluginError('invalid', 'profile solo aplica a Chrome');
     return this.#connectCanva(body, opts.redirectUri);
   }
@@ -193,7 +239,7 @@ export class PluginService {
   async disconnect(id: PluginId): Promise<Plugin> {
     const s = this.#state(id);
     if (id === 'chrome') {
-      return this.#save({ ...s, status: 'disconnected', detail: 'Desconectado: los agentes no reciben Chrome.', steps: chromeSteps(s.profile ?? 'personal') });
+      return this.#save({ ...s, status: 'disconnected', detail: 'Desconectado: los agentes no reciben navegador (ni otro Chrome).', steps: chromeSteps() });
     }
     this.#authUrl = undefined;
     let detail: string;
@@ -222,47 +268,33 @@ export class PluginService {
     return { ok: false, title: 'No se pudo conectar Canva', message: result.message };
   }
 
-  /** Servidores MCP para un agente (sin candados). Para una ejecución, usar `grant`. */
-  async mcpServersFor(agentId: string, kind: AgentKind): Promise<McpServerMap> {
-    return (await this.#collect(agentId, kind)).servers;
+  /** Servidores MCP para un agente (la mente: sin tarea). Para una ejecución, usar `grant`. */
+  async mcpServersFor(agentId: string, kind: AgentKind, taskId?: string): Promise<McpServerMap> {
+    return (await this.#collect(agentId, kind, taskId)).servers;
   }
 
-  /** Servidores para una ejecución, con el candado de Chrome tomado hasta `release()`. */
+  /**
+   * Servidores para una ejecución, con sus notas. El candado de Chrome no se toma aquí: lo toma la puerta en la
+   * primera llamada. `release()` libera el candado si la puerta de esta sesión murió sin soltarlo.
+   */
   async grant(req: McpGrantRequest): Promise<McpGrant> {
-    const { servers: collected, notes } = await this.#collect(req.agentId, req.kind);
-    const handles: LockHandle[] = [];
-    const skipped = new Set<string>();
-    for (const profile of ['personal', 'agente'] as const) {
-      const name = CHROME_SERVER[profile];
-      if (!collected[name]) continue;
-      try {
-        handles.push(
-          await this.#locks.acquire(name, { agent: lockId(req.agentId, 'agente'), task: lockId(req.taskId, 'sesion'), note: `MCP de Chrome (${profile}) para la sesión` }, {
-            timeoutMs: this.#opts.lockWaitMs ?? 0,
-            ...(req.signal ? { signal: req.signal } : {}),
-          }),
-        );
-      } catch (err) {
-        skipped.add(name);
-        const who = err instanceof LockError && err.holder ? describeHolder(err.holder) : this.#errText(err);
-        notes.push(`Chrome (perfil ${profile}) está en uso por ${who}: esta sesión no lo recibe. Si lo necesitas, dilo en tu informe.`);
-      }
-    }
-    const servers = Object.fromEntries(Object.entries(collected).filter(([name]) => !skipped.has(name)));
+    const { servers, notes } = await this.#collect(req.agentId, req.kind, req.taskId);
     if (Object.keys(servers).length === 0 && notes.length === 0) return EMPTY_GRANT;
+    const owner = { agent: lockId(req.agentId, 'agente'), task: lockId(req.taskId, 'sesion') };
+    const hasChrome = CHROME_SERVER in servers;
     let released = false;
     return {
       servers,
       notes,
       release: async () => {
-        if (released) return;
+        if (released || !hasChrome) return;
         released = true;
-        for (const h of handles) {
-          try {
-            await h.release();
-          } catch (err) {
-            this.#opts.log?.(`plugins: no se pudo soltar ${h.name}: ${this.#errText(err)}`);
-          }
+        try {
+          await this.#locks.releaseAbandoned(CHROME_LOCK, (h) => h.agent === owner.agent && h.task === owner.task && isAbandonedChromeHolder(h));
+          this.#opts.log?.(`plugins: candado ${CHROME_LOCK} de ${owner.agent}/${owner.task} quedó abandonado y se liberó`);
+        } catch (err) {
+          // Lo normal: libre (`not_held`) o de otro (`not_owner`).
+          if (!(err instanceof LockError && (err.code === 'not_held' || err.code === 'not_owner'))) this.#opts.log?.(`plugins: no se pudo revisar ${CHROME_LOCK}: ${this.#errText(err)}`);
         }
       },
     };
@@ -284,15 +316,23 @@ export class PluginService {
 
   // ------------------------------------------------------------------ internos
 
-  async #collect(agentId: string, kind: AgentKind): Promise<{ servers: Record<string, McpServerSpec>; notes: string[] }> {
+  async #collect(agentId: string, kind: AgentKind, taskId?: string): Promise<{ servers: Record<string, McpServerSpec>; notes: string[] }> {
     const servers: Record<string, McpServerSpec> = {};
     const notes: string[] = [];
     const wants = (id: PluginId, s: PluginState) => s.status === 'connected' && PLUGIN_AGENT_KINDS[id].includes(kind) && (s.agents.length === 0 || s.agents.includes(agentId));
 
     const chrome = this.#state('chrome');
     if (wants('chrome', chrome)) {
-      const profile = chrome.profile ?? 'personal';
-      servers[CHROME_SERVER[profile]] = chromeServerSpec(profile, this.#launcher(profile));
+      const gate = this.#opts.chrome?.gate ?? {};
+      servers[CHROME_SERVER] = chromeServerSpec(this.#launcher(), {
+        agent: lockId(agentId, 'agente'),
+        task: lockId(taskId ?? 'sesion', 'sesion'),
+        locksRoot: this.#locks.root,
+        ...gate,
+      });
+    } else if (PLUGIN_AGENT_KINDS.chrome.includes(kind)) {
+      // Sin Chrome, que no busque otro navegador (el integrado de su CLI, Playwright, un perfil aparte).
+      notes.push(NO_BROWSER_NOTE);
     }
     const canva = this.#state('canva');
     if (wants('canva', canva)) {
@@ -323,14 +363,13 @@ export class PluginService {
 
   async #probeChrome(body: ConnectPluginBody): Promise<Plugin> {
     const prev = this.#state('chrome');
-    const profile: ChromeProfile = body.profile ?? prev.profile ?? 'personal';
     const agents = body.agents ?? prev.agents;
     const extraSteps = this.#unsupportedAgentSteps('chrome', agents);
-    this.#save({ ...prev, profile, agents, status: 'connecting', detail: `Comprobando Chrome (perfil ${profile})…`, steps: chromeSteps(profile) });
+    this.#save({ ...prev, profile: 'personal', agents, status: 'connecting', detail: 'Comprobando tu Chrome personal…', steps: chromeSteps() });
 
     const chromeOpts = this.#opts.chrome ?? {};
-    const launcher = this.#launcher(profile);
-    const launcherPath = chromeOpts.launcher ? undefined : chromeLauncherPath(profile, chromeOpts.toolsDir ?? DEFAULT_BROWSER_TOOLS_DIR);
+    const launcher = this.#launcher();
+    const launcherPath = chromeOpts.launcher ? undefined : chromeLauncherPath(chromeOpts.toolsDir ?? DEFAULT_BROWSER_TOOLS_DIR);
     if (launcherPath) {
       try {
         await access(launcherPath);
@@ -344,13 +383,18 @@ export class PluginService {
       }
     }
 
-    // El candado del perfil durante la prueba: si un agente lo tiene, el navegador ya está en uso y solo se listan herramientas.
+    // El candado durante la prueba: si un agente lo tiene, el navegador ya está en uso y solo se listan herramientas.
     let lock: LockHandle | undefined;
     let busyBy: string | undefined;
+    const take = () => this.#locks.acquire(CHROME_LOCK, { agent: 'orquestador', task: 'probar-chrome', note: `${BERLAND_CHROME_NOTE} · prueba de conexión` }, { timeoutMs: 0 });
     try {
-      lock = await this.#locks.acquire(CHROME_SERVER[profile], { agent: 'orquestador', task: 'conectar-chrome', note: 'Prueba de conexión del plugin Chrome' }, { timeoutMs: 0 });
+      lock = await take();
     } catch (err) {
-      busyBy = err instanceof LockError && err.holder ? describeHolder(err.holder) : 'otro proceso';
+      if (err instanceof LockError && err.holder && isAbandonedChromeHolder(err.holder)) {
+        await this.#locks.releaseAbandoned(CHROME_LOCK, (h) => isAbandonedChromeHolder(h)).catch(() => undefined);
+        lock = await take().catch(() => undefined);
+      }
+      if (!lock) busyBy = err instanceof LockError && err.holder ? describeChromeHolder(err.holder, (this.#opts.now ?? (() => new Date()))()) : 'otro proceso';
     }
     const verifyBrowser = (chromeOpts.verifyBrowser ?? true) && busyBy === undefined;
     let result: StdioProbeResult;
@@ -364,8 +408,8 @@ export class PluginService {
     } finally {
       await lock?.release().catch(() => undefined);
     }
-    const outcome = interpretChromeProbe(profile, result, { ...(launcherPath ? { launcherPath } : {}), browserChecked: verifyBrowser, ...(busyBy ? { busyBy } : {}) });
-    this.#opts.log?.(redactSecrets(`plugins: chrome ${profile} → ${outcome.status} (${outcome.tools} herramientas)`));
+    const outcome = interpretChromeProbe(result, { ...(launcherPath ? { launcherPath } : {}), browserChecked: verifyBrowser, ...(busyBy ? { busyBy } : {}) });
+    this.#opts.log?.(redactSecrets(`plugins: chrome personal → ${outcome.status} (${outcome.tools} herramientas)`));
     return this.#save({ ...this.#state('chrome'), status: outcome.status, detail: outcome.detail, steps: [...outcome.steps, ...extraSteps] });
   }
 
@@ -414,18 +458,18 @@ export class PluginService {
       if (kind === undefined) return [`El agente ${a} no está registrado.`];
       if (PLUGIN_AGENT_KINDS[id].includes(kind)) return [];
       return kind === 'agy-cli'
-        ? [`${a} (agy) todavía no recibe plugins por sesión: agy usa su propia configuración global (agy mcp list).`]
+        ? [`${a} (agy) todavía no recibe plugins por sesión: usa su propio chrome-personal (agy mcp list), sin el candado de Berland.`]
         : [`${a} (${kind}) no puede usar servidores MCP.`];
     });
   }
 
-  #launcher(profile: ChromeProfile): ChromeLauncher {
+  #launcher(): ChromeLauncher {
     const c = this.#opts.chrome;
-    return c?.launcher ? c.launcher(profile) : defaultChromeLauncher(profile, c?.toolsDir ?? DEFAULT_BROWSER_TOOLS_DIR);
+    return c?.launcher ? c.launcher() : defaultChromeLauncher(c?.toolsDir ?? DEFAULT_BROWSER_TOOLS_DIR);
   }
 
-  #defaultSteps(id: PluginId, profile: ChromeProfile | undefined): string[] {
-    return id === 'chrome' ? chromeSteps(profile ?? 'personal') : [...CANVA_STEPS];
+  #defaultSteps(id: PluginId): string[] {
+    return id === 'chrome' ? chromeSteps() : [...CANVA_STEPS];
   }
 
   #state(id: PluginId): PluginState {
@@ -434,7 +478,7 @@ export class PluginService {
         id,
         status: 'disconnected',
         agents: [],
-        steps: this.#defaultSteps(id, 'personal'),
+        steps: this.#defaultSteps(id),
         ...(id === 'chrome' ? { profile: 'personal' as const } : {}),
         updatedAt: this.#iso(),
       }

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AgyCliAdapter } from '../../../../src/core/adapters/agy-cli/index.ts';
+import { AgyCliAdapter, agyBrowserOffArgs } from '../../../../src/core/adapters/agy-cli/index.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../../src/core/process/run-jsonl.ts';
 import type { AgentConfig, AgentEvent, RunContext, TaskBrief } from '../../../../src/shared/index.ts';
 import { agentConfigSchema, REDACTED, taskBriefSchema } from '../../../../src/shared/index.ts';
@@ -139,6 +139,7 @@ describe('AgyCliAdapter.run', () => {
         '--output-format',
         'stream-json',
         '--dangerously-skip-permissions',
+        ...agyBrowserOffArgs(),
         '--model',
         'gemini-3.8-flash-high',
       ]);

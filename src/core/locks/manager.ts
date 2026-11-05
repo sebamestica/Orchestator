@@ -204,6 +204,17 @@ export class LockManager {
   }
 
   /**
+   * Libera un candado del núcleo cuyo dueño ya no existe (p. ej. un proceso terminado a la fuerza que no alcanzó a
+   * soltarlo). `isAbandoned` decide con el dueño leído; se confirma de nuevo sobre la carpeta apartada, así que si
+   * entretanto lo tomó otro, no se le quita (`not_owner`). Nunca libera candados en texto de la skill ni ilegibles.
+   */
+  async releaseAbandoned(name: string, isAbandoned: (holder: LockHolder) => boolean): Promise<void> {
+    const lock = validName(name);
+    await this.releaseWhen(lock, ({ holder }) => holder.format === 'json' && isAbandoned(holder),
+      (holder) => `${lock} no está abandonado: lo tiene ${describeHolder(holder)}`);
+  }
+
+  /**
    * Ejecuta `fn` con el candado y lo libera siempre. Si `fn` lanza, se relanza su error;
    * si además falla la liberación, se lanza un `AggregateError` con ambos.
    * Un candado que ya no existe al terminar (alguien lo borró a mano) no es error.

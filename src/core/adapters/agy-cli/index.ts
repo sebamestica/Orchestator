@@ -37,6 +37,22 @@ function fatalLineCode(line: string): 'quota_exhausted' | 'auth' | undefined {
 }
 
 /**
+ * Navegadores propios de agy que Berland bloquea en cada ejecución, solo por argumentos (la configuración global de
+ * agy no se toca). Comprobado con agy 1.5.0 sin gastar cupo (issue 11):
+ * - `--settings` (solo la sesión, nunca se guarda) admite `permissions.deny`; `agy --settings … -p "/permissions"`
+ *   lista las reglas. `chrome_devtools` es el Chrome DevTools MCP integrado del subagente de navegador; los demás son
+ *   copias aisladas que el usuario pudiera registrar.
+ * - `--disable-slash-commands`: el subagente de navegador solo se invoca con `/browser`; así no se expande en `-p`.
+ * El `chrome-personal` global de agy (tu Chrome) sigue disponible, pero sin la puerta ni el candado de Berland: agy
+ * aún no recibe servidores por sesión (ver abajo).
+ */
+export const AGY_BROWSER_DENY = ['mcp(chrome_devtools/*)', 'mcp(chrome-devtools/*)', 'mcp(chrome-agente/*)', 'mcp(playwright/*)'] as const;
+
+export function agyBrowserOffArgs(): string[] {
+  return ['--disable-slash-commands', '--settings', JSON.stringify({ permissions: { deny: [...AGY_BROWSER_DENY] } })];
+}
+
+/**
  * Adaptador para agy CLI (Antigravity).
  * Ejecuta el CLI sin ventana, pasando el encargo mediante archivo en el worktree
  * y traduciendo la salida JSONL en eventos normalizados AgentEvent.
@@ -195,6 +211,7 @@ export class AgyCliAdapter implements AgentAdapter {
           '--output-format',
           'stream-json',
           '--dangerously-skip-permissions',
+          ...agyBrowserOffArgs(),
         ];
 
         if (this.config.model) {

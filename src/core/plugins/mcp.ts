@@ -16,6 +16,8 @@ export interface McpStdioSpec {
   env?: Readonly<Record<string, string>>;
   /** Nota para el agente (se agrega al encargo). */
   instructions?: string;
+  /** Tope de una llamada a herramienta, en segundos (Codex: `tool_timeout_sec`). Sin él, el de cada cliente. */
+  toolTimeoutSec?: number;
 }
 
 export interface McpHttpSpec {
@@ -24,6 +26,7 @@ export interface McpHttpSpec {
   /** Encabezados HTTP (p. ej. `Authorization: Bearer …`). Se tratan siempre como secretos. */
   headers: Readonly<Record<string, string>>;
   instructions?: string;
+  toolTimeoutSec?: number;
 }
 
 export type McpServerSpec = McpStdioSpec | McpHttpSpec;
@@ -32,9 +35,9 @@ export type McpServerMap = Readonly<Record<string, McpServerSpec>>;
 /** Lo que recibe un adaptador para una ejecución: los servidores, notas para el encargo y cómo soltarlos. */
 export interface McpGrant {
   servers: McpServerMap;
-  /** Avisos para el agente (p. ej. «Chrome está en uso por otro agente: esta sesión no lo recibe»). */
+  /** Avisos para el agente (p. ej. «esta sesión no tiene navegador: no abras ninguno»). */
   notes: string[];
-  /** Suelta los recursos de la ejecución (candados de Chrome). Idempotente; nunca lanza. */
+  /** Suelta los recursos de la ejecución (p. ej. un candado de Chrome que su puerta no alcanzó a soltar). Idempotente; nunca lanza. */
   release(): Promise<void>;
 }
 

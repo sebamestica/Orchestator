@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgyCliAdapter } from '../../../src/core/adapters/agy-cli/index.ts';
+import { AGY_BROWSER_DENY, AgyCliAdapter } from '../../../src/core/adapters/agy-cli/index.ts';
 import { ClaudeSdkAdapter, claudeMcpOptions } from '../../../src/core/adapters/claude-sdk/adapter.ts';
 import { decideToolUse, mcpToolAllowed } from '../../../src/core/adapters/claude-sdk/permissions.ts';
-import { CodexCliAdapter, codexMcpArgs } from '../../../src/core/adapters/codex-cli/index.ts';
+import { CodexCliAdapter, codexBrowserOffArgs, codexMcpArgs, codexPluginArgs } from '../../../src/core/adapters/codex-cli/index.ts';
 import { createAdapterFactory } from '../../../src/core/app/adapters.ts';
-import { CHROME_TAB_NOTE, chromeServerSpec, mcpSecrets, type McpGrant, type McpGrantRequest, type McpServerMap, type McpServerSource } from '../../../src/core/plugins/index.ts';
+import { CHROME_ONLY_NOTE, CHROME_TAB_NOTE, chromeGateArgs, chromeServerSpec, mcpSecrets, type McpGrant, type McpGrantRequest, type McpServerMap, type McpServerSource } from '../../../src/core/plugins/index.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../src/core/process/run-jsonl.ts';
 import { agentConfigSchema, agentEventSchema, taskBriefSchema, type AgentEvent, type RunContext } from '../../../src/shared/index.ts';
 import { config as claudeConfig, ctx as claudeCtx, fakeQuery, loadJsonl, task as claudeTask } from '../adapters/claude-sdk/helpers.ts';
@@ -16,9 +16,12 @@ import { config as claudeConfig, ctx as claudeCtx, fakeQuery, loadJsonl, task as
 const TOKEN = 'tok-canva-PRUEBA-0123456789abcdefghij';
 const LAUNCHER = 'C:\\dev\\agent-hub\\tools\\browser\\chrome-personal.cmd';
 const CMD = 'C:\\Windows\\System32\\cmd.exe';
+const NODE = 'C:\\Program Files\\nodejs\\node.exe';
+const GATE = { agent: 'codex-main', task: 'tarea-codex', locksRoot: 'C:\\dev\\agent-hub\\locks', node: NODE, script: 'C:\\b\\chrome-gate.ts', waitMs: 300_000, idleMs: 180_000 };
+const GATE_ARGS = chromeGateArgs({ command: CMD, args: ['/c', LAUNCHER] }, GATE);
 
 const servers: McpServerMap = {
-  'chrome-personal': chromeServerSpec('personal', { command: CMD, args: ['/c', LAUNCHER] }),
+  'chrome-personal': chromeServerSpec({ command: CMD, args: ['/c', LAUNCHER] }, GATE),
   canva: { type: 'http', url: 'https://mcp.canva.com/mcp', headers: { Authorization: `Bearer ${TOKEN}` }, instructions: 'Usa Canva solo para la tarea.' },
 };
 
@@ -52,7 +55,8 @@ const exit: JsonlLine = { kind: 'exit', code: 0, signal: null, timedOut: false, 
 describe('traducción a Claude SDK', () => {
   it('claudeMcpOptions: stdio tal cual y los secretos como ${VAR} con su valor en env', () => {
     const out = claudeMcpOptions({ ...servers, otro: { type: 'stdio', command: 'node', args: ['s.js'], env: { API_KEY: 'secreto-largo-123' } } });
-    expect(out.mcpServers['chrome-personal']).toEqual({ type: 'stdio', command: CMD, args: ['/c', LAUNCHER] });
+    expect(out.mcpServers['chrome-personal']).toEqual({ type: 'stdio', command: NODE, args: GATE_ARGS });
+    expect(GATE_ARGS.slice(-4)).toEqual(['--', CMD, '/c', LAUNCHER]);
     expect(out.mcpServers.canva).toEqual({ type: 'http', url: 'https://mcp.canva.com/mcp', headers: { Authorization: '${ORQ_MCP_CANVA_AUTHORIZATION}' } });
     expect(out.mcpServers.otro).toEqual({ type: 'stdio', command: 'node', args: ['s.js'], env: { API_KEY: '${ORQ_MCP_OTRO_API_KEY}' } });
     expect(out.env).toEqual({ ORQ_MCP_CANVA_AUTHORIZATION: `Bearer ${TOKEN}`, ORQ_MCP_OTRO_API_KEY: 'secreto-largo-123' });
@@ -76,6 +80,7 @@ describe('traducción a Claude SDK', () => {
     const prompt = options.systemPrompt as { append?: string };
     expect(prompt.append).toContain('## Plugins del orquestador');
     expect(prompt.append).toContain(CHROME_TAB_NOTE);
+    expect(prompt.append).toContain(CHROME_ONLY_NOTE);
     expect(prompt.append).toContain('Aviso de prueba.');
 
     const allow = async (tool: string) => (await options.canUseTool?.(tool, {}, { signal: new AbortController().signal, suggestions: [], toolUseID: 'x' } as never))?.behavior;
@@ -128,22 +133,28 @@ describe('traducción a Codex CLI', () => {
   const config = agentConfigSchema.parse({ id: 'codex-main', kind: 'codex-cli', provider: 'openai', displayName: 'Codex' });
   const task = taskBriefSchema.parse({ id: 'tarea-codex', projectId: 'p1', title: 'T', objective: 'O', ownedPaths: ['a.txt'], dependsOn: [], acceptance: ['ok'], difficulty: 'low' });
 
-  it('codexMcpArgs: -c mcp_servers.<n>.… sin secretos en argumentos', () => {
+  it('codexMcpArgs: -c mcp_servers.<n>.… sin secretos en argumentos, encendidos y aprobados', () => {
     const out = codexMcpArgs({
       ...servers,
       otro: { type: 'http', url: 'https://x.example/mcp', headers: { 'X-Org': 'org-secreta-123' } },
       local: { type: 'stdio', command: 'node', args: ['s.js', 'con "comillas"'], env: { API_KEY: 'secreto-largo-123' } },
     });
+    const on = (n: string) => ['-c', `mcp_servers.${n}.enabled=true`, '-c', `mcp_servers.${n}.default_tools_approval_mode="approve"`];
     expect(out.args).toEqual([
-      '-c', `mcp_servers.chrome-personal.command="C:\\\\Windows\\\\System32\\\\cmd.exe"`,
-      '-c', `mcp_servers.chrome-personal.args=["/c","C:\\\\dev\\\\agent-hub\\\\tools\\\\browser\\\\chrome-personal.cmd"]`,
+      '-c', `mcp_servers.chrome-personal.command=${JSON.stringify(NODE)}`,
+      '-c', `mcp_servers.chrome-personal.args=[${GATE_ARGS.map((a) => JSON.stringify(a)).join(',')}]`,
+      ...on('chrome-personal'),
+      '-c', 'mcp_servers.chrome-personal.tool_timeout_sec=420',
       '-c', 'mcp_servers.canva.url="https://mcp.canva.com/mcp"',
       '-c', 'mcp_servers.canva.bearer_token_env_var="ORQ_MCP_CANVA_TOKEN"',
+      ...on('canva'),
       '-c', 'mcp_servers.otro.url="https://x.example/mcp"',
       '-c', 'mcp_servers.otro.env_http_headers={"X-Org"="ORQ_MCP_OTRO_X_ORG"}',
+      ...on('otro'),
       '-c', 'mcp_servers.local.command="node"',
       '-c', 'mcp_servers.local.args=["s.js","con \\"comillas\\""]',
       '-c', 'mcp_servers.local.env_vars=["API_KEY"]',
+      ...on('local'),
     ]);
     expect(out.env).toEqual({ ORQ_MCP_CANVA_TOKEN: TOKEN, ORQ_MCP_OTRO_X_ORG: 'org-secreta-123', API_KEY: 'secreto-largo-123' });
     const argv = out.args.join(' ');
@@ -164,8 +175,14 @@ describe('traducción a Codex CLI', () => {
     const ctx: RunContext = { worktreePath: await worktree(), env: { CODEX_HOME: 'C:\\codex' }, signal: new AbortController().signal, timeoutMs: 1000 };
     const events = await collect(adapter.run(task, ctx));
     const opts = run.mock.calls[0]?.[0];
-    // Primero el esfuerzo de razonamiento (issue 6), después los servidores MCP.
-    expect(opts?.args.slice(0, 7)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-c', `mcp_servers.chrome-personal.command="C:\\\\Windows\\\\System32\\\\cmd.exe"`]);
+    const plugins = codexPluginArgs(servers);
+    // Primero el esfuerzo de razonamiento (issue 6), después el navegador apagado y los servidores MCP.
+    expect(opts?.args.slice(0, 5 + plugins.args.length)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...plugins.args]);
+    expect(opts?.args).toContain('plugins.chrome@openai-bundled.enabled=false');
+    expect(opts?.args).toContain('mcp_servers.node_repl.enabled=false');
+    // El chrome-personal que entrega Berland (la puerta) no se apaga: se enciende y se aprueba.
+    expect(opts?.args).not.toContain('mcp_servers.chrome-personal.enabled=false');
+    expect(opts?.args).toContain('mcp_servers.chrome-personal.default_tools_approval_mode="approve"');
     expect(opts?.args).toContain('mcp_servers.canva.bearer_token_env_var="ORQ_MCP_CANVA_TOKEN"');
     expect(opts?.args.join(' ')).not.toContain(TOKEN);
     expect(opts?.env).toEqual({ CODEX_HOME: 'C:\\codex', ORQ_MCP_CANVA_TOKEN: TOKEN });
@@ -177,19 +194,41 @@ describe('traducción a Codex CLI', () => {
     expect(src.releases).toBe(1);
   });
 
-  it('sin plugins, los argumentos de siempre', async () => {
+  it('sin plugins: sus navegadores apagados, también el chrome-personal global (fuera del candado)', async () => {
     const run = vi.fn(async function* (o: JsonlProcessOptions) {
       void o;
       yield exit;
     });
     const ctx: RunContext = { worktreePath: await worktree(), env: {}, signal: new AbortController().signal, timeoutMs: 1000 };
     await collect(new CodexCliAdapter(config, { runner: run, executable: { command: 'node', args: ['codex.js'] } }).run(task, ctx));
-    expect(run.mock.calls[0]?.[0].args.slice(0, 7)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-s', 'workspace-write']);
+    const off = codexBrowserOffArgs();
+    expect(run.mock.calls[0]?.[0].args.slice(0, 7 + off.length)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...off, '-s', 'workspace-write']);
+    expect(off).toContain('mcp_servers.chrome-personal.enabled=false');
+  });
+
+  it('codexBrowserOffArgs: plugins, funciones y servidores de navegador de Codex, cada servidor válido exista o no', () => {
+    expect(codexBrowserOffArgs()).toEqual([
+      '-c', 'plugins.browser@openai-bundled.enabled=false',
+      '-c', 'plugins.chrome@openai-bundled.enabled=false',
+      '-c', 'plugins.computer-use@openai-bundled.enabled=false',
+      '-c', 'plugins.unified-computer-use@openai-bundled.enabled=false',
+      '-c', 'features.browser_use=false',
+      '-c', 'features.browser_use_external=false',
+      '-c', 'features.in_app_browser=false',
+      '-c', 'features.computer_use=false',
+      '-c', 'mcp_servers.node_repl.command="cmd.exe"', '-c', 'mcp_servers.node_repl.enabled=false',
+      '-c', 'mcp_servers.chrome-personal.command="cmd.exe"', '-c', 'mcp_servers.chrome-personal.enabled=false',
+      '-c', 'mcp_servers.chrome-agente.command="cmd.exe"', '-c', 'mcp_servers.chrome-agente.enabled=false',
+      '-c', 'mcp_servers.chrome-devtools.command="cmd.exe"', '-c', 'mcp_servers.chrome-devtools.enabled=false',
+    ]);
+    // Sin comillas en la clave del plugin: `-c` divide la ruta por puntos (con comillas no tiene efecto).
+    expect(codexBrowserOffArgs().join(' ')).not.toContain('"chrome@');
+    expect(codexBrowserOffArgs(['chrome-personal']).join(' ')).not.toContain('chrome-personal');
   });
 });
 
 describe('agy y la fábrica de adaptadores', () => {
-  it('agy no recibe servidores MCP: sin argumentos ni archivos de configuración', async () => {
+  it('agy no recibe servidores MCP: sus navegadores propios bloqueados por argumentos, sin archivos de configuración', async () => {
     const config = agentConfigSchema.parse({ id: 'agy-main', kind: 'agy-cli', provider: 'antigravity', displayName: 'agy' });
     const task = taskBriefSchema.parse({ id: 'tarea-agy', projectId: 'p1', title: 'T', objective: 'O', ownedPaths: ['a.txt'], dependsOn: [], acceptance: ['ok'], difficulty: 'low' });
     const lines = (await readFile(new URL('../../../fixtures/agy/stream-ok.jsonl', import.meta.url), 'utf8')).trim().split(/\r?\n/)
@@ -202,7 +241,12 @@ describe('agy y la fábrica de adaptadores', () => {
     const wt = await worktree();
     await collect(new AgyCliAdapter(config, { runner: run, executable: { command: 'agy.exe', args: [] } }).run(task, { worktreePath: wt, env: {}, signal: new AbortController().signal, timeoutMs: 1000 }));
     const args = run.mock.calls[0]?.[0].args ?? [];
-    expect(args.join(' ')).not.toMatch(/mcp|--settings/i);
+    expect(args).toContain('--disable-slash-commands');
+    const settings = args[args.indexOf('--settings') + 1] ?? '';
+    expect(JSON.parse(settings)).toEqual({ permissions: { deny: [...AGY_BROWSER_DENY] } });
+    expect(AGY_BROWSER_DENY).toContain('mcp(chrome_devtools/*)');
+    expect(AGY_BROWSER_DENY).toContain('mcp(chrome-agente/*)');
+    expect(args.join(' ')).not.toMatch(/mcpServers|mcp_config|mcp add/i);
     const { readdir } = await import('node:fs/promises');
     expect(await readdir(join(wt, '.orq'))).toEqual(['BRIEF-tarea-agy.md']);
   });

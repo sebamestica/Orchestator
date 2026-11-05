@@ -62,8 +62,8 @@ export function registerPluginRoutes(ctx: RouteModuleContext, service: PluginSer
   const { r } = ctx;
   service.setPublisher((message) => ctx.hub.publish(message));
 
-  r.add({ method: 'get', path: '/plugins', tag: 'Plugins', summary: 'Lista los plugins (Chrome, Canva) y su estado', response: pluginsResponse }, () => ({
-    plugins: service.list(),
+  r.add({ method: 'get', path: '/plugins', tag: 'Plugins', summary: 'Lista los plugins (Chrome, Canva) y su estado', response: pluginsResponse }, async () => ({
+    plugins: await service.listLive(),
   }));
   r.add(
     {
@@ -72,13 +72,13 @@ export function registerPluginRoutes(ctx: RouteModuleContext, service: PluginSer
       tag: 'Plugins',
       summary: 'Conecta un plugin',
       description:
-        'Chrome: arranca el MCP `chrome-devtools-mcp` del perfil elegido (`personal` = tu Chrome con `--autoConnect`, `agente` = perfil propio de los agentes), hace `initialize`, `tools/list` y `list_pages`, y lo cierra; responde `connected` (detalle: perfil y número de herramientas) o `error` con los pasos. Puede tardar hasta un minuto si Chrome pide aceptar la conexión. Canva: descubre el servidor OAuth, registra el cliente y responde `connecting` con `authUrl` (la abre la interfaz); termina en `GET /plugins/canva/callback`. `agents` vacío: el plugin llega a todos los agentes compatibles (Claude y Codex). Cada cambio se transmite por `/ws` como `{type:"plugin"}`.',
+        'Chrome («Probar conexión»): arranca el MCP `chrome-devtools-mcp` de tu Chrome personal (`--autoConnect`, el único navegador de los agentes), hace `initialize`, `tools/list` y `list_pages`, y lo cierra; responde `connected` (detalle: número de herramientas) o `error` con los pasos. Puede tardar hasta un minuto si Chrome pide aceptar la conexión. `profile: "agente"` (perfil aislado) ya no existe y responde 400. Canva: descubre el servidor OAuth, registra el cliente y responde `connecting` con `authUrl` (la abre la interfaz); termina en `GET /plugins/canva/callback`. `agents` vacío: el plugin llega a todos los agentes compatibles (Claude y Codex). Cada cambio se transmite por `/ws` como `{type:"plugin"}`.',
       params: { id: pluginIdParam },
       body: connectPluginBody,
       bodyOptional: true,
       response: pluginResponse,
       errors: [400, 415],
-      example: { profile: 'personal' },
+      example: {},
     },
     async ({ params, body, c }) => {
       const id = params.id as PluginId;
