@@ -1,0 +1,13 @@
+@keyframes agent-activity {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+@keyframes agent-change {
+  from { opacity: 0.4; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.agent-activity { animation: agent-activity 1.8s linear infinite; }
+.agent-change { animation: agent-change 200ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-activity, .agent-change { animation: none; transform: none; }
+}
