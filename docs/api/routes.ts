@@ -52,7 +52,7 @@ export const tags: readonly { name: string; description: string }[] = [
   { name: 'Proyectos', description: 'Repositorios locales sobre los que trabaja la flota.' },
   { name: 'Planes y tareas', description: 'Plan en texto → tareas propuestas → aprobación → ejecución.' },
   { name: 'Sesiones', description: 'Sesiones de agente y sus eventos normalizados (con reconexión por `seq`).' },
-  { name: 'Uso', description: 'Tokens y costo acumulados.' },
+  { name: 'Uso', description: 'Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5).' },
   { name: 'Skills', description: 'Hub de skills con cuarentena.' },
   { name: 'Memoria', description: 'Extractos de la memoria en Obsidian para ahorrar contexto.' },
   { name: 'Ajustes', description: 'Ajustes de la interfaz (F5): la mente, los subagentes de la flota, el modo inicial, el umbral de cupo, la concurrencia y la apariencia.' },
@@ -128,6 +128,9 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'GET /sessions/:id/events': { paramVars: sessionId, responseExample: { sessionId: ex.ids.session, events: ex.events, lastSeq: 6, hasMore: false } },
 
   'GET /usage': { responseExample: { groupBy: ['agent', 'day'], rows: ex.usageRows } },
+  'GET /usage/summary': { responseExample: ex.usageSummary },
+  'GET /usage/rates': { responseExample: { rates: ex.usageRates } },
+  'PATCH /usage/rates': { responseExample: { rates: ex.usageRates } },
 
   'GET /skills': { responseExample: { skills: ex.skillsList } },
   'POST /skills/import': { responseExample: { result: ex.skillImport } },

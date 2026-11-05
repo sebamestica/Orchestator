@@ -137,7 +137,7 @@ function recordUsage(opts: ClaudePlannerLlmOptions, agentId: string, requested: 
       seq: 1,
       ts: ts(),
       type: 'usage',
-      payload: { inputTokens: u.input_tokens + cacheRead + cacheWrite, outputTokens: u.output_tokens, cachedInputTokens: cacheRead, costUsd, model },
+      payload: { inputTokens: u.input_tokens + cacheRead + cacheWrite, outputTokens: u.output_tokens, cachedInputTokens: cacheRead, cacheWriteTokens: cacheWrite, costUsd, model },
     },
     { ...base, seq: 2, ts: ts(), type: 'done', payload: { ok: res.stop_reason !== 'refusal', summary: `stop_reason: ${res.stop_reason ?? 'desconocido'}` } },
   ];

@@ -1,5 +1,5 @@
 /** Ajustes de Berland: navegación de secciones a la izquierda y contenido a la derecha. */
-import { Bot, Brain, Database, FolderGit2, Puzzle, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { BarChart3, Bot, Brain, Database, FolderGit2, Puzzle, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import { routeHash, type SettingsSection } from '../../app/routes.ts';
 import { PageBody, PageHeader } from '../../components/PageBody.tsx';
 import { AgentsSection } from './AgentsSection.tsx';
@@ -8,6 +8,7 @@ import { MemorySection } from './MemorySection.tsx';
 import { MindSection } from './MindSection.tsx';
 import { ProjectsSection } from './ProjectsSection.tsx';
 import { SkillsSection } from './SkillsSection.tsx';
+import { UsageSection } from './UsageSection.tsx';
 
 export interface SettingsViewProps {
   section: SettingsSection;
@@ -20,6 +21,7 @@ const SECTIONS: readonly { id: SettingsSection; label: string; icon: LucideIcon;
   { id: 'proyectos', label: 'Proyectos', icon: FolderGit2, description: 'Carpetas que conoce Berland.' },
   { id: 'memoria', label: 'Memoria', icon: Database, description: 'Vista previa del contexto de cada proyecto.' },
   { id: 'skills', label: 'Skills', icon: Puzzle, description: 'Skills instaladas y en cuarentena.' },
+  { id: 'uso', label: 'Uso y gasto', icon: BarChart3, description: 'Tokens y gasto de la API por modelo, día, rol y proyecto.' },
 ];
 
 function SectionContent({ section }: SettingsViewProps) {
@@ -36,6 +38,8 @@ function SectionContent({ section }: SettingsViewProps) {
       return <MemorySection />;
     case 'skills':
       return <SkillsSection />;
+    case 'uso':
+      return <UsageSection />;
   }
 }
 
@@ -66,7 +70,7 @@ export default function SettingsView({ section }: SettingsViewProps) {
         </ul>
       </nav>
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <PageBody>
+        <PageBody width={section === 'uso' ? 'split' : 'default'}>
           {current ? <PageHeader title={current.label} description={current.description} /> : null}
           <SectionContent section={section} />
         </PageBody>

@@ -1,6 +1,8 @@
 /** Rutas de la interfaz en el fragmento (`#/…`): funcionan igual en Electron y en el navegador. */
-export type SettingsSection = 'general' | 'mente' | 'agentes' | 'proyectos' | 'memoria' | 'skills';
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'mente', 'agentes', 'proyectos', 'memoria', 'skills'];
+export type SettingsSection = 'general' | 'mente' | 'agentes' | 'proyectos' | 'memoria' | 'skills' | 'uso';
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['general', 'mente', 'agentes', 'proyectos', 'memoria', 'skills', 'uso'];
+/** Acceso «Perfil» (`#/perfil`): lleva a Ajustes › Uso y gasto. */
+export const PROFILE_HASH = '#/perfil';
 
 export type Route =
   | { name: 'home' }
@@ -39,6 +41,8 @@ export function parseRoute(hash: string): Route {
     }
     case 'plugins':
       return { name: 'plugins' };
+    case 'perfil':
+      return { name: 'settings', section: 'uso' };
     default:
       return { name: 'home' };
   }

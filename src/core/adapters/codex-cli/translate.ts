@@ -9,7 +9,8 @@ const itemSchema = z.object({ item: z.object({
   status: z.string().optional(), changes: z.array(z.object({ path: z.string(), kind: z.enum(['add', 'update', 'delete']) })).optional(),
 }) });
 const usageSchema = z.object({ usage: z.object({ input_tokens: z.number().int().nonnegative(), output_tokens: z.number().int().nonnegative(),
-  cached_input_tokens: z.number().int().nonnegative().optional(), reasoning_output_tokens: z.number().int().nonnegative().optional() }) });
+  cached_input_tokens: z.number().int().nonnegative().optional(), cache_write_input_tokens: z.number().int().nonnegative().optional(),
+  reasoning_output_tokens: z.number().int().nonnegative().optional() }) });
 const failureSchema = z.object({ message: z.string().optional(), error: z.union([z.string(), z.object({ message: z.string() })]).optional() });
 
 export function classifyCodexError(message: string): ErrorCode {
@@ -18,8 +19,16 @@ export function classifyCodexError(message: string): ErrorCode {
   return 'unknown';
 }
 
+export interface CodexTranslateOptions {
+  /**
+   * Modelo con el que se lanzó Codex (`-m`, el `model` del agente). `codex exec --json` no lo informa en ningún
+   * evento: sin él, el uso queda sin modelo.
+   */
+  model?: string;
+}
+
 /** Los tipos nuevos se conservan como raw; los conocidos malformados fallan explícitamente. */
-export function translateCodexEvent(value: unknown, line: string): EventBody[] {
+export function translateCodexEvent(value: unknown, line: string, opts: CodexTranslateOptions = {}): EventBody[] {
   const raw = (): EventBody[] => [{ type: 'raw', payload: { source: 'codex-cli', line } }];
   const head = envelope.safeParse(value);
   if (!head.success) return [{ type: 'error', payload: { code: 'invalid_output', message: 'Evento Codex sin type válido' } }];
@@ -60,10 +69,13 @@ export function translateCodexEvent(value: unknown, line: string): EventBody[] {
         }
       }
       case 'turn.completed': {
+        // `input_tokens` ya es la entrada total (con lo leído y lo escrito en caché): la convención normalizada.
         const { usage } = usageSchema.parse(value);
         return [{ type: 'usage', payload: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens,
           ...(usage.cached_input_tokens === undefined ? {} : { cachedInputTokens: usage.cached_input_tokens }),
-          ...(usage.reasoning_output_tokens === undefined ? {} : { reasoningTokens: usage.reasoning_output_tokens }) } }];
+          cacheWriteTokens: usage.cache_write_input_tokens ?? 0,
+          ...(usage.reasoning_output_tokens === undefined ? {} : { reasoningTokens: usage.reasoning_output_tokens }),
+          ...(opts.model ? { model: opts.model } : {}) } }];
       }
       case 'error':
       case 'turn.failed': {

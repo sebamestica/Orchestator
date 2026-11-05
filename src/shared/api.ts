@@ -1,5 +1,5 @@
 /**
- * Contratos de F5 (interfaz): ajustes, chats con la mente, adjuntos, carpetas, plugins y plan obligatorio.
+ * Contratos de F5 (interfaz): ajustes, chats con la mente, adjuntos, carpetas, plugins, uso y gasto, y plan obligatorio.
  * Los usan el núcleo (src/core/server) y la interfaz (src/ui). Fuente de verdad: este archivo (lo cambia solo A0).
  * Plan: docs/plan/F5-INTERFAZ.md.
  */
@@ -239,6 +239,149 @@ export type ChatTargetResponse = z.infer<typeof chatTargetResponse>;
 /** Mensaje en vivo (`/ws`) cuando cambia el destino de un chat. */
 export const chatTargetMessageSchema = z.strictObject({ type: z.literal('chat_target'), chatId: z.string(), target: changesTargetSchema });
 export type ChatTargetMessage = z.infer<typeof chatTargetMessageSchema>;
+
+// ── Uso y gasto (GET /usage/summary, GET/PATCH /usage/rates; issue 5) ────────────────────────
+
+const usageDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const tokenCountSchema = z.number().int().nonnegative();
+
+/** `api`: se paga por la clave de API (con costo). `subscription`: Codex y agy, por cupo y sin costo. */
+export const usageBillingSchema = z.enum(['api', 'subscription']);
+export type UsageBilling = z.infer<typeof usageBillingSchema>;
+
+/** Quién gastó: la mente, el autor o el revisor de una tarea, el planificador u otros (sin tarea ni chat). */
+export const usageRoleSchema = z.enum(['mind', 'author', 'reviewer', 'planner', 'other']);
+export type UsageRole = z.infer<typeof usageRoleSchema>;
+
+/** Periodos fijos: hoy, hoy y los 6 días anteriores, y el mes calendario (del día 1 a hoy). */
+export const usagePeriodSchema = z.enum(['today', 'week', 'month']);
+export type UsagePeriod = z.infer<typeof usagePeriodSchema>;
+
+/** Tope del multiplicador de tarifa por modelo. */
+export const MAX_USAGE_MULTIPLIER = 10;
+/** Días como máximo de un rango de `GET /usage/summary`. */
+export const MAX_USAGE_RANGE_DAYS = 366;
+
+/** Suma de uso. Los tokens van separados: entrada nueva + caché escrita + caché leída + salida = total. */
+export const usageBucketSchema = z.strictObject({
+  /** Entrada nueva (sin lo leído ni lo escrito en caché). */
+  inputTokens: tokenCountSchema,
+  cacheWriteTokens: tokenCountSchema,
+  cacheReadTokens: tokenCountSchema,
+  outputTokens: tokenCountSchema,
+  /** Parte de la salida que fue razonamiento (si el proveedor la informa). */
+  reasoningTokens: tokenCountSchema,
+  totalTokens: tokenCountSchema,
+  /** Estimado con precios públicos (el costo que informó el SDK o el adaptador). 0 en suscripción. */
+  costUsd: z.number().nonnegative(),
+  /** `costUsd` × el multiplicador de tu tarifa de cada modelo. */
+  costWithRateUsd: z.number().nonnegative(),
+  /** Registros de uso sumados. */
+  entries: tokenCountSchema,
+});
+export type UsageBucket = z.infer<typeof usageBucketSchema>;
+
+export const usageSplitSchema = z.strictObject({ api: usageBucketSchema, subscription: usageBucketSchema });
+export type UsageSplit = z.infer<typeof usageSplitSchema>;
+
+export const usagePeriodTotalsSchema = z.strictObject({ from: usageDaySchema, to: usageDaySchema, api: usageBucketSchema, subscription: usageBucketSchema });
+
+export const usageModelRowSchema = z.strictObject({
+  ...usageBucketSchema.shape,
+  billing: usageBillingSchema,
+  /** `null`: el evento no informó el modelo. */
+  model: z.string().nullable(),
+  agentIds: z.array(z.string()),
+  /** Multiplicador de tu tarifa (1 si no se cambió; siempre 1 en suscripción). */
+  multiplier: z.number().positive(),
+  /** Registros de API sin costo informado (suman 0). */
+  withoutCost: tokenCountSchema,
+});
+export type UsageModelRow = z.infer<typeof usageModelRowSchema>;
+
+export const usageDayRowSchema = z.strictObject({ day: usageDaySchema, api: usageBucketSchema, subscription: usageBucketSchema });
+export const usageRoleRowSchema = z.strictObject({ role: usageRoleSchema, api: usageBucketSchema, subscription: usageBucketSchema });
+export const usageProjectRowSchema = z.strictObject({
+  /** `null`: sin proyecto (agente suelto, planificador o sesión sin tarea). */
+  projectId: z.string().nullable(),
+  name: z.string().nullable(),
+  api: usageBucketSchema,
+  subscription: usageBucketSchema,
+});
+
+/** Un agente de suscripción (Codex, agy): tokens del rango y su cupo, sin costo. */
+export const usageSubscriptionRowSchema = z.strictObject({
+  ...usageBucketSchema.shape,
+  agentId: z.string(),
+  displayName: z.string(),
+  /** `null`: el agente ya no está registrado. */
+  kind: z.string().nullable(),
+  models: z.array(z.string()),
+  /** Cupo restante más bajo de la última foto (0–1); `null` si no hay foto o no informa fracción. */
+  quotaRemaining: z.number().min(0).max(1).nullable(),
+  quotaTakenAt: isoSchema.nullable(),
+  quotaStale: z.boolean(),
+});
+export type UsageSubscriptionRow = z.infer<typeof usageSubscriptionRowSchema>;
+
+/** Calidad de los datos del rango (para las notas de la sección). */
+export const usageCoverageSchema = z.strictObject({
+  /** Registros de API anteriores al issue 5: no separan la caché escrita (va dentro de la entrada nueva). */
+  withoutCacheWrite: tokenCountSchema,
+  /** Registros de API sin costo informado. */
+  withoutCost: tokenCountSchema,
+  /** Registros de sesiones sin tarea, chat ni planificador (rol «otros»). */
+  unlinked: tokenCountSchema,
+});
+
+/** `period` o `from`/`to` (días AAAA-MM-DD incluidos, en `tz`). Sin nada: el mes calendario. */
+export const usageSummaryQuery = z.strictObject({
+  period: usagePeriodSchema.optional(),
+  from: usageDaySchema.optional(),
+  to: usageDaySchema.optional(),
+  /** Zona horaria IANA de los días (por defecto, la del núcleo). */
+  tz: z.string().min(1).max(64).optional(),
+});
+export type UsageSummaryQuery = z.infer<typeof usageSummaryQuery>;
+
+export const usageSummaryResponse = z.strictObject({
+  currency: z.literal('USD'),
+  timeZone: z.string(),
+  today: usageDaySchema,
+  /** Periodo fijo pedido; `null` si se pidió un rango con `from`/`to`. */
+  period: usagePeriodSchema.nullable(),
+  from: usageDaySchema,
+  to: usageDaySchema,
+  /** Los tres periodos fijos, siempre relativos a `today`. */
+  periods: z.strictObject({ today: usagePeriodTotalsSchema, week: usagePeriodTotalsSchema, month: usagePeriodTotalsSchema }),
+  /** Totales del rango `from`–`to`. */
+  totals: usageSplitSchema,
+  byModel: z.array(usageModelRowSchema),
+  /** Un elemento por día del rango, también los días sin uso. */
+  byDay: z.array(usageDayRowSchema),
+  byRole: z.array(usageRoleRowSchema),
+  byProject: z.array(usageProjectRowSchema),
+  subscriptions: z.array(usageSubscriptionRowSchema),
+  coverage: usageCoverageSchema,
+});
+export type UsageSummary = z.infer<typeof usageSummaryResponse>;
+
+const usageModelKeySchema = z.string().min(1).max(100);
+const usageMultiplierSchema = z.number().positive().max(MAX_USAGE_MULTIPLIER);
+
+/** Multiplicador de tu tarifa para un modelo (los modelos sin fila usan 1: precios públicos). */
+export const usageRateSchema = z.strictObject({ model: z.string().min(1).max(100), multiplier: usageMultiplierSchema, updatedAt: isoSchema });
+export type UsageRate = z.infer<typeof usageRateSchema>;
+export const usageRatesResponse = z.strictObject({ rates: z.array(usageRateSchema) });
+export type UsageRatesResponse = z.infer<typeof usageRatesResponse>;
+
+/** Cambia multiplicadores por modelo; `null` borra el del modelo (vuelve a 1). */
+export const patchUsageRatesBody = z.strictObject({
+  rates: z
+    .record(usageModelKeySchema, usageMultiplierSchema.nullable())
+    .refine((r) => Object.keys(r).length >= 1 && Object.keys(r).length <= 100, { message: 'De 1 a 100 modelos por cambio' }),
+});
+export type PatchUsageRatesBody = z.infer<typeof patchUsageRatesBody>;
 
 // ── Tarea manual (POST /tasks/manual) ────────────────────────────────────────────────────────
 

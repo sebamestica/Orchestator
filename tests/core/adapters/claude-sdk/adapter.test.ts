@@ -158,7 +158,7 @@ describe('ClaudeSdkAdapter.run: errores', () => {
     expect(payload(events, 'error')).toEqual([{ code: 'crash', message: 'spawn ENOENT' }]);
     // Registra lo estimado hasta ese momento.
     // Registra lo estimado hasta ese momento (ver translate.test.ts: prompt ×1,4 escrito en caché y salida del contenido).
-    expect(payload(events, 'usage')).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
+    expect(payload(events, 'usage')).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, cacheWriteTokens: 44080, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
     expect(events.at(-1)?.payload).toEqual({ ok: false });
   });
 

@@ -6385,6 +6385,10 @@
             "type": "integer",
             "minimum": 0
           },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "minimum": 0
+          },
           "reasoningTokens": {
             "type": "integer",
             "minimum": 0

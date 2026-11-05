@@ -9,6 +9,7 @@ import { chatRouteModule } from './f5-chat.ts';
 import { pluginsRouteModule } from './f5-plugins.ts';
 import { settingsStoreFor } from '../settings/index.ts';
 import { f5Servidor } from './f5-servidor.ts';
+import { usageRouteModule } from './f5-uso.ts';
 
 export type RouteModuleFactory = (comp: Composition) => RouteModule;
 
@@ -20,6 +21,8 @@ export const ROUTE_MODULE_FACTORIES: readonly RouteModuleFactory[] = [
   (comp) => chatRouteModule(comp, { settings: () => settingsStoreFor(comp.store.database).get() }),
   // c16-plugins: Chrome y Canva
   pluginsRouteModule,
+  // c29-uso: uso de tokens y gasto de la API por modelo (issue 5)
+  usageRouteModule,
 ];
 
 export function routeModulesFor(comp: Composition): RouteModule[] {

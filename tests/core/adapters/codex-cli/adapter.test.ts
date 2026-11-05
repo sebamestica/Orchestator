@@ -45,7 +45,7 @@ describe('Codex CLI', () => {
     const ctx = await context();
     const events = await collect(new CodexCliAdapter(config, { runner: run }), ctx);
     expect(events.find((e) => e.type === 'text')?.payload).toEqual({ text: 'OK', role: 'assistant' });
-    expect(events.find((e) => e.type === 'usage')?.payload).toEqual({ inputTokens: 22572, cachedInputTokens: 13440, outputTokens: 5, reasoningTokens: 0 });
+    expect(events.find((e) => e.type === 'usage')?.payload).toEqual({ inputTokens: 22572, cachedInputTokens: 13440, cacheWriteTokens: 0, outputTokens: 5, reasoningTokens: 0 });
     expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: true } });
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(new Set(events.map((e) => e.sessionId)).size).toBe(1);

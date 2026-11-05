@@ -154,7 +154,7 @@ export class CodexCliAdapter implements AgentAdapter {
               failed = true;
             }
           } else if (line.kind === 'json') {
-            const events = translateCodexEvent(line.value, line.line).map((event) => relativizeChange(event, ctx.worktreePath));
+            const events = translateCodexEvent(line.value, line.line, this.config.model ? { model: this.config.model } : {}).map((event) => relativizeChange(event, ctx.worktreePath));
             for (const event of events) {
               if (event.type === 'error') failed = true;
               if (event.type === 'usage') completed = true;

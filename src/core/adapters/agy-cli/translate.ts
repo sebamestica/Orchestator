@@ -103,24 +103,58 @@ function summarizeToolInput(params: unknown): string {
   return JSON.stringify(params);
 }
 
-function mapUsage(raw: z.infer<typeof agyUsageRawSchema>): Usage {
+/**
+ * Uso de un paso en la convención normalizada (`usageSchema`): agy informa `input_tokens` SIN la caché leída
+ * (en los datos reales `cache_read_tokens` supera a menudo a `input_tokens`), así que la entrada total es la suma.
+ * agy no informa escritura en caché: va en 0.
+ */
+function mapUsage(raw: z.infer<typeof agyUsageRawSchema>, model: string | undefined): Usage {
+  const cacheRead = raw.cache_read_tokens ?? 0;
   return {
-    inputTokens: raw.input_tokens,
+    inputTokens: raw.input_tokens + cacheRead,
     outputTokens: raw.output_tokens,
-    ...(typeof raw.cache_read_tokens === 'number'
-      ? { cachedInputTokens: raw.cache_read_tokens }
-      : {}),
+    cachedInputTokens: cacheRead,
+    cacheWriteTokens: 0,
     ...(typeof raw.thinking_tokens === 'number'
       ? { reasoningTokens: raw.thinking_tokens }
       : {}),
+    ...(model ? { model } : {}),
   };
+}
+
+export interface AgyTranslateOptions {
+  /** Modelo con el que se lanzó agy (`--model`): se usa si el `init` de la conversación no lo trae. */
+  model?: string;
+}
+
+/** Conversaciones recordadas a la vez (cada ejecución de agy es una; se olvida al llegar su `result`). */
+const MAX_CONVERSATIONS = 64;
+/**
+ * Modelo de cada conversación en curso (`conversation_id` → `init.model`), para anotarlo en el uso de sus pasos:
+ * los `step_update` no lo repiten y la traducción es por línea.
+ */
+const conversationModels = new Map<string, string>();
+
+function rememberModel(conversationId: string | undefined, model: string | undefined): void {
+  if (!conversationId || !model) return;
+  conversationModels.delete(conversationId);
+  conversationModels.set(conversationId, model);
+  while (conversationModels.size > MAX_CONVERSATIONS) {
+    const oldest = conversationModels.keys().next().value;
+    if (oldest === undefined) break;
+    conversationModels.delete(oldest);
+  }
+}
+
+function modelOf(conversationId: string | undefined, opts: AgyTranslateOptions): string | undefined {
+  return (conversationId ? conversationModels.get(conversationId) : undefined) ?? opts.model;
 }
 
 /**
  * Traduce una línea JSON del stream de agy CLI (`--output-format stream-json`)
  * a uno o más fragmentos de AgentEvent (`EventBody`).
  */
-export function translateAgyEvent(value: unknown, line: string): EventBody[] {
+export function translateAgyEvent(value: unknown, line: string, opts: AgyTranslateOptions = {}): EventBody[] {
   const envelope = agyEnvelopeSchema.safeParse(value);
   if (!envelope.success) {
     return [
@@ -138,6 +172,7 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
     switch (envelope.data.event) {
       case 'init': {
         const init = agyInitSchema.parse(value);
+        rememberModel(init.conversation_id, init.init?.model);
         const detail = init.conversation_id ?? init.init?.model;
         return [
           {
@@ -153,6 +188,7 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
       case 'step_update': {
         const parsed = agyStepUpdateSchema.parse(value);
         const step = parsed.step_update;
+        const model = modelOf(step.conversation_id ?? envelope.data.conversation_id, opts);
         const events: EventBody[] = [];
 
         switch (step.step_type) {
@@ -169,7 +205,7 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
             if (step.usage) {
               events.push({
                 type: 'usage',
-                payload: mapUsage(step.usage),
+                payload: mapUsage(step.usage, model),
               });
             }
             return events;
@@ -231,7 +267,7 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
             if (step.usage) {
               events.push({
                 type: 'usage',
-                payload: mapUsage(step.usage),
+                payload: mapUsage(step.usage, model),
               });
             }
             return events;
@@ -239,7 +275,7 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
 
           case 'user_input': {
             if (step.usage) {
-              return [{ type: 'usage', payload: mapUsage(step.usage) }];
+              return [{ type: 'usage', payload: mapUsage(step.usage, model) }];
             }
             return [];
           }
@@ -253,6 +289,8 @@ export function translateAgyEvent(value: unknown, line: string): EventBody[] {
       case 'result': {
         const parsed = agyResultSchema.parse(value);
         const res = parsed.result;
+        const conversationId = res.conversation_id ?? envelope.data.conversation_id;
+        if (conversationId) conversationModels.delete(conversationId);
 
         if (res.status === 'ERROR' || res.error) {
           const message = res.error || 'agy falló con estado ERROR';

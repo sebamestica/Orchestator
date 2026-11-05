@@ -7,7 +7,20 @@
  * respuestas solo `secretRef`.
  */
 import type { LockEntry, QuarantinedSkill, SkillEntry, SkillSource } from '../../src/core/skills/index.ts';
-import type { AgentConfig, AgentEvent, FolderInspection, FsListResponse, MindCandidate, ProbeResult, QuotaSnapshot, Settings, TaskBrief } from '../../src/shared/index.ts';
+import type {
+  AgentConfig,
+  AgentEvent,
+  FolderInspection,
+  FsListResponse,
+  MindCandidate,
+  ProbeResult,
+  QuotaSnapshot,
+  Settings,
+  TaskBrief,
+  UsageBucket,
+  UsageRate,
+  UsageSummary,
+} from '../../src/shared/index.ts';
 
 const T_START = '2026-11-01T21:30:00.000Z';
 const T_ADD = '2026-11-01T21:31:12.000Z';
@@ -241,6 +254,109 @@ export const usageRows = [
   { agentId: ids.agent, day: '2026-11-01', inputTokens: 18250, outputTokens: 2140, cachedInputTokens: 12000, reasoningTokens: 0, costUsd: 0.103, entries: 3 },
   { agentId: ids.codex, day: '2026-11-01', inputTokens: 22572, outputTokens: 5, cachedInputTokens: 13440, reasoningTokens: 0, costUsd: 0, entries: 1 },
 ];
+
+// ----------------------------------------------------------------- uso y gasto (issue 5)
+
+/** Suma de uso con el total calculado (entrada nueva + caché escrita + caché leída + salida). */
+function usageBucket(b: Partial<Omit<UsageBucket, 'totalTokens'>>): UsageBucket {
+  const full = { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, reasoningTokens: 0, costUsd: 0, costWithRateUsd: 0, entries: 0, ...b };
+  return { ...full, totalTokens: full.inputTokens + full.cacheWriteTokens + full.cacheReadTokens + full.outputTokens };
+}
+const noUsage = usageBucket({});
+
+/**
+ * Cifras reales del 2026-11-04 (la base del usuario, en solo lectura), con un multiplicador de 1,3 en los modelos de
+ * Claude. Los proyectos se juntan en uno de ejemplo; esos registros son anteriores al issue 5 (sin caché escrita).
+ */
+const apiDay = usageBucket({ inputTokens: 11669759, cacheReadTokens: 90578547, outputTokens: 1868576, costUsd: 87.980337, costWithRateUsd: 114.374438, entries: 63 });
+const subscriptionDay = usageBucket({ inputTokens: 1936306, cacheReadTokens: 40008176, outputTokens: 209999, reasoningTokens: 85216, entries: 432 });
+const mindDay = usageBucket({ inputTokens: 5735757, cacheReadTokens: 67708621, outputTokens: 1630094, costUsd: 52.604748, costWithRateUsd: 68.386172, entries: 36 });
+const plannerDay = usageBucket({ inputTokens: 67615, cacheReadTokens: 21299, outputTokens: 70290, costUsd: 1.748103, costWithRateUsd: 2.272534, entries: 8 });
+const otherDay = usageBucket({ inputTokens: 5866387, cacheReadTokens: 22848627, outputTokens: 168192, costUsd: 33.627486, costWithRateUsd: 43.715732, entries: 19 });
+const looseDay = usageBucket({ inputTokens: 5934002, cacheReadTokens: 22869926, outputTokens: 238482, costUsd: 35.375589, costWithRateUsd: 45.988266, entries: 27 });
+const T_USAGE_QUOTA = '2026-11-05T01:38:10.355Z';
+
+export const usageSummary: UsageSummary = {
+  currency: 'USD',
+  timeZone: 'America/Santiago',
+  today: '2026-11-04',
+  period: 'month',
+  from: '2026-11-01',
+  to: '2026-11-04',
+  periods: {
+    today: { from: '2026-11-04', to: '2026-11-04', api: apiDay, subscription: subscriptionDay },
+    week: { from: '2026-10-29', to: '2026-11-04', api: apiDay, subscription: subscriptionDay },
+    month: { from: '2026-11-01', to: '2026-11-04', api: apiDay, subscription: subscriptionDay },
+  },
+  totals: { api: apiDay, subscription: subscriptionDay },
+  byModel: [
+    {
+      ...usageBucket({ inputTokens: 9259059, cacheReadTokens: 45871974, outputTokens: 755319, costUsd: 66.67219, costWithRateUsd: 86.673847, entries: 58 }),
+      billing: 'api',
+      model: 'claude-opus-5-5',
+      agentIds: [ids.agent, 'orquestador'],
+      multiplier: 1.3,
+      withoutCost: 0,
+    },
+    {
+      ...usageBucket({ inputTokens: 2368450, cacheReadTokens: 44706573, outputTokens: 1090013, costUsd: 21.291244, costWithRateUsd: 27.678618, entries: 3 }),
+      billing: 'api',
+      model: 'claude-sonnet-5-5',
+      agentIds: ['orquestador'],
+      multiplier: 1.3,
+      withoutCost: 0,
+    },
+    {
+      ...usageBucket({ inputTokens: 42250, outputTokens: 23244, costUsd: 0.016903, costWithRateUsd: 0.021974, entries: 2 }),
+      billing: 'api',
+      model: 'claude-haiku-5-5',
+      agentIds: ['orquestador'],
+      multiplier: 1.3,
+      withoutCost: 0,
+    },
+    { ...subscriptionDay, billing: 'subscription', model: null, agentIds: [ids.agy, ids.codex], multiplier: 1, withoutCost: 0 },
+  ],
+  byDay: [
+    { day: '2026-11-01', api: noUsage, subscription: noUsage },
+    { day: '2026-11-02', api: noUsage, subscription: noUsage },
+    { day: '2026-11-03', api: noUsage, subscription: noUsage },
+    { day: '2026-11-04', api: apiDay, subscription: subscriptionDay },
+  ],
+  byRole: [
+    { role: 'mind', api: mindDay, subscription: noUsage },
+    { role: 'planner', api: plannerDay, subscription: noUsage },
+    { role: 'other', api: otherDay, subscription: subscriptionDay },
+  ],
+  byProject: [
+    { projectId: ids.project, name: 'Vetworld', api: mindDay, subscription: noUsage },
+    { projectId: null, name: null, api: looseDay, subscription: subscriptionDay },
+  ],
+  subscriptions: [
+    {
+      ...usageBucket({ inputTokens: 1333628, cacheReadTokens: 32218480, outputTokens: 144202, reasoningTokens: 79485, entries: 421 }),
+      agentId: ids.agy,
+      displayName: 'Antigravity (agy)',
+      kind: 'agy-cli',
+      models: [],
+      quotaRemaining: 0.79,
+      quotaTakenAt: T_USAGE_QUOTA,
+      quotaStale: false,
+    },
+    {
+      ...usageBucket({ inputTokens: 602678, cacheReadTokens: 7789696, outputTokens: 65797, reasoningTokens: 5731, entries: 11 }),
+      agentId: ids.codex,
+      displayName: 'Codex CLI',
+      kind: 'codex-cli',
+      models: [],
+      quotaRemaining: 0.9,
+      quotaTakenAt: '2026-11-05T01:37:59.854Z',
+      quotaStale: false,
+    },
+  ],
+  coverage: { withoutCacheWrite: 63, withoutCost: 0, unlinked: 451 },
+};
+
+export const usageRates: UsageRate[] = [{ model: 'claude-opus-5-5', multiplier: 1.3, updatedAt: '2026-11-04T22:10:00.000Z' }];
 
 // --------------------------------------------------------------------- skills y memoria
 

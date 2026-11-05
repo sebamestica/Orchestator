@@ -30,6 +30,11 @@ import {
   taskBriefSchema,
   taskStateSchema,
   usageSchema,
+  patchUsageRatesBody,
+  usageBucketSchema,
+  usageRateSchema,
+  usageRatesResponse,
+  usageSummaryResponse,
 } from '../../src/shared/index.ts';
 
 // -------------------------------------------------------------------------- WebSocket
@@ -130,6 +135,10 @@ const outputs: readonly [z.ZodType, string][] = [
   [s.eventsResponse, 'EventsResponse'],
   [s.usageRowSchema, 'UsageRow'],
   [s.usageResponse, 'UsageResponse'],
+  [usageBucketSchema, 'UsageBucket'],
+  [usageSummaryResponse, 'UsageSummary'],
+  [usageRateSchema, 'UsageRate'],
+  [usageRatesResponse, 'UsageRatesResponse'],
   [s.skillsResponse, 'SkillsResponse'],
   [s.skillResultResponse, 'SkillResultResponse'],
   [s.memoryContextResponse, 'MemoryContextResponse'],
@@ -149,6 +158,7 @@ const inputs: readonly [z.ZodType, string][] = [
   [s.approveTaskBody, 'ApproveTaskRequest'],
   [s.cancelTaskBody, 'CancelTaskRequest'],
   [s.importSkillBody, 'ImportSkillRequest'],
+  [patchUsageRatesBody, 'PatchUsageRatesRequest'],
   [wsClientMessageSchema, 'WsClientMessage'],
 ];
 for (const [schema, id] of inputs) inputComponents.add(schema, { id });
@@ -176,6 +186,10 @@ export const componentDescriptions: Readonly<Record<string, string>> = {
   AddAgentRequest: 'Con `apiKey` (va a la bóveda y se prueba) o configuración sin clave (CLI).',
   PatchAgentRequest: 'Cambios sobre un agente existente (al menos un campo). `null` borra un campo opcional.',
   QuotaRecord: 'Foto de cupo guardada.',
+  UsageBucket: 'Suma de uso: entrada nueva, caché escrita, caché leída y salida (total = las cuatro), costo estimado con precios públicos y con tu tarifa, en USD.',
+  UsageSummary: 'Resumen de uso y gasto (issue 5): periodos fijos (hoy, 7 días, mes calendario) y el rango pedido por modelo, día, rol y proyecto. Codex y agy van como suscripción, sin costo.',
+  UsageRate: 'Multiplicador de tu tarifa para un modelo sobre los precios públicos (un modelo sin fila vale 1).',
+  PatchUsageRatesRequest: 'Multiplicador por modelo (0–10); `null` lo borra y el modelo vuelve a 1.',
   WsServerMessage: 'Mensaje que el servidor envía por `/ws`.',
   WsClientMessage: 'Mensaje que el cliente envía por `/ws`.',
 };

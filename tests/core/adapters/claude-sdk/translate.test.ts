@@ -67,7 +67,7 @@ describe('ClaudeSdkTranslator con la fixture real (tarea con un subagente)', () 
     const events = translateAll(messages, tr);
     expect(events[0]?.payload).toEqual({ state: 'running', detail: 'modelo claude-opus-5-5 · Claude Code 2.1.302 · permisos acceptEdits' });
     expect(payload(events, 'usage')).toEqual([
-      { inputTokens: 16 + 46330 + 77719, outputTokens: 196, cachedInputTokens: 46330, reasoningTokens: 0, costUsd: 0.401845, model: 'claude-opus-5-5' },
+      { inputTokens: 16 + 46330 + 77719, outputTokens: 196, cachedInputTokens: 46330, cacheWriteTokens: 77719, reasoningTokens: 0, costUsd: 0.401845, model: 'claude-opus-5-5' },
     ]);
     expect(tr.sdkSessionId).toBe('d21b3f48-2a67-4f10-b0dd-ec6b5b6ba138');
     expect(tr.costUsd).toBe(0.401845);
@@ -82,7 +82,7 @@ describe('ClaudeSdkTranslator con la fixture real (tarea con un subagente)', () 
     expect(tr.estimatedCostUsd).toBeCloseTo((44080 * 5 + 48 * 20) / 1e6, 9);
     expect(tr.spentUsd).toBe(tr.estimatedCostUsd);
     const partial = tr.partialUsageEvents().map((e) => e.payload);
-    expect(partial).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
+    expect(partial).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, cacheWriteTokens: 44080, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
   });
 });
 
@@ -129,7 +129,7 @@ describe('ClaudeSdkTranslator: costo de una sesión cortada (sesión de 14,55 US
       parent_tool_use_id: null,
       message: { id: 'msg_1', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 2_000 } },
     });
-    expect(tr.partialUsageEvents()[0]?.payload).toEqual({ inputTokens: 92_010, outputTokens: 1, cachedInputTokens: 90_000, costUsd: 0.02806, model: 'claude-opus-5-5' });
+    expect(tr.partialUsageEvents()[0]?.payload).toEqual({ inputTokens: 92_010, outputTokens: 1, cachedInputTokens: 90_000, cacheWriteTokens: 2_000, costUsd: 0.02806, model: 'claude-opus-5-5' });
   });
 });
 
@@ -145,13 +145,13 @@ describe('ClaudeSdkTranslator con errores reales', () => {
     expect(payload(events, 'text')).toEqual([]);
     expect(payload(events, 'error')).toEqual([{ code: 'auth', message: 'Failed to authenticate. API Error: 401 unauthorized (HTTP 401)' }]);
     expect(events.at(-1)?.payload).toEqual({ ok: false, summary: 'Failed to authenticate. API Error: 401 unauthorized' });
-    expect(payload(events, 'usage')).toEqual([{ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, costUsd: 0 }]);
+    expect(payload(events, 'usage')).toEqual([{ inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, costUsd: 0 }]);
   });
 
   it('tope de presupuesto del SDK (error_max_budget_usd) → quota_exhausted con el gasto registrado', () => {
     const events = translateAll(loadJsonl('budget-exceeded.jsonl'));
     expect(payload(events, 'usage')).toEqual([
-      { inputTokens: 4 + 4909, outputTokens: 33, cachedInputTokens: 0, reasoningTokens: 0, costUsd: 0.025221, model: 'claude-opus-5-5' },
+      { inputTokens: 4 + 4909, outputTokens: 33, cachedInputTokens: 0, cacheWriteTokens: 4909, reasoningTokens: 0, costUsd: 0.025221, model: 'claude-opus-5-5' },
     ]);
     expect(payload(events, 'error')).toEqual([{ code: 'quota_exhausted', message: 'Se alcanzó el tope de presupuesto del encargo (0.0252 USD gastados).' }]);
     expect(events.at(-1)?.payload).toMatchObject({ ok: false });

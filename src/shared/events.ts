@@ -16,9 +16,16 @@ export const errorCodeSchema = z.enum(['quota_exhausted', 'auth', 'timeout', 'cr
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
 export const usageSchema = z.strictObject({
+  /** Entrada total procesada: la nueva más lo leído de caché y lo escrito en ella. */
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
+  /** Parte de `inputTokens` leída de caché. */
   cachedInputTokens: z.number().int().nonnegative().optional(),
+  /**
+   * Parte de `inputTokens` escrita en caché (0 si el proveedor no la informa). Un evento con este campo sigue la
+   * convención de arriba; los anteriores al issue 5 no lo traen (agy guardaba la entrada sin la caché).
+   */
+  cacheWriteTokens: z.number().int().nonnegative().optional(),
   reasoningTokens: z.number().int().nonnegative().optional(),
   costUsd: z.number().nonnegative().optional(),
   model: z.string().optional(),

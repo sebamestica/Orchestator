@@ -224,7 +224,7 @@ export class AgyCliAdapter implements AgentAdapter {
               failed = true;
             }
           } else if (line.kind === 'json') {
-            const events = translateAgyEvent(line.value, line.line).map((event) =>
+            const events = translateAgyEvent(line.value, line.line, this.config.model ? { model: this.config.model } : {}).map((event) =>
               relativizeChange(event, ctx.worktreePath),
             );
             for (const event of events) {

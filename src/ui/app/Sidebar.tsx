@@ -1,10 +1,10 @@
-import { Folder, KanbanSquare, MessageSquarePlus, MoreHorizontal, Plus, Puzzle, Settings } from 'lucide-react';
+import { CircleUserRound, Folder, KanbanSquare, MessageSquarePlus, MoreHorizontal, Plus, Puzzle, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { IconButton } from '../components/IconButton.tsx';
 import { NavItem } from '../components/NavItem.tsx';
 import { AddProjectDialog } from '../features/projects/AddProjectDialog.tsx';
 import { useApp } from '../store/app.ts';
-import { routeHash, type Route } from './routes.ts';
+import { PROFILE_HASH, routeHash, type Route } from './routes.ts';
 
 function StatusDot() {
   const core = useApp((s) => s.core);
@@ -70,7 +70,8 @@ export function Sidebar({ route }: { route: Route }) {
         <div className="mt-2 flex flex-col gap-1 border-t border-foreground/[0.06] pt-2">
           <StatusDot />
           <ul>
-            <NavItem icon={Settings} label="Ajustes" href={routeHash({ name: 'settings', section: 'general' })} active={route.name === 'settings'} />
+            <NavItem icon={CircleUserRound} label="Perfil" href={PROFILE_HASH} active={route.name === 'settings' && route.section === 'uso'} />
+            <NavItem icon={Settings} label="Ajustes" href={routeHash({ name: 'settings', section: 'general' })} active={route.name === 'settings' && route.section !== 'uso'} />
           </ul>
         </div>
       </div>

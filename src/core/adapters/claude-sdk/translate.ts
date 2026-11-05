@@ -210,10 +210,12 @@ export class ClaudeSdkTranslator {
     return Object.entries(modelUsage).map(([model, u]) => {
       const cached = Math.round(u.cacheReadInputTokens ?? 0);
       const payload: EventOf<'usage'>['payload'] = {
-        // Entrada total procesada (incluye lo leído de caché y lo escrito en ella); `cachedInputTokens` es el subconjunto leído de caché.
+        // Entrada total procesada (incluye lo leído de caché y lo escrito en ella); `cachedInputTokens` y
+        // `cacheWriteTokens` son las partes leída y escrita.
         inputTokens: Math.round(u.inputTokens + (u.cacheReadInputTokens ?? 0) + (u.cacheCreationInputTokens ?? 0)),
         outputTokens: Math.round(u.outputTokens),
         cachedInputTokens: cached,
+        cacheWriteTokens: Math.round(u.cacheCreationInputTokens ?? 0),
         model,
       };
       if (u.thinkingTokens !== undefined) payload.reasoningTokens = Math.round(u.thinkingTokens);
@@ -245,6 +247,7 @@ export class ClaudeSdkTranslator {
         inputTokens: Math.round(u.input + u.cacheRead + u.cacheWrite),
         outputTokens: Math.round(u.output),
         cachedInputTokens: Math.round(u.cacheRead),
+        cacheWriteTokens: Math.round(u.cacheWrite),
         costUsd: Math.round(u.cost * 1e6) / 1e6,
         model,
       }),
@@ -559,11 +562,13 @@ export class ClaudeSdkTranslator {
     } else {
       // Sin desglose por modelo: un solo evento con el total.
       const cacheRead = r.usage.cache_read_input_tokens ?? 0;
+      const cacheWrite = r.usage.cache_creation_input_tokens ?? 0;
       out.push(
         this.#event('usage', {
-          inputTokens: Math.round((r.usage.input_tokens ?? 0) + cacheRead + (r.usage.cache_creation_input_tokens ?? 0)),
+          inputTokens: Math.round((r.usage.input_tokens ?? 0) + cacheRead + cacheWrite),
           outputTokens: Math.round(r.usage.output_tokens ?? 0),
           cachedInputTokens: Math.round(cacheRead),
+          cacheWriteTokens: Math.round(cacheWrite),
           costUsd: r.total_cost_usd,
         }),
       );
