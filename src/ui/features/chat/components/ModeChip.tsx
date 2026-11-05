@@ -11,7 +11,10 @@ interface ModeChipProps {
   isDisabled?: boolean;
 }
 
-/** Ficha del modo de la mente (Plan neutra, Auto verde, Bypass roja): clic o Shift+Tab para cambiar. */
+/**
+ * Ficha del modo de la mente (Plan neutra, Auto verde, Bypass roja, Chat de acento: «Chat · como Claude Code», sin
+ * flota): clic o Shift+Tab para cambiar. Etiquetas y descripciones en `MODE_INFO`.
+ */
 export function ModeChip({ mode, onChange, mind, isDisabled = false }: ModeChipProps) {
   const info = MODE_INFO[mode];
   const next = nextMindMode(mode);

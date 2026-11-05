@@ -11,7 +11,7 @@ export function FakeComposer(props: ComposerProps) {
   const [text, setText] = useState('');
   lastComposerProps.current = props;
   return (
-    <div data-testid="composer" data-streaming={props.isStreaming ? 'true' : 'false'} data-mode={props.mode}>
+    <div data-testid="composer" data-streaming={props.isStreaming ? 'true' : 'false'} data-mode={props.mode} data-effort={props.effort}>
       <textarea aria-label="Mensaje" placeholder={props.placeholder} value={text} disabled={props.isDisabled} onChange={(e) => setText(e.target.value)} />
       <button
         type="button"

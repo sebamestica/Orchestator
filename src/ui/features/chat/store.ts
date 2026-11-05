@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand';
 import type { AgentEvent, Attachment, Chat, ChatMessage, MindMode, Proposal } from '../../../shared/index.ts';
+import { effortSchema, opaqueIdSchema, type Effort, type SendMessageBody } from '../../../shared/api.ts';
 import { api, ApiError } from '../../api/client.ts';
 import type { LiveMessage } from '../../api/live.ts';
 import { mergeEvents, upsertMessage } from './timeline.ts';
@@ -65,6 +66,52 @@ export async function attachFile(file: File): Promise<Attachment> {
   return r.attachment;
 }
 
+// ── Esfuerzo de razonamiento por chat ────────────────────────────────────────────────────────
+
+/** Clave de `localStorage` con el esfuerzo elegido en cada chat (respaldo del store). */
+export const EFFORT_STORAGE_KEY = 'berland.chat.effort';
+/** Chats recordados como máximo (se olvidan los más antiguos). */
+export const MAX_REMEMBERED_EFFORTS = 200;
+
+type Efforts = Readonly<Record<string, Effort>>;
+
+/** Esfuerzo guardado de un chat (solo propiedades propias: un id no puede leer `Object.prototype`). */
+export function effortIn(efforts: Efforts, chatId: string): Effort | null {
+  return Object.hasOwn(efforts, chatId) ? (efforts[chatId] ?? null) : null;
+}
+
+/** Lee el respaldo; lo que no sea `{ chatId: esfuerzo }` válido se descarta. Sin almacenamiento, vacío. */
+export function readEfforts(): Record<string, Effort> {
+  try {
+    const raw = globalThis.localStorage?.getItem(EFFORT_STORAGE_KEY);
+    if (!raw) return {};
+    const data: unknown = JSON.parse(raw);
+    if (!isRecord(data)) return {};
+    return Object.fromEntries(
+      Object.entries(data).flatMap(([id, value]) => {
+        const effort = effortSchema.safeParse(value);
+        return opaqueIdSchema.safeParse(id).success && effort.success ? [[id, effort.data] as const] : [];
+      }).slice(-MAX_REMEMBERED_EFFORTS),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeEfforts(efforts: Efforts): void {
+  try {
+    globalThis.localStorage?.setItem(EFFORT_STORAGE_KEY, JSON.stringify(efforts));
+  } catch {
+    // Sin almacenamiento (modo privado, cuota llena): el esfuerzo queda solo en memoria.
+  }
+}
+
+/** Pone `chatId` al final (el más reciente) y recorta a los últimos `MAX_REMEMBERED_EFFORTS`. */
+function withEffort(efforts: Efforts, chatId: string, effort: Effort | null): Record<string, Effort> {
+  const rest = Object.entries(efforts).filter(([id]) => id !== chatId);
+  return Object.fromEntries((effort ? [...rest, [chatId, effort] as const] : rest).slice(-MAX_REMEMBERED_EFFORTS));
+}
+
 interface ChatData {
   projectId: string | null;
   status: ChatStatus;
@@ -86,6 +133,19 @@ interface ChatData {
   notice: string | null;
   /** Propuestas con una acción en curso (`'*'` = aprobar todo). */
   busy: Record<string, true>;
+  /** Esfuerzo elegido en cada chat (id → nivel), con respaldo en `localStorage`. Sobrevive a `open`. */
+  efforts: Efforts;
+  /** Esfuerzo elegido antes de crear el chat: pasa al chat nuevo al crearlo. */
+  draftEffort: Effort | null;
+}
+
+/**
+ * Esfuerzo elegido para el próximo mensaje: el del chat abierto (o del que se está abriendo) o, sin chat, el del
+ * borrador. `null`: no se eligió; la vista usa el de Ajustes.
+ */
+export function chosenEffort(s: Pick<ChatData, 'chat' | 'activeId' | 'status' | 'efforts' | 'draftEffort'>): Effort | null {
+  const id = s.chat?.id ?? (s.status === 'loading' ? s.activeId : null);
+  return id ? effortIn(s.efforts, id) : s.draftEffort;
 }
 
 interface ChatActions {
@@ -98,7 +158,9 @@ interface ChatActions {
   deleteChat(chatId: string): Promise<void>;
   setMode(mode: MindMode): Promise<void>;
   setExtraRoots(roots: string[]): Promise<void>;
-  send(chatId: string, text: string, attachments: Attachment[]): Promise<boolean>;
+  /** Recuerda el esfuerzo del chat abierto (o del borrador, si aún no hay chat). */
+  setEffort(effort: Effort): void;
+  send(chatId: string, text: string, attachments: Attachment[], effort?: Effort): Promise<boolean>;
   interrupt(): Promise<void>;
   decide(taskId: string, decision: Decision): Promise<void>;
   approveAll(): Promise<void>;
@@ -109,7 +171,8 @@ interface ChatActions {
 
 export type ChatStore = ChatData & ChatActions;
 
-const INITIAL: ChatData = {
+/** Estado de una apertura nueva. `efforts` no está: se recuerda entre aperturas. */
+const INITIAL: Omit<ChatData, 'efforts'> = {
   projectId: null,
   status: 'idle',
   error: null,
@@ -124,6 +187,7 @@ const INITIAL: ChatData = {
   pendingRoots: [],
   notice: null,
   busy: {},
+  draftEffort: null,
 };
 
 /** Cambia en cada `open`/`reset`: las respuestas de una apertura anterior se descartan. */
@@ -170,6 +234,14 @@ export const useChat = create<ChatStore>((set, get) => {
     }
   }
 
+  /** Guarda (o, con `null`, olvida) el esfuerzo de un chat, en el store y en el respaldo. */
+  function rememberEffort(chatId: string, effort: Effort | null): void {
+    if (effort === null && !Object.hasOwn(get().efforts, chatId)) return;
+    const efforts = withEffort(get().efforts, chatId, effort);
+    writeEfforts(efforts);
+    set({ efforts });
+  }
+
   function setBusy(key: string, on: boolean) {
     set((s) => ({
       busy: on ? { ...s.busy, [key]: true } : (Object.fromEntries(Object.entries(s.busy).filter(([k]) => k !== key)) as Record<string, true>),
@@ -178,10 +250,11 @@ export const useChat = create<ChatStore>((set, get) => {
 
   return {
     ...INITIAL,
+    efforts: readEfforts(),
 
     reset() {
       generation++;
-      set({ ...INITIAL });
+      set({ ...INITIAL, efforts: readEfforts() });
     },
 
     async open(projectId, chatId, defaultMode) {
@@ -223,7 +296,7 @@ export const useChat = create<ChatStore>((set, get) => {
     },
 
     async createChat(opts = {}) {
-      const { projectId, draftMode, pendingRoots } = get();
+      const { projectId, draftMode, pendingRoots, draftEffort } = get();
       const gen = generation;
       try {
         const r = await api.post<{ chat: Chat }>('/chats', {
@@ -232,6 +305,8 @@ export const useChat = create<ChatStore>((set, get) => {
           ...(opts.cwd ? { cwd: opts.cwd } : {}),
           ...(pendingRoots.length ? { extraRoots: pendingRoots } : {}),
         });
+        // Lo elegido en el borrador queda como esfuerzo del chat nuevo.
+        if (draftEffort) rememberEffort(r.chat.id, draftEffort);
         if (gen !== generation) return r.chat;
         set((s) => ({
           chats: upsertChat(s.chats, r.chat),
@@ -242,6 +317,7 @@ export const useChat = create<ChatStore>((set, get) => {
           events: [],
           lastSeq: -1,
           pendingRoots: [],
+          draftEffort: null,
           status: 'ready',
           notice: null,
         }));
@@ -268,6 +344,7 @@ export const useChat = create<ChatStore>((set, get) => {
         set({ notice: `No se pudo borrar: ${errorText(err)}` });
         return;
       }
+      rememberEffort(chatId, null);
       const rest = get().chats.filter((c) => c.id !== chatId);
       set({ chats: rest });
       if (get().activeId !== chatId) return;
@@ -314,12 +391,16 @@ export const useChat = create<ChatStore>((set, get) => {
       }
     },
 
-    async send(chatId, text, attachments) {
+    setEffort(effort) {
+      const chat = get().chat;
+      if (chat) rememberEffort(chat.id, effort);
+      else set({ draftEffort: effort });
+    },
+
+    async send(chatId, text, attachments, effort) {
+      const body: SendMessageBody = { text, attachmentIds: attachments.map((a) => a.id), ...(effort ? { effort } : {}) };
       try {
-        const r = await api.post<{ message?: ChatMessage; chat?: Chat }>(`/chats/${enc(chatId)}/messages`, {
-          text,
-          attachmentIds: attachments.map((a) => a.id),
-        });
+        const r = await api.post<{ message?: ChatMessage; chat?: Chat }>(`/chats/${enc(chatId)}/messages`, body);
         if (get().activeId !== chatId) return true;
         set((s) => ({
           messages: r?.message ? upsertMessage(s.messages, r.message) : s.messages,
@@ -405,6 +486,7 @@ export const useChat = create<ChatStore>((set, get) => {
           if (message.message.chatId === s.activeId) set((st) => ({ messages: upsertMessage(st.messages, message.message) }));
           return;
         case 'chat_deleted':
+          rememberEffort(message.chatId, null);
           set((st) => ({ chats: st.chats.filter((c) => c.id !== message.chatId) }));
           if (message.chatId === s.activeId) set({ status: 'missing', chat: null, messages: [], proposals: [], events: [], lastSeq: -1 });
           return;

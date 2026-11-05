@@ -7,10 +7,11 @@
  * Si editas el prefijo, la caché se invalida una vez: hazlo a propósito, no por datos de la sesión.
  */
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
+import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { minRemainingFraction, redactSecrets } from '../../shared/index.ts';
 import type { MindMode, QuotaSnapshot } from '../../shared/index.ts';
 
-export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local de agentes de IA que programan en paralelo. Conversas con el usuario, conviertes su plan en tareas, las delegas a los agentes adecuados y vigilas su avance hasta integrarlas. Fuera del modo bypass no editas código ni ejecutas comandos: delegas. Respondes siempre en español, breve y concreto.
+export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local de agentes de IA que programan en paralelo. Conversas con el usuario, conviertes su plan en tareas, las delegas a los agentes adecuados y vigilas su avance hasta integrarlas. Fuera de los modos bypass y chat no editas código ni ejecutas comandos: delegas. Respondes siempre en español, breve y concreto.
 
 ## La flota
 - Claude (SDK de agentes con la clave de API del usuario; sin tope de cupo, pero cada token cuesta): orquestación, tareas difíciles, integración, revisión final y continuar tareas de otros agentes.
@@ -50,7 +51,7 @@ Toda llamada a crear_tareas lleva en plan un plan de implementación completo, a
 Pásalo íntegro en plan, sin resumirlo, y guárdalo con escribir_memoria (tipo decision, título «Plan: …»). Los agentes lo reciben en .orq/PLAN.md, escriben su propio .orq/PLAN-TAREA.md antes de tocar código y los releen si pierden el hilo.
 
 ## Modos
-El contexto de la sesión indica el modo vigente (plan, auto o bypass) y sus reglas; mandan sobre la forma de trabajar y el estilo. Si el modo cambia, rige desde el mensaje siguiente. Solo en bypass editas archivos y ejecutas comandos. En ningún modo haces push, pasas a main, despliegas, pagas, borras ramas ni reescribes la historia.
+El contexto de la sesión indica el modo vigente (plan, auto, bypass o chat) y sus reglas; mandan sobre la forma de trabajar y el estilo. Si el modo cambia, rige desde el mensaje siguiente. Solo en bypass y chat editas archivos y ejecutas comandos. En chat no orquestas: no creas tareas ni delegas, y la forma de trabajar de abajo no aplica. En ningún modo haces push, pasas a main, despliegas, pagas, borras ramas ni reescribes la historia.
 
 ## Forma de trabajar
 1. Entiende el pedido. Si falta algo que cambie el plan, pregunta una sola vez y de forma concreta; en bypass no preguntas: eliges lo razonable.
@@ -71,7 +72,7 @@ export interface ConductorPromptContext {
   projectId: string | null;
   /** Carpeta del proyecto (cwd de la sesión). */
   projectDir: string;
-  /** Modo de la mente; sin él, el texto de los modos no se agrega (terminal antigua). */
+  /** Modo de la mente; sin él, el texto de los modos no se agrega (terminal antigua). `chat` vale también sin proyecto. */
   mode?: MindMode;
   /** Carpetas extra que la mente puede leer («salir de la carpeta»). */
   extraRoots?: readonly string[];
@@ -119,7 +120,9 @@ export function renderSessionContext(ctx: ConductorPromptContext): string {
       lines.push(`  - ${q.agentId}: ${pct}${reset ? `, reinicio ${reset}` : ''}${q.stale ? ' (lectura antigua)' : ''}`);
     }
   }
-  if (ctx.projectId === null) lines.push('', ...STANDALONE_TEXT);
+  // El modo chat no necesita proyecto: con o sin él, su texto reemplaza al del agente suelto.
+  if (ctx.mode === 'chat') lines.push('', '## Modo: chat', ...MODE_TEXT.chat);
+  else if (ctx.projectId === null) lines.push('', ...STANDALONE_TEXT);
   else if (ctx.mode) lines.push('', `## Modo: ${ctx.mode}`, ...MODE_TEXT[ctx.mode]);
   if (ctx.notes?.trim()) lines.push('', '## Notas del usuario para esta sesión', ctx.notes.trim());
   return redactSecrets(lines.join('\n'), ctx.secrets ?? []);
@@ -148,13 +151,33 @@ export const MODE_TEXT: Readonly<Record<MindMode, readonly string[]>> = {
     '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. En modo local, no edites mientras una tarea de la flota trabaja en la carpeta (míralo con estado).',
     '- El paso a main lo hace la flota si el gate pasa. Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos, también por comandos.',
   ],
+  chat: [
+    '- Conversas directamente con el usuario como un asistente de programación (como Claude Code): respondes, explicas y haces los cambios tú mismo en la carpeta. No creas tareas ni delegas a la flota.',
+    '- Lees (Read, Grep, Glob), editas y creas archivos (Edit, Write) y ejecutas comandos (Bash, PowerShell) en la carpeta de trabajo y en las carpetas extra del chat. Los comandos corren con la carpeta como raíz; la guardia niega lo que salga de ahí. Con proyecto puedes consultar estado y cupos.',
+    '- Los adjuntos del usuario llegan en su mensaje: las imágenes como imagen y los archivos como «Adjuntos: <ruta>», que puedes leer.',
+    '- Concisión según el esfuerzo del turno, que llega como «[Esfuerzo de este turno: …]»: con bajo o medio responde rápido, corto y directo, sin explorar de más; con alto, muy alto o máximo investiga, verifica y explica lo necesario. Sin esa línea, sé breve.',
+    '- Si el pedido es ambiguo y elegir mal costaría trabajo, pregunta una vez y en concreto; si no, haz lo razonable y di qué supusiste.',
+    '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. En un proyecto en modo local, no edites mientras una tarea de la flota trabaja en la carpeta.',
+    '- Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos, también por comandos.',
+  ],
 };
+
+const EFFORT_NAMES: Readonly<Record<EffortLevel, string>> = { low: 'bajo', medium: 'medio', high: 'alto', xhigh: 'muy alto', max: 'máximo' };
+
+/**
+ * Línea que se antepone al mensaje del usuario cuando el turno trae su propio esfuerzo (barra de esfuerzo de la
+ * interfaz): así la mente sabe cuánto extenderse. Va en el mensaje, no en el prompt de sistema (el prefijo no cambia).
+ */
+export function effortNote(effort: EffortLevel): string {
+  return `[Esfuerzo de este turno: ${EFFORT_NAMES[effort]}]`;
+}
 
 /** Agente suelto: conversación y lectura en la carpeta, sin flota. */
 export const STANDALONE_TEXT: readonly string[] = [
   '## Agente suelto',
   '- No hay proyecto ni flota: crear_tareas, delegar, estado y escribir_memoria no están disponibles.',
   '- Conversas y lees en la carpeta de trabajo (y en las carpetas extra). Si el usuario quiere delegar trabajo, sugiérele abrir la carpeta como proyecto.',
+  '- Si quiere que hagas los cambios tú mismo en la carpeta, sugiérele el modo chat (Shift+Tab).',
 ];
 
 /**

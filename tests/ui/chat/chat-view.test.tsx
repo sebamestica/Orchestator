@@ -179,7 +179,7 @@ describe('respuesta en vivo', () => {
 });
 
 describe('modo de la mente', () => {
-  it('Shift+Tab fuera de un campo de texto cicla auto → plan → bypass → auto con PATCH', async () => {
+  it('Shift+Tab fuera de un campo de texto cicla auto → plan → bypass → chat → auto con PATCH', async () => {
     const chat = makeChat({ mode: 'auto' });
     const { calls } = fakeCore({ chats: [chat], messages: { [chat.id]: [] } });
     render(<ChatView projectId="demo" />);
@@ -190,6 +190,7 @@ describe('modo de la mente', () => {
     const steps = [
       ['plan', 'text-foreground'],
       ['bypass', 'text-danger'],
+      ['chat', 'text-accent'],
       ['auto', 'text-success'],
     ] as const;
     for (const [mode, tone] of steps) {
@@ -198,16 +199,16 @@ describe('modo de la mente', () => {
       expect(screen.getByTestId('mode-chip').className).toContain(tone);
       expect(screen.getByTestId('composer').dataset.mode).toBe(mode);
     }
-    await waitFor(() => expect(patches(calls)).toEqual([{ mode: 'plan' }, { mode: 'bypass' }, { mode: 'auto' }]));
+    await waitFor(() => expect(patches(calls)).toEqual([{ mode: 'plan' }, { mode: 'bypass' }, { mode: 'chat' }, { mode: 'auto' }]));
     expect(calls.filter((c) => c.method === 'PATCH').every((c) => c.path === '/chats/chat_abc123')).toBe(true);
 
     // Dentro de un campo de texto, Shift+Tab es del campo (el Composer decide).
     fireEvent.keyDown(screen.getByLabelText('Mensaje'), { key: 'Tab', shiftKey: true });
-    expect(patches(calls)).toHaveLength(3);
+    expect(patches(calls)).toHaveLength(4);
 
     // También con clic en la ficha.
     fireEvent.click(screen.getByTestId('mode-chip'));
-    await waitFor(() => expect(patches(calls)).toEqual([{ mode: 'plan' }, { mode: 'bypass' }, { mode: 'auto' }, { mode: 'plan' }]));
+    await waitFor(() => expect(patches(calls)).toEqual([{ mode: 'plan' }, { mode: 'bypass' }, { mode: 'chat' }, { mode: 'auto' }, { mode: 'plan' }]));
   });
 
   it('el Composer cambia el modo con onModeChange', async () => {
@@ -367,7 +368,7 @@ describe('estado vacío y primer mensaje', () => {
     fireEvent.click(screen.getByRole('button', { name: first }));
     await waitFor(() => expect(window.location.hash).toBe('#/p/demo/c/chat_new001'));
     expect(calls.find((c) => c.method === 'POST' && c.path === '/chats')?.body).toEqual({ projectId: 'demo', mode: 'bypass' });
-    await waitFor(() => expect(calls.find((c) => c.path === '/chats/chat_new001/messages' && c.method === 'POST')?.body).toEqual({ text: first, attachmentIds: [] }));
+    await waitFor(() => expect(calls.find((c) => c.path === '/chats/chat_new001/messages' && c.method === 'POST')?.body).toEqual({ text: first, attachmentIds: [], effort: 'medium' }));
     expect(await screen.findByTestId('user-message')).toBeTruthy();
     expect(screen.getByText('Pensando…')).toBeTruthy();
     expect(patches(calls)).toEqual([]);

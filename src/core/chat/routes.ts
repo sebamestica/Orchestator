@@ -106,7 +106,7 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       tag: 'Chats',
       summary: 'Crea un chat con la mente',
       description:
-        'La mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; para un agente suelto (`projectId: null`, sin flota) es obligatoria. `mode` por defecto: `settings.defaultMode`.',
+        'La mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; para un agente suelto (`projectId: null`, sin flota) es obligatoria. `mode` por defecto: `settings.defaultMode`; `chat` (como Claude Code, sin flota) vale también sin proyecto.',
       body: createChatBody,
       response: chatResponse,
       status: 201,
@@ -125,7 +125,8 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       path: '/chats/:id',
       tag: 'Chats',
       summary: 'Renombra el chat, cambia el modo (Shift+Tab) o las carpetas extra',
-      description: 'El cambio de modo rige desde el turno siguiente; la guardia de herramientas lo ve al instante (en `plan`, `delegar` queda bloqueada).',
+      description:
+        'El cambio de modo rige desde el turno siguiente; la guardia de herramientas lo ve al instante (en `plan`, `delegar` queda bloqueada; en `chat`, `crear_tareas` y `delegar`; fuera de `bypass` y `chat`, edición y shell).',
       params: chatId,
       body: patchChatBody,
       response: chatResponse,
@@ -200,13 +201,13 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       tag: 'Chats',
       summary: 'Envía un mensaje a la mente',
       description:
-        'Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible.',
+        'Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.',
       params: chatId,
       body: sendMessageBody,
       response: messageResponse,
       status: 201,
       errors: [400, 404, 409, 413, 415],
-      example: { text: 'Separa la API y la interfaz del tablero', attachmentIds: [] },
+      example: { text: 'Separa la API y la interfaz del tablero', attachmentIds: [], effort: 'high' },
     },
     ({ params, body }) => run(async () => ({ message: await service.send(params.id ?? '', body) })),
   );

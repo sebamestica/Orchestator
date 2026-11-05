@@ -1,13 +1,15 @@
 /**
  * Sesión de chat con el orquestador: una conversación larga con el SDK de agentes (entrada en streaming),
- * herramientas propias por MCP en proceso, lectura + subagentes y, solo en `bypass`, edición y shell. La función
+ * herramientas propias por MCP en proceso, lectura + subagentes y, en `bypass` y `chat`, edición y shell. La función
  * `query` se inyecta (la del SDK por defecto) para probar las opciones sin red.
  *
- * Modos de la mente (docs/plan/F5-INTERFAZ.md §2 y docs/plan/issues/08-bypass-autonomo.md): `plan` deja `delegar`
- * fuera de `allowedTools` y la guardia la bloquea; `auto`/`bypass` aprueban solas las tareas nuevas (`autoApprove`).
- * `bypass` con proyecto suma `BYPASS_TOOLS`: la mente escribe en el proyecto y en las carpetas extra del chat, y sus
- * comandos pasan por la política de shell de los workers con el proyecto como raíz. El modo se lee en cada llamada de
- * la guardia y de las herramientas; su texto va en el contexto dinámico del prompt (el prefijo en caché no cambia).
+ * Modos de la mente (docs/plan/F5-INTERFAZ.md §2, docs/plan/issues/08-bypass-autonomo.md y 10-modo-chat.md): `plan`
+ * deja `delegar` fuera de `allowedTools` y la guardia la bloquea; `auto`/`bypass` aprueban solas las tareas nuevas
+ * (`autoApprove`). `bypass` con proyecto y `chat` (con o sin proyecto) suman `BYPASS_TOOLS`: la mente escribe en la
+ * carpeta y en las carpetas extra del chat, y sus comandos pasan por la política de shell de los workers con la carpeta
+ * como raíz. `chat` además oculta `crear_tareas` y `delegar` (no orquesta). El modo se lee en cada llamada de la
+ * guardia y de las herramientas; su texto va en el contexto dinámico del prompt (el prefijo en caché no cambia). El
+ * esfuerzo cambia en vivo con `setEffort` (`Query.applyFlagSettings`), sin recrear el proceso.
  */
 import { randomUUID } from 'node:crypto';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
@@ -33,7 +35,7 @@ export const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob'] as const;
  * aceptándose como alias (`LEGACY_TOOL_NAME_ALIASES.Task === 'Agent'`).
  */
 export const SUBAGENT_TOOL = 'Agent';
-/** Edición y ejecución: fuera del contexto del modelo aunque algún ajuste los habilitara (salvo `BYPASS_TOOLS` en bypass). */
+/** Edición y ejecución: fuera del contexto del modelo aunque algún ajuste los habilitara (salvo `BYPASS_TOOLS` en bypass y chat). */
 export const BLOCKED_TOOLS = [
   'Bash',
   'PowerShell',
@@ -49,14 +51,23 @@ export const BLOCKED_TOOLS = [
 ] as const;
 
 /**
- * Lo que la mente suma en `bypass` (con proyecto): editar y crear archivos y ejecutar comandos. La guardia limita la
- * escritura al proyecto y a las carpetas extra del chat, y el shell a la política de los workers con el proyecto como
- * raíz. El resto de `BLOCKED_TOOLS` (Monitor, worktrees, Workflow, Cron, RemoteTrigger) sigue bloqueado.
+ * Lo que la mente suma en `bypass` (con proyecto) y en `chat` (con o sin proyecto): editar y crear archivos y ejecutar
+ * comandos. La guardia limita la escritura a la carpeta y a las carpetas extra del chat, y el shell a la política de los
+ * workers con la carpeta como raíz. El resto de `BLOCKED_TOOLS` (Monitor, worktrees, Workflow, Cron, RemoteTrigger)
+ * sigue bloqueado.
  */
 export const BYPASS_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'] as const;
 
+/** Herramientas de la flota que el modo `chat` oculta (no orquesta): fuera de `allowedTools` y en `disallowedTools`. */
+export const CHAT_HIDDEN_TOOLS = ['crear_tareas', 'delegar'] as const;
+
+/** Modos en los que la mente edita y ejecuta: `chat` siempre; `bypass`, solo con proyecto. */
+export function modeActs(mode: MindMode | undefined, standalone: boolean): boolean {
+  return mode === 'chat' || (mode === 'bypass' && !standalone);
+}
+
 /**
- * Entorno extra de `bypass`: Claude Code quita las credenciales (ANTHROPIC_API_KEY y otras) del entorno de sus
+ * Entorno extra de `bypass` y `chat`: Claude Code quita las credenciales (ANTHROPIC_API_KEY y otras) del entorno de sus
  * subprocesos (Bash, PowerShell, hooks y servidores MCP stdio); su propio proceso las conserva.
  */
 export const BYPASS_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' };
@@ -86,6 +97,9 @@ export const DESTINATION_PROMPT_TEXT = [
   '- Un plan nuevo sin destino conserva el destino anterior del chat. Para volver a local, destino: null, y solo si el usuario lo pide.',
   '- Anotar el destino no sube nada: el push solo se hace con la aprobación explícita del usuario. Si crear_tareas avisa que el remoto no está configurado en la carpeta, díselo.',
 ].join('\n');
+
+/** Espera máxima de `applyFlagSettings` al cambiar el esfuerzo en vivo. */
+export const EFFORT_TIMEOUT_MS = 10_000;
 
 /** Tope de una imagen en base64 que acepta la API de Mensajes (5 MB del texto codificado ≈ 3,75 MB de archivo). */
 export const MAX_IMAGE_BASE64_BYTES = 5 * 1024 * 1024;
@@ -121,6 +135,8 @@ const mcpServerNameSchema = z
 export type ConductorQueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => AsyncIterable<SDKMessage> & {
   close?(): void;
   interrupt?(): Promise<unknown>;
+  /** `Query.applyFlagSettings` del SDK: aquí solo se usa para cambiar el esfuerzo en vivo. */
+  applyFlagSettings?(settings: { effortLevel?: EffortLevel | null }): Promise<unknown>;
 };
 
 export interface ConductorSessionOptions {
@@ -215,7 +231,7 @@ export class ConductorSession {
   readonly model: string;
   /** Modo con el que se armó la sesión (`allowedTools` y prompt). */
   readonly mode: MindMode | undefined;
-  /** `allowedTools` del SDK (propias, lectura, subagentes, plugins y, en bypass, edición y shell). */
+  /** `allowedTools` del SDK (propias, lectura, subagentes, plugins y, en bypass y chat, edición y shell). */
   readonly allowedTools: readonly string[];
   /** Raíces de lectura al crear la sesión (`additionalDirectories`). */
   readonly readRoots: readonly string[];
@@ -230,6 +246,7 @@ export class ConductorSession {
   readonly #secrets: readonly string[];
   readonly #translator: SdkMessageTranslator | undefined;
   #stream: ReturnType<ConductorQueryFn> | undefined;
+  #effort: EffortLevel;
   #reading = false;
   #closed = false;
 
@@ -241,8 +258,11 @@ export class ConductorSession {
     const mode = typeof opts.mode === 'function' ? opts.mode : opts.mode === undefined ? undefined : (() => opts.mode as MindMode);
     this.mode = mode?.();
     const standalone = o.projectId === null;
-    // Bypass con proyecto: la mente edita y ejecuta como un Claude Code autónomo (el agente suelto no cambia).
-    const acts = this.mode === 'bypass' && !standalone;
+    // Bypass con proyecto y chat (con o sin proyecto): la mente edita y ejecuta como un Claude Code.
+    const acts = modeActs(this.mode, standalone);
+    const chatHidden = new Set<string>(CHAT_HIDDEN_TOOLS.map(mcpToolName));
+    const hidden = this.mode === 'chat' ? [...chatHidden] : [];
+    this.#effort = o.effort;
     const env = buildEnv(opts.baseEnv ?? process.env, {
       ...o.env,
       ...(o.apiKey ? { ANTHROPIC_API_KEY: o.apiKey } : {}),
@@ -269,6 +289,7 @@ export class ConductorSession {
     const unavailable = new Set<string>([
       ...(standalone ? FLEET_TOOL_NAMES.map(mcpToolName) : []),
       ...(this.mode === 'plan' ? [mcpToolName('delegar')] : []),
+      ...hidden,
     ]);
     const builtins = [...READ_ONLY_TOOLS, SUBAGENT_TOOL, ...(acts ? BYPASS_TOOLS : [])];
     const allowedTools = [
@@ -288,13 +309,17 @@ export class ConductorSession {
       cwd: o.cwd,
       readRoots,
       denyPaths: [...(opts.denyPaths ?? [])],
-      // Escritura: el proyecto y las carpetas extra del chat. Shell: la política de los workers con el proyecto como raíz.
+      // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
       ...(acts ? { writeRoots: [o.cwd, ...extraRoots], shellRoot: o.cwd } : {}),
       deny: (name) => {
         if (standalone && fleetTools.has(name)) return `${name} no está disponible para un agente suelto (sin proyecto ni flota).`;
         if (name === mcpToolName('delegar') && mode?.() === 'plan') return 'delegar no está disponible en modo plan: el usuario aprueba y la tarea pasa sola a la flota.';
-        // La sesión sigue viva si el modo cambia con subagentes trabajando: edición y shell valen solo en bypass.
-        if (actTools.has(name) && mode?.() !== 'bypass') return `${name} solo está disponible en modo bypass: en el modo ${mode?.() ?? 'actual'} delega con crear_tareas y delegar.`;
+        // La sesión sigue viva si el modo cambia con subagentes trabajando: la guardia lee el modo vigente.
+        const current = mode?.();
+        if (chatHidden.has(name) && current === 'chat') return `${name} no está disponible en modo chat: no orquestas; haz el cambio tú mismo en la carpeta.`;
+        if (actTools.has(name) && !modeActs(current, standalone)) {
+          return `${name} solo está disponible en los modos bypass y chat: en el modo ${current ?? 'actual'} delega con crear_tareas y delegar.`;
+        }
         return undefined;
       },
     });
@@ -327,13 +352,14 @@ export class ConductorSession {
           notes: opts.notes,
           secrets: this.#secrets,
         }),
-        ...(opts.recordDestination && !standalone ? [DESTINATION_PROMPT_TEXT] : []),
+        // En chat no hay crear_tareas: el destino no se anota.
+        ...(opts.recordDestination && !standalone && this.mode !== 'chat' ? [DESTINATION_PROMPT_TEXT] : []),
       ],
       mcpServers: { ...Object.fromEntries(plugins), [this.tools.serverName]: this.tools.server },
       strictMcpConfig: true,
       tools: builtins,
       allowedTools,
-      disallowedTools: BLOCKED_TOOLS.filter((t) => !(acts && actTools.has(t))),
+      disallowedTools: [...BLOCKED_TOOLS.filter((t) => !(acts && actTools.has(t))), ...hidden],
       permissionMode: 'dontAsk',
       // La barrera es el hook (ve también a los subagentes). `canUseTool` no se pasa: con `allowedTools`
       // completos el SDK nunca lo consultaría (aviso CLAUDE_SDK_CAN_USE_TOOL_SHADOWED).
@@ -358,6 +384,42 @@ export class ConductorSession {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /** Esfuerzo vigente: el de las opciones o el último aplicado con `setEffort`. */
+  get effort(): EffortLevel {
+    return this.#effort;
+  }
+
+  /**
+   * Cambia el esfuerzo de los turnos siguientes sin recrear la sesión. Antes del primer mensaje cambia las opciones;
+   * con la conversación en marcha usa `Query.applyFlagSettings({ effortLevel })` del SDK. Devuelve `false` si no se
+   * pudo (el SDK no lo permite o falló): la sesión sigue con su esfuerzo y quien llama decide si la recrea.
+   */
+  async setEffort(effort: EffortLevel): Promise<boolean> {
+    if (this.#closed) return false;
+    if (effort === this.#effort) return true;
+    const stream = this.#stream;
+    if (!stream) {
+      this.#options.effort = effort;
+      this.#effort = effort;
+      return true;
+    }
+    if (!stream.applyFlagSettings) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), EFFORT_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    const applied = stream.applyFlagSettings({ effortLevel: effort }).then(
+      () => true,
+      () => false,
+    );
+    // Un proceso que no responde no deja el turno colgado: sin respuesta, la sesión sigue con su esfuerzo.
+    const ok = await Promise.race([applied, timeout]);
+    clearTimeout(timer);
+    if (ok) this.#effort = effort;
+    return ok;
   }
 
   /**

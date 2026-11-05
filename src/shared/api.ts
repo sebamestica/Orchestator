@@ -21,12 +21,15 @@ export const opaqueIdSchema = z.string().regex(/^[A-Za-z0-9_-]{6,100}$/);
  *   comandos ella misma en la carpeta del proyecto y en las carpetas extra del chat; los comandos pasan por la
  *   política de shell de los workers. No pregunta ni muestra planes: delega cuando conviene, elige lo razonable y
  *   persiste. Además lee fuera de la carpeta del proyecto, y la flota pasa a `main` sin preguntar cuando el gate pasa.
+ * - `chat`: la mente no orquesta: conversa como un asistente de programación (como Claude Code) en la carpeta del chat,
+ *   con o sin proyecto. Responde, explica y hace los cambios ella misma (lee, edita, crea archivos y ejecuta comandos
+ *   en la carpeta y en las carpetas extra, con la misma guardia que bypass). No crea tareas ni delega a la flota.
  * - En todos los modos siguen bloqueados el push, el despliegue, los pagos, borrar ramas y reescribir la historia.
  */
-export const mindModeSchema = z.enum(['plan', 'auto', 'bypass']);
+export const mindModeSchema = z.enum(['plan', 'auto', 'bypass', 'chat']);
 export type MindMode = z.infer<typeof mindModeSchema>;
 /** Orden del ciclo con Shift+Tab. */
-export const MIND_MODE_CYCLE: readonly MindMode[] = ['auto', 'plan', 'bypass'];
+export const MIND_MODE_CYCLE: readonly MindMode[] = ['auto', 'plan', 'bypass', 'chat'];
 export function nextMindMode(mode: MindMode): MindMode {
   const i = MIND_MODE_CYCLE.indexOf(mode);
   return MIND_MODE_CYCLE[(i + 1) % MIND_MODE_CYCLE.length] ?? 'plan';
@@ -189,6 +192,7 @@ export const sendMessageBody = z
   .strictObject({
     text: z.string().max(100_000),
     attachmentIds: z.array(opaqueIdSchema).max(20).default([]),
+    effort: effortSchema.optional(),
   })
   .refine((b) => b.text.trim().length > 0 || b.attachmentIds.length > 0, { message: 'Mensaje vacío' });
 export type SendMessageBody = z.input<typeof sendMessageBody>;

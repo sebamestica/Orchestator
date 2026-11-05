@@ -7,6 +7,7 @@ import {
   ConductorSession,
   MODE_TEXT,
   buildConductorSystemPrompt,
+  effortNote,
   renderSessionContext,
 } from '../../../src/core/conductor/index.ts';
 import type { ConductorQueryFn } from '../../../src/core/conductor/index.ts';
@@ -83,13 +84,19 @@ describe('prompt de sistema del orquestador', () => {
     expect(solo).not.toMatch(/## Modo:/);
   });
 
-  it('el prefijo es idéntico byte a byte en los tres modos y no contradice al bypass', () => {
-    const heads = (['plan', 'auto', 'bypass'] as const).map((mode) => buildConductorSystemPrompt({ projectId: 'demo', projectDir: 'C:\\dev\\demo', mode, workMode: 'local' })[0] ?? '');
+  it('el prefijo es idéntico byte a byte en los cuatro modos (también sin proyecto) y no contradice a bypass ni a chat', () => {
+    const modes = ['plan', 'auto', 'bypass', 'chat'] as const;
+    const heads = [
+      ...modes.map((mode) => buildConductorSystemPrompt({ projectId: 'demo', projectDir: 'C:\\dev\\demo', mode, workMode: 'local' })[0] ?? ''),
+      ...modes.map((mode) => buildConductorSystemPrompt({ projectId: null, projectDir: 'C:\\Users\\yo\\Desktop', mode })[0] ?? ''),
+    ];
     expect(new Set(heads.map(sha)).size).toBe(1);
     expect(heads[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     const p = CONDUCTOR_PROMPT_PREFIX;
-    expect(p).toMatch(/Fuera del modo bypass no editas código ni ejecutas comandos: delegas/);
-    expect(p).toMatch(/Solo en bypass editas archivos y ejecutas comandos/);
+    expect(p).toMatch(/Fuera de los modos bypass y chat no editas código ni ejecutas comandos: delegas/);
+    expect(p).toMatch(/Solo en bypass y chat editas archivos y ejecutas comandos/);
+    expect(p).toMatch(/modo vigente \(plan, auto, bypass o chat\)/);
+    expect(p).toMatch(/En chat no orquestas: no creas tareas ni delegas/);
     expect(p).toMatch(/En ningún modo haces push, pasas a main, despliegas, pagas, borras ramas ni reescribes la historia/);
     // Ninguna frase del prefijo obliga a la mente a no actuar, preguntar o terminar pidiendo cosas en bypass.
     expect(p).not.toMatch(/Tú no editas código/);
@@ -115,6 +122,34 @@ describe('prompt de sistema del orquestador', () => {
     expect(text).toMatch(/Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos/);
     // Plan y auto no cambian: ni edición ni shell.
     for (const mode of ['plan', 'auto'] as const) expect(MODE_TEXT[mode].join('\n'), mode).not.toMatch(/Edit|Bash|no preguntes/i);
+  });
+
+  it('MODE_TEXT.chat: asistente directo como Claude Code, sin flota, con concisión según el esfuerzo', () => {
+    const text = MODE_TEXT.chat.join('\n');
+    expect(text).toContain('Conversas directamente con el usuario como un asistente de programación (como Claude Code): respondes, explicas y haces los cambios tú mismo en la carpeta. No creas tareas ni delegas a la flota.');
+    expect(text).toMatch(/editas y creas archivos \(Edit, Write\) y ejecutas comandos \(Bash, PowerShell\)/);
+    expect(text).toMatch(/Adjuntos: <ruta>/);
+    expect(text).toMatch(/Concisión según el esfuerzo del turno/);
+    expect(text).toMatch(/con bajo o medio responde rápido, corto y directo/);
+    expect(text).toMatch(/Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos/);
+    expect(text).not.toMatch(/crear_tareas \(|delegar\)/);
+    // Con proyecto y sin él, el modo chat lleva su texto (no el del agente suelto).
+    for (const projectId of ['demo', null]) {
+      const ctx = renderSessionContext({ projectId, projectDir: 'C:\\dev\\demo', mode: 'chat' });
+      expect(ctx, String(projectId)).toMatch(/## Modo: chat\n- Conversas directamente/);
+      expect(ctx, String(projectId)).not.toMatch(/## Agente suelto/);
+    }
+    // El agente suelto en los otros modos sugiere el modo chat para editar.
+    expect(renderSessionContext({ projectId: null, projectDir: 'C:\\x', mode: 'bypass' })).toMatch(/## Agente suelto[\s\S]*sugiérele el modo chat/);
+  });
+
+  it('effortNote: la línea del esfuerzo del turno, en español', () => {
+    expect(effortNote('low')).toBe('[Esfuerzo de este turno: bajo]');
+    expect(effortNote('medium')).toBe('[Esfuerzo de este turno: medio]');
+    expect(effortNote('high')).toBe('[Esfuerzo de este turno: alto]');
+    expect(effortNote('xhigh')).toBe('[Esfuerzo de este turno: muy alto]');
+    expect(effortNote('max')).toBe('[Esfuerzo de este turno: máximo]');
+    expect(CONDUCTOR_PROMPT_PREFIX).not.toContain('[Esfuerzo de este turno');
   });
 
   it('el modo de trabajo del proyecto va en el contexto: en local, la mente sabe que no hacen falta commits', () => {

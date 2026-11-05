@@ -154,6 +154,28 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     expect(q.calls[1]?.options.resume).toBe('sdk-1');
   });
 
+  it('un esfuerzo por mensaje con un subagente trabajando no recrea la sesión: el turno usa el de la sesión viva y queda en el log', async () => {
+    const q = injectableQuery(launchScript);
+    const lines: string[] = [];
+    const b = await bench({ query: q.fn, log: (line) => lines.push(line) });
+    const chat = b.service.create({ projectId: 'demo', mode: 'chat' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+
+    await b.service.send(chat.id, { text: 'rápido', effort: 'low' });
+    await b.settle(chat.id);
+    expect(q.calls).toHaveLength(1);
+    expect(q.closed).toBe(0);
+    expect(lines.some((l) => /el turno pidió esfuerzo low, pero 1 subagente\(s\) siguen trabajando; usa el de la sesión viva \(medium\)/.test(l))).toBe(true);
+
+    q.inject([taskDone('t1', 'tu1', 'sdk-1')]);
+    await waitFor(() => b.service.get(chat.id).backgroundTasks === undefined);
+    await b.service.send(chat.id, { text: 'sigue', effort: 'low' });
+    await b.settle(chat.id);
+    expect(q.calls).toHaveLength(2);
+    expect(q.calls[1]?.options).toMatchObject({ effort: 'low', resume: 'sdk-1' });
+  });
+
   it('los plugins que se refrescan al abrir la sesión no hacen que el mensaje siguiente la recree', async () => {
     const fake = { type: 'stdio' as const, command: 'node', args: ['chrome-falso.mjs'] };
     const holder: { envCalls?: string[] } = {};

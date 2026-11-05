@@ -3,9 +3,11 @@
  *
  * - La sesión se crea con el primer mensaje y se cierra tras `idleMs` sin uso (15 min), al cerrar o al borrar el chat.
  *   Al recrearla se reanuda con `resume` (el `session_id` del SDK guardado), así no se pierde el contexto.
- * - Lo que cambia la forma de la sesión (mente, modelo, esfuerzo, modo, raíces de lectura, plugins) se compara en
- *   cada mensaje: si cambió, la sesión se recrea (reanudada) y el cambio rige desde ese turno. El modo, además, se lee
- *   en cada llamada de la guardia y de las herramientas.
+ * - Lo que cambia la forma de la sesión (mente, modelo, modo, raíces de lectura, plugins) se compara en cada mensaje:
+ *   si cambió, la sesión se recrea (reanudada) y el cambio rige desde ese turno. El modo, además, se lee en cada llamada
+ *   de la guardia y de las herramientas. El esfuerzo del turno (`effort` del mensaje o el de los ajustes) se aplica en
+ *   vivo (`ConductorSession.setEffort`) y solo recrea la sesión si el SDK no lo permite.
+ * - Modo `chat`: la mente conversa como Claude Code en la carpeta del chat (con o sin proyecto), sin flota.
  * - Los eventos de la sesión van al hub (`hub.append`, SQLite + `/ws`) con `sessionId = chat.sessionId`, en
  *   diferencias de uso (`usageDeltas`) y con `seq` continuo entre sesiones reanudadas.
  * - Destino de los cambios (`target`): local salvo que la mente haya anotado con `crear_tareas.destino` el repositorio
@@ -17,7 +19,7 @@ import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { McpServerConfig, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { redactSecrets } from '../../shared/index.ts';
+import { effortSchema, redactSecrets } from '../../shared/index.ts';
 import type {
   AgentConfig,
   AgentEvent,
@@ -26,6 +28,7 @@ import type {
   Chat,
   ChatMessage,
   CreateChatBody,
+  Effort,
   MindMode,
   PatchChatBody,
   Proposal,
@@ -38,6 +41,7 @@ import {
   MAX_IMAGE_BASE64_BYTES,
   ProposalError,
   approveAndDeliver,
+  effortNote,
   imageTooLarge,
   sdkSessionIdOf,
   usageDeltas,
@@ -149,6 +153,8 @@ interface Live {
 export interface SendInput {
   text: string;
   attachmentIds?: readonly string[];
+  /** Esfuerzo de este turno (barra de esfuerzo); sin él, el de los ajustes de la mente. */
+  effort?: Effort;
 }
 
 export interface ApprovalOutcome extends DeliveryReport {
@@ -383,6 +389,7 @@ export class ChatService {
    */
   async send(chatId: string, input: SendInput): Promise<ChatMessage> {
     const stored = this.#require(chatId);
+    if (input.effort !== undefined && !effortSchema.safeParse(input.effort).success) throw new ChatError('invalid', `Esfuerzo inválido: ${String(input.effort)}`);
     const live = this.#liveOf(chatId);
     if (live.busy) throw new ChatError('conflict', 'La mente todavía está respondiendo: espera o interrumpe el turno');
     // Ocupado antes de cualquier espera: dos envíos simultáneos no arrancan dos turnos.
@@ -414,12 +421,14 @@ export class ChatService {
         live.roots.add(root);
       }
       // Tachado también hacia la mente: el SDK guarda la transcripción de la sesión en disco.
-      const text = redactSecrets(composeUserText(input.text, files));
-      if (!text.trim() && !images.length) throw new ChatError('invalid', 'Mensaje vacío');
+      const composed = redactSecrets(composeUserText(input.text, files));
+      if (!composed.trim() && !images.length) throw new ChatError('invalid', 'Mensaje vacío');
+      // Con esfuerzo propio, la mente lo sabe por una línea al inicio (el historial guarda el texto sin ella).
+      const text = input.effort ? [effortNote(input.effort), composed].filter((t) => t.trim()).join('\n') : composed;
 
       if (live.idle) clearTimeout(live.idle);
       live.idle = undefined;
-      const session = await this.#ensureSession(chatId, live);
+      const session = await this.#ensureSession(chatId, live, input.effort);
       const chat = this.#require(chatId).chat;
       const message = this.#repo.addMessage({
         id: this.#newId(),
@@ -614,18 +623,22 @@ export class ChatService {
     return [...new Set([...(this.#deps.readRoots ?? []), ...live.roots, ...(chat.mode === 'bypass' ? this.#drivesList() : [])])];
   }
 
-  async #ensureSession(chatId: string, live: Live): Promise<ConductorSession> {
+  /**
+   * Sesión viva del chat con la forma vigente. El esfuerzo no es parte de la forma: el del turno
+   * (`turnEffort ?? settings.mind.effort`) se aplica en vivo con `setEffort`; si el SDK no lo permite, la sesión se
+   * recrea reanudada. Con subagentes vivos nunca se recrea (issue 7): el turno usa lo que tenga la sesión viva.
+   */
+  async #ensureSession(chatId: string, live: Live, turnEffort?: Effort): Promise<ConductorSession> {
     const { chat, sdkSessionId } = this.#require(chatId);
     const settings = this.#deps.settings();
     const mind = resolveMind(settings, this.#deps.mind.agents());
     const model = settings.mind.model ?? mind.model;
-    const effort = settings.mind.effort;
+    const effort = turnEffort ?? settings.mind.effort;
     const roots = this.#rootsFor(chat, live);
     const keyOf = (plugins: Readonly<Record<string, unknown>>) =>
       JSON.stringify({
         mind: mind.id,
         model: model ?? null,
-        effort,
         mode: chat.mode,
         cwd: chat.cwd,
         extraRoots: chat.extraRoots,
@@ -634,11 +647,21 @@ export class ChatService {
         quotaFloor: settings.quotaFloor,
       });
     const key = keyOf(this.#deps.mcpServersFor?.(mind.id) ?? {});
-    if (live.session && !live.session.closed && live.key === key) return live.session;
-    if (live.session && !live.session.closed && live.background.size > 0) {
-      // Recrear la sesión mataría a los subagentes que siguen trabajando: el cambio rige cuando terminen.
-      this.#log(`chat ${chatId}: los ajustes de la mente cambiaron, pero ${live.background.size} subagente(s) siguen trabajando; se aplican al terminar`);
-      return live.session;
+    const alive = live.session && !live.session.closed ? live.session : undefined;
+    if (alive) {
+      const sameShape = live.key === key;
+      const busy = live.background.size > 0;
+      if (sameShape || busy) {
+        // El esfuerzo cambia en vivo (sin recrear el proceso), también con subagentes trabajando.
+        const applied = await alive.setEffort(effort);
+        if (sameShape && applied) return alive;
+        if (busy) {
+          // Recrear la sesión mataría a los subagentes que siguen trabajando: el cambio rige cuando terminen.
+          if (!sameShape) this.#log(`chat ${chatId}: los ajustes de la mente cambiaron, pero ${live.background.size} subagente(s) siguen trabajando; se aplican al terminar`);
+          if (!applied) this.#log(`chat ${chatId}: el turno pidió esfuerzo ${effort}, pero ${live.background.size} subagente(s) siguen trabajando; usa el de la sesión viva (${alive.effort}) hasta que terminen`);
+          return alive;
+        }
+      }
     }
     if (live.session) this.#dropSession(chatId, live);
 

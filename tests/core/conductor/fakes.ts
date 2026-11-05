@@ -206,11 +206,17 @@ export interface ScriptedQuery {
   received: SDKUserMessage[];
   closed: number;
   interrupted: number;
+  /** Llamadas a `applyFlagSettings` (solo con la opción `flags`). */
+  flags: Record<string, unknown>[];
 }
 
 /** `query` falsa: por cada mensaje del usuario ejecuta el guion y emite lo que devuelve. */
-export function scriptedQuery(turn: (message: SDKUserMessage, index: number) => Promise<SDKMessage[]> | SDKMessage[]): ScriptedQuery {
-  const state: ScriptedQuery = { fn: () => { throw new Error('sin iniciar'); }, calls: [], received: [], closed: 0, interrupted: 0 };
+/**
+ * `flags`: con `'ok'` o `'reject'`, el stream tiene `applyFlagSettings` (como `Query` del SDK) y anota cada llamada en
+ * `state.flags`; sin la opción, no lo tiene (como un CLI antiguo).
+ */
+export function scriptedQuery(turn: (message: SDKUserMessage, index: number) => Promise<SDKMessage[]> | SDKMessage[], opts: { flags?: 'ok' | 'reject' } = {}): ScriptedQuery {
+  const state: ScriptedQuery = { fn: () => { throw new Error('sin iniciar'); }, calls: [], received: [], closed: 0, interrupted: 0, flags: [] };
   state.fn = ({ prompt, options }) => {
     state.calls.push({ options });
     const stream = (async function* () {
@@ -220,9 +226,18 @@ export function scriptedQuery(turn: (message: SDKUserMessage, index: number) => 
         for (const out of await turn(message, index++)) yield out;
       }
     })();
+    const flags = opts.flags;
     return Object.assign(stream, {
       close: () => { state.closed++; },
       interrupt: async () => { state.interrupted++; },
+      ...(flags
+        ? {
+            applyFlagSettings: async (settings: Record<string, unknown>) => {
+              state.flags.push(settings);
+              if (flags === 'reject') throw new Error('control request no admitido');
+            },
+          }
+        : {}),
     });
   };
   return state;

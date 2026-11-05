@@ -77,11 +77,16 @@ export interface ChatQuery {
   received: SDKUserMessage[];
   closed: number;
   interrupted: number;
+  /** Llamadas a `applyFlagSettings` por proceso del SDK (solo con `flags: true`). */
+  flags: { process: number; settings: Record<string, unknown> }[];
 }
 
-/** `query` falsa del SDK: un guion por mensaje; `interrupt()` y `close()` resuelven `ctx.stopped`. */
-export function chatQuery(turn: TurnFn): ChatQuery {
-  const state: ChatQuery = { fn: () => { throw new Error('sin iniciar'); }, calls: [], received: [], closed: 0, interrupted: 0 };
+/**
+ * `query` falsa del SDK: un guion por mensaje; `interrupt()` y `close()` resuelven `ctx.stopped`. Con `flags`, el
+ * stream tiene `applyFlagSettings` (cambia el esfuerzo en vivo, como `Query` del SDK).
+ */
+export function chatQuery(turn: TurnFn, opts: { flags?: boolean } = {}): ChatQuery {
+  const state: ChatQuery = { fn: () => { throw new Error('sin iniciar'); }, calls: [], received: [], closed: 0, interrupted: 0, flags: [] };
   state.fn = ({ prompt, options }) => {
     state.calls.push({ options });
     const process = state.calls.length;
@@ -99,6 +104,7 @@ export function chatQuery(turn: TurnFn): ChatQuery {
     return Object.assign(stream, {
       close: () => { state.closed++; stop(); },
       interrupt: async () => { state.interrupted++; stop(); },
+      ...(opts.flags ? { applyFlagSettings: async (settings: Record<string, unknown>) => { state.flags.push({ process, settings }); } } : {}),
     });
   };
   return state;
@@ -135,6 +141,8 @@ export interface ChatBench {
 
 export interface BenchOptions extends Partial<Omit<ChatServiceDeps, 'db' | 'store' | 'hub' | 'settings' | 'mind' | 'ports' | 'translator' | 'attachments'>> {
   turn?: TurnFn;
+  /** La `query` falsa tiene `applyFlagSettings` (esfuerzo en vivo). */
+  flags?: boolean;
   settings?: Settings;
   agents?: AgentConfig[];
   budgetLeftUsd?: (agentId: string) => number | undefined;
@@ -152,12 +160,12 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
   const published: HubMessage[] = [];
   hub.subscribe((m) => published.push(m));
   const ports = fakePorts();
-  const q = chatQuery(opts.turn ?? echoTurn);
+  const q = chatQuery(opts.turn ?? echoTurn, { flags: opts.flags ?? false });
   const attachments = new AttachmentStore({ db: store.database, dir: join(dir, 'datos', 'attachments') });
   const settings = { value: opts.settings ?? DEFAULT_SETTINGS };
   const agents = opts.agents ?? [claudeAgent];
   const envCalls: string[] = [];
-  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, ...rest } = opts;
+  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, flags: _f, ...rest } = opts;
   const service = new ChatService({
     db: store.database,
     store,

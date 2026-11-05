@@ -2867,7 +2867,8 @@
                           "enum": [
                             "plan",
                             "auto",
-                            "bypass"
+                            "bypass",
+                            "chat"
                           ]
                         },
                         "quotaFloor": {
@@ -3012,7 +3013,8 @@
                     "enum": [
                       "plan",
                       "auto",
-                      "bypass"
+                      "bypass",
+                      "chat"
                     ]
                   },
                   "quotaFloor": {
@@ -3119,7 +3121,8 @@
                           "enum": [
                             "plan",
                             "auto",
-                            "bypass"
+                            "bypass",
+                            "chat"
                           ]
                         },
                         "quotaFloor": {
@@ -8002,7 +8005,8 @@
                     "enum": [
                       "plan",
                       "auto",
-                      "bypass"
+                      "bypass",
+                      "chat"
                     ]
                   },
                   "quotaFloor": {
@@ -8100,7 +8104,8 @@
                     "enum": [
                       "plan",
                       "auto",
-                      "bypass"
+                      "bypass",
+                      "chat"
                     ]
                   },
                   "mindAgentId": {
@@ -8253,7 +8258,8 @@
                     "enum": [
                       "plan",
                       "auto",
-                      "bypass"
+                      "bypass",
+                      "chat"
                     ]
                   },
                   "at": {

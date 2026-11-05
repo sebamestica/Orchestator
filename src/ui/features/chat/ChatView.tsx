@@ -1,12 +1,12 @@
 /**
  * Vista de chat con la mente (c19, docs/plan/F5-INTERFAZ.md §6): encabezado con proyecto y conversaciones,
  * hilo en Markdown con la respuesta en vivo desde `/ws`, propuestas aprobables, ficha del modo con
- * Shift+Tab y el Composer abajo.
+ * Shift+Tab y el Composer abajo, con el esfuerzo de razonamiento de cada chat (issue 10).
  */
 import { Button, Spinner } from '@heroui/react';
 import { ArrowDown, CircleAlert, MessageSquareOff, Unplug, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { nextMindMode, type Attachment, type Chat, type MindMode } from '../../../shared/api.ts';
+import { effortSchema, nextMindMode, type Attachment, type Chat, type Effort, type MindMode } from '../../../shared/api.ts';
 import { navigate } from '../../app/routes.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
 import { useApp } from '../../store/app.ts';
@@ -20,7 +20,7 @@ import { ProposalsCard } from './components/ProposalsCard.tsx';
 import { BackgroundLine } from './components/BackgroundLine.tsx';
 import { TargetLine } from './components/TargetLine.tsx';
 import { APP_NAME } from './format.ts';
-import { attachFile, errorText, pickFolder, useChat } from './store.ts';
+import { attachFile, chosenEffort, effortIn, errorText, pickFolder, useChat } from './store.ts';
 import { anchorProposals, buildReply, PROPOSALS_AT_END, splitTurns } from './timeline.ts';
 import { useChatLive } from './use-chat-live.ts';
 
@@ -84,6 +84,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const pendingRoots = useChat((s) => s.pendingRoots);
   const notice = useChat((s) => s.notice);
   const busy = useChat((s) => s.busy);
+  const chosen = useChat(chosenEffort);
 
   useEffect(() => {
     void useChat.getState().open(projectId, chatId ?? null, useApp.getState().settings.defaultMode);
@@ -93,6 +94,8 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   useChatLive(chat?.sessionId ?? null);
 
   const mode: MindMode = chat?.mode ?? draftMode;
+  // Sin elección en este chat, el esfuerzo de la mente de Ajustes.
+  const effort: Effort = chosen ?? settings.mind.effort;
   const running = chat?.state === 'running';
   const roots = chat?.extraRoots ?? pendingRoots;
   const projectName = projectId ? (project?.name ?? projectId) : null;
@@ -118,6 +121,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const toRoot = useCallback(() => navigate(projectId ? { name: 'project', projectId } : { name: 'standalone' }, { replace: true }), [projectId]);
 
   const setMode = useCallback((m: MindMode) => void useChat.getState().setMode(m), []);
+  const setEffort = useCallback((e: Effort) => useChat.getState().setEffort(e), []);
   const cycleMode = useCallback(() => {
     const s = useChat.getState();
     void s.setMode(nextMindMode(s.chat?.mode ?? s.draftMode));
@@ -163,7 +167,9 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
         if (!current) return false;
         toChat(current.id, true);
       }
-      return useChat.getState().send(current.id, turn.text, turn.attachments);
+      // Un chat recién creado ya heredó el esfuerzo del borrador.
+      const store = useChat.getState();
+      return store.send(current.id, turn.text, turn.attachments, effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort);
     },
     [createChat, toChat],
   );
@@ -367,6 +373,9 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
           placeholder={projectName ? `Pídele algo a ${APP_NAME} sobre ${projectName}…` : `Pídele algo a ${APP_NAME}…`}
           mode={mode}
           onModeChange={setMode}
+          effort={effort}
+          onEffortChange={setEffort}
+          effortLevels={effortSchema.options}
           onAttach={onAttach}
           onSubmit={onSubmit}
           isStreaming={running}

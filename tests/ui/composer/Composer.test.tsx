@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Composer } from '../../../src/ui/features/composer/Composer.tsx';
 import type { ComposerProps } from '../../../src/ui/features/composer/Composer.tsx';
@@ -65,14 +65,14 @@ describe('Composer', () => {
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith({ text: 'Hola', attachments: [] }));
     await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(''));
   });
-  it('Shift+Tab cicla auto → plan → bypass → auto y evita mover el foco', () => {
+  it('Shift+Tab cicla auto → plan → bypass → chat → auto y evita mover el foco', () => {
     const { props, rerender } = setup();
-    for (const [mode, next] of [['auto', 'plan'], ['plan', 'bypass'], ['bypass', 'auto']] as const) {
+    for (const [mode, next] of [['auto', 'plan'], ['plan', 'bypass'], ['bypass', 'chat'], ['chat', 'auto']] as const) {
       rerender(<Composer {...props} mode={mode} />);
       expect(fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab', shiftKey: true })).toBe(false);
       expect(props.onModeChange).toHaveBeenLastCalledWith(next);
     }
-    fireEvent.click(screen.getByRole('button', { name: 'Cambiar modo: Bypass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar modo: Chat' }));
     expect(props.onModeChange).toHaveBeenLastCalledWith('auto');
   });
   it('Esc solo detiene durante la transmisión, también fuera del textarea', () => {
@@ -182,5 +182,123 @@ describe('Composer', () => {
     expect(screen.queryByText('Suelta para adjuntar')).toBeNull();
     expect(fireEvent.drop(window, { dataTransfer })).toBe(false);
     expect(props.onAttach).not.toHaveBeenCalled();
+  });
+});
+
+describe('Composer al estilo Claude Code (issue 10)', () => {
+  const ready = (id: string, name: string): Attachment => ({ ...attachment, id, name, path: `C:/data/${name}` });
+  const drop = (files: File[]) => {
+    const dataTransfer = { types: ['Files'], files };
+    fireEvent.dragEnter(window, { dataTransfer });
+    return fireEvent.drop(window, { dataTransfer });
+  };
+
+  it('soltar una imagen crea el adjunto con vista previa, lo sube y lo envía', async () => {
+    const { props } = setup();
+    const file = image();
+    expect(drop([file])).toBe(false);
+    expect(screen.getByAltText('foto.png').getAttribute('src')).toBe('blob:preview');
+    expect(props.onAttach).toHaveBeenCalledWith(file);
+    await waitFor(() => expect(screen.queryByText('Subiendo…')).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole('textbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar mensaje' }));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith({ text: '', attachments: [attachment] }));
+  });
+
+  it('mientras se arrastra, el texto de ayuda lo dice y la caja se resalta', () => {
+    const { container } = setup();
+    const dataTransfer = { types: ['Files'], files: [image()] };
+    fireEvent.dragEnter(window, { dataTransfer });
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Suelta los archivos para adjuntarlos');
+    expect(container.querySelector('form')?.className).toContain('ring-2');
+    fireEvent.dragLeave(window, { dataTransfer });
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toBe('Escribe a Berland');
+  });
+
+  it('Ctrl+V fuera del campo también adjunta; en otro campo editable no', async () => {
+    const { props } = setup();
+    render(<input aria-label="Renombrar chat" />);
+    expect(fireEvent.paste(screen.getByLabelText('Renombrar chat'), { clipboardData: { files: [image()] } })).toBe(true);
+    expect(props.onAttach).not.toHaveBeenCalled();
+    expect(fireEvent.paste(document.body, { clipboardData: { files: [image()] } })).toBe(false);
+    await waitFor(() => expect(props.onAttach).toHaveBeenCalledTimes(1));
+    expect(screen.getByAltText('foto.png')).toBeTruthy();
+  });
+
+  it('si el portapapeles también trae texto (celdas de Excel), pega el texto y no adjunta', () => {
+    const { props } = setup();
+    expect(fireEvent.paste(screen.getByRole('textbox'), { clipboardData: { types: ['text/plain', 'Files'], files: [image()] } })).toBe(true);
+    expect(props.onAttach).not.toHaveBeenCalled();
+  });
+
+  it('numera las capturas pegadas sin nombre propio', async () => {
+    const onAttach = vi.fn(async (file: File) => ready(file.name === 'imagen-pegada-1.png' ? 'attachment-1' : 'attachment-2', file.name));
+    setup({ onAttach });
+    paste([new File(['a'], 'image.png', { type: 'image/png' })]);
+    paste([new File(['b'], 'image.png', { type: 'image/png' })]);
+    expect(screen.getByAltText('imagen-pegada-1.png')).toBeTruthy();
+    expect(screen.getByAltText('imagen-pegada-2.png')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Quitar imagen-pegada-2.png' })).toBeTruthy();
+    await waitFor(() => expect(onAttach).toHaveBeenCalledTimes(2));
+    expect(onAttach.mock.calls.map(([file]) => [file.name, file.type])).toEqual([['imagen-pegada-1.png', 'image/png'], ['imagen-pegada-2.png', 'image/png']]);
+  });
+
+  it('quitar un adjunto ya subido lo saca de la bandeja y del envío', async () => {
+    const onAttach = vi.fn(async (file: File) => ready(file.name === 'foto.png' ? 'attachment-1' : 'attachment-2', file.name));
+    const { props } = setup({ onAttach });
+    paste([image(), new File(['nota'], 'nota.md', { type: 'text/markdown' })]);
+    await waitFor(() => expect(screen.queryByText('Subiendo…')).toBeNull());
+    const tray = screen.getByRole('list', { name: 'Adjuntos' });
+    expect(within(tray).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(tray).getByText('nota.md')).toBeTruthy();
+    expect(within(tray).getByText('4 B')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar foto.png' }));
+    expect(screen.queryByAltText('foto.png')).toBeNull();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith({ text: '', attachments: [ready('attachment-2', 'nota.md')] }));
+  });
+
+  it('la barra de esfuerzo va en la barra del composer, junto a la ficha de modo, y avisa el nivel elegido', async () => {
+    const onEffortChange = vi.fn();
+    setup({ effort: 'high', onEffortChange });
+    const trigger = screen.getByRole('button', { name: /Esfuerzo: Profundo/ });
+    expect(trigger.parentElement?.contains(screen.getByRole('button', { name: 'Cambiar modo: Auto' }))).toBe(true);
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: 'Esfuerzo de razonamiento' });
+    fireEvent.keyDown(within(dialog).getByRole('slider', { name: 'Esfuerzo de razonamiento' }), { key: 'ArrowLeft' });
+    expect(onEffortChange).toHaveBeenCalledWith('medium');
+  });
+
+  it('ofrece los niveles que pide la vista y se deshabilita con el composer', async () => {
+    const onEffortChange = vi.fn();
+    setup({ effort: 'xhigh', onEffortChange, effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] });
+    fireEvent.click(screen.getByRole('button', { name: /Esfuerzo: Muy profundo/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.keyDown(within(dialog).getByRole('slider'), { key: 'ArrowRight' });
+    expect(onEffortChange).toHaveBeenCalledWith('max');
+    cleanup();
+    setup({ effort: 'low', onEffortChange, isDisabled: true });
+    const disabled = screen.getByRole('button', { name: /Esfuerzo: Rápido/ });
+    expect(disabled.hasAttribute('disabled') || disabled.getAttribute('aria-disabled') === 'true').toBe(true);
+  });
+
+  it('sin onEffortChange no muestra la barra de esfuerzo', () => {
+    setup({ effort: 'high' });
+    expect(screen.queryByRole('button', { name: /Esfuerzo/ })).toBeNull();
+  });
+
+  it('con dos composers montados, solo el último atiende al soltar y al pegar fuera del campo', async () => {
+    const first = vi.fn().mockResolvedValue(attachment);
+    const second = vi.fn().mockResolvedValue(attachment);
+    setup({ onAttach: first });
+    const other = render(<Composer placeholder="Otro" mode="plan" onModeChange={vi.fn()} onAttach={second} onSubmit={vi.fn()} />);
+    drop([image()]);
+    fireEvent.paste(document.body, { clipboardData: { files: [image()] } });
+    await waitFor(() => expect(second).toHaveBeenCalledTimes(2));
+    expect(first).not.toHaveBeenCalled();
+    other.unmount();
+    drop([image()]);
+    await waitFor(() => expect(first).toHaveBeenCalledTimes(1));
   });
 });
