@@ -563,7 +563,7 @@ describe('modos de la mente y agente suelto', () => {
     ] as const) {
       const res = await tools.call(name, args);
       expect(res.isError, name).toBe(true);
-      expect(textOf(res)).toMatch(/agente suelto/);
+      expect(textOf(res)).toMatch(/en una conversación/);
     }
     expect(ports.planner.requests).toEqual([]);
     expect((await tools.call('cupos', {})).isError).toBeFalsy();

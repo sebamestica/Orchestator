@@ -99,7 +99,8 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const running = chat?.state === 'running';
   const roots = chat?.extraRoots ?? pendingRoots;
   const projectName = projectId ? (project?.name ?? projectId) : null;
-  const folder = chat?.cwd ?? project?.repoPath ?? null;
+  // La carpeta interna de una conversación no se muestra: el usuario no eligió ninguna.
+  const folder = chat?.internalFolder ? null : (chat?.cwd ?? project?.repoPath ?? null);
 
   const turns = useMemo(() => splitTurns(events, messages), [events, messages]);
   const draft = useMemo(() => buildReply(turns.pending), [turns.pending]);
@@ -141,23 +142,8 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [cycleMode]);
 
-  /** Crea el chat (el agente suelto necesita una carpeta de trabajo). */
-  const createChat = useCallback(async (): Promise<Chat | null> => {
-    const store = useChat.getState();
-    if (projectId !== null) return store.createChat();
-    let cwd: string | null;
-    try {
-      cwd = await pickFolder();
-    } catch (err) {
-      store.setNotice(`No se pudo abrir el selector de carpetas: ${errorText(err)}`);
-      return null;
-    }
-    if (!cwd) {
-      store.setNotice('Elige una carpeta de trabajo para el agente suelto.');
-      return null;
-    }
-    return store.createChat({ cwd });
-  }, [projectId]);
+  /** Crea el chat. Una conversación sin proyecto no pide carpeta: el núcleo le da una interna. */
+  const createChat = useCallback((): Promise<Chat | null> => useChat.getState().createChat(), []);
 
   const onSubmit = useCallback(
     async (turn: { text: string; attachments: Attachment[] }): Promise<boolean> => {
@@ -362,11 +348,14 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
             </button>
           </div>
         ) : null}
-        <TargetLine
-          chatId={chat?.id ?? null}
-          standalone={projectId === null}
-          draft={!chat && canWrite && project ? { path: project.repoPath, worktrees: project.workspace !== undefined } : null}
-        />
+        {/* Una conversación sin carpeta propia no tiene dónde «quedan los cambios»: sin línea. */}
+        {projectId === null && (!chat || chat.internalFolder) ? null : (
+          <TargetLine
+            chatId={chat?.id ?? null}
+            standalone={projectId === null}
+            draft={!chat && canWrite && project ? { path: project.repoPath, worktrees: project.workspace !== undefined } : null}
+          />
+        )}
         {chat && (chat.backgroundTasks ?? 0) > 0 ? <BackgroundLine count={chat.backgroundTasks ?? 0} /> : null}
         <ModeChip mode={mode} onChange={setMode} mind={mind} isDisabled={unavailable} />
         <Composer

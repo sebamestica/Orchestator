@@ -65,7 +65,7 @@ describe('ChatService: modo chat (como Claude Code)', () => {
     expect(o.cwd).toBe(b.repo);
     for (const t of BYPASS_TOOLS) expect(o.allowedTools).toContain(t);
     expect(o.allowedTools).not.toContain('mcp__orquestador__crear_tareas');
-    expect((o.systemPrompt as string[])[2]).toMatch(/agente suelto[\s\S]*## Modo: chat/);
+    expect((o.systemPrompt as string[])[2]).toMatch(/conversación: sin proyecto ni flota[\s\S]*## Modo: chat/);
     const pre = guardOf(o, b.repo);
     expect(await pre('Write', { file_path: join(b.repo, 'notas.md'), content: 'x' })).toBe(true);
     expect(await pre('Bash', { command: 'git status' })).toBe(true);

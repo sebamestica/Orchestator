@@ -21,6 +21,12 @@ describe('rutas de la interfaz', () => {
   it.each(cases)('ida y vuelta %o', (route) => {
     expect(parseRoute(routeHash(route))).toEqual(route);
   });
+  it('Conversaciones vive en #/conversaciones; los enlaces viejos #/suelto siguen abriendo lo mismo', () => {
+    expect(routeHash({ name: 'standalone' })).toBe('#/conversaciones');
+    expect(routeHash({ name: 'standalone', chatId: 'chat_x1y2z3' })).toBe('#/conversaciones/chat_x1y2z3');
+    expect(parseRoute('#/suelto')).toEqual({ name: 'standalone' });
+    expect(parseRoute('#/suelto/chat_x1y2z3')).toEqual({ name: 'standalone', chatId: 'chat_x1y2z3' });
+  });
   it('una sección desconocida cae en general', () => {
     expect(parseRoute('#/ajustes/nada')).toEqual({ name: 'settings', section: 'general' });
   });

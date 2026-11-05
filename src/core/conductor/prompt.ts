@@ -68,7 +68,7 @@ El contexto de la sesión indica el modo vigente (plan, auto, bypass o chat) y s
 - Si una herramienta falla, dilo y propone cómo seguir.`;
 
 export interface ConductorPromptContext {
-  /** `null`: agente suelto (sin proyecto ni flota). */
+  /** `null`: conversación (sin proyecto ni flota). */
   projectId: string | null;
   /** Carpeta del proyecto (cwd de la sesión). */
   projectDir: string;
@@ -103,7 +103,7 @@ export function workModeLine(mode: ConductorWorkMode, dir: string): string {
 export function renderSessionContext(ctx: ConductorPromptContext): string {
   const lines = ['## Contexto de esta sesión'];
   if (ctx.projectId === null) {
-    lines.push('- Proyecto: ninguno (agente suelto)', `- Carpeta de trabajo: ${ctx.projectDir}`);
+    lines.push('- Proyecto: ninguno (conversación: sin proyecto ni flota)', `- Carpeta de trabajo: ${ctx.projectDir}`);
   } else {
     lines.push(`- Proyecto: ${ctx.projectId}`, `- Carpeta del proyecto: ${ctx.projectDir}`);
     if (ctx.workMode) lines.push(workModeLine(ctx.workMode, ctx.projectDir));
@@ -120,7 +120,7 @@ export function renderSessionContext(ctx: ConductorPromptContext): string {
       lines.push(`  - ${q.agentId}: ${pct}${reset ? `, reinicio ${reset}` : ''}${q.stale ? ' (lectura antigua)' : ''}`);
     }
   }
-  // El modo chat no necesita proyecto: con o sin él, su texto reemplaza al del agente suelto.
+  // El modo chat no necesita proyecto: con o sin él, su texto reemplaza al de la conversación.
   if (ctx.mode === 'chat') lines.push('', '## Modo: chat', ...MODE_TEXT.chat);
   else if (ctx.projectId === null) lines.push('', ...STANDALONE_TEXT);
   else if (ctx.mode) lines.push('', `## Modo: ${ctx.mode}`, ...MODE_TEXT[ctx.mode]);
@@ -172,12 +172,12 @@ export function effortNote(effort: EffortLevel): string {
   return `[Esfuerzo de este turno: ${EFFORT_NAMES[effort]}]`;
 }
 
-/** Agente suelto: conversación y lectura en la carpeta, sin flota. */
+/** Conversación (chat sin proyecto, «Conversaciones» en la interfaz): preguntas y ayuda directa, sin flota. */
 export const STANDALONE_TEXT: readonly string[] = [
-  '## Agente suelto',
-  '- No hay proyecto ni flota: crear_tareas, delegar, estado y escribir_memoria no están disponibles.',
-  '- Conversas y lees en la carpeta de trabajo (y en las carpetas extra). Si el usuario quiere delegar trabajo, sugiérele abrir la carpeta como proyecto.',
-  '- Si quiere que hagas los cambios tú mismo en la carpeta, sugiérele el modo chat (Shift+Tab).',
+  '## Conversación',
+  '- El usuario conversa contigo para preguntarte o pedirte cosas: responde directo, como un asistente. No hay proyecto ni flota: crear_tareas, delegar, estado y escribir_memoria no están disponibles.',
+  '- No le pidas una carpeta: la carpeta de trabajo es interna de Berland y propia de esta conversación. Si quiere que leas archivos suyos, puede sumar una carpeta extra; para delegar trabajo a la flota, abrir la carpeta como proyecto.',
+  '- Si quiere que hagas cambios o ejecutes algo tú mismo, sugiérele el modo chat (Shift+Tab).',
 ];
 
 /**

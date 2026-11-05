@@ -78,8 +78,9 @@ describe('prompt de sistema del orquestador', () => {
     expect(prompts[1]?.[2]).toMatch(/## Modo: auto[\s\S]*quedan aprobadas al instante/);
     expect(prompts[2]?.[2]).toMatch(/## Modo: bypass[\s\S]*leer fuera de la carpeta del proyecto/);
     const solo = renderSessionContext({ projectId: null, projectDir: 'C:\\Users\\yo\\Desktop', mode: 'auto', extraRoots: ['D:\\fotos'] });
-    expect(solo).toMatch(/Proyecto: ninguno \(agente suelto\)/);
-    expect(solo).toMatch(/## Agente suelto/);
+    expect(solo).toMatch(/Proyecto: ninguno \(conversación: sin proyecto ni flota\)/);
+    expect(solo).toMatch(/## Conversación\n/);
+    expect(solo).toMatch(/No le pidas una carpeta/);
     expect(solo).toMatch(/Carpetas extra de lectura: D:\\fotos/);
     expect(solo).not.toMatch(/## Modo:/);
   });
@@ -137,10 +138,10 @@ describe('prompt de sistema del orquestador', () => {
     for (const projectId of ['demo', null]) {
       const ctx = renderSessionContext({ projectId, projectDir: 'C:\\dev\\demo', mode: 'chat' });
       expect(ctx, String(projectId)).toMatch(/## Modo: chat\n- Conversas directamente/);
-      expect(ctx, String(projectId)).not.toMatch(/## Agente suelto/);
+      expect(ctx, String(projectId)).not.toMatch(/## Conversación\n/);
     }
     // El agente suelto en los otros modos sugiere el modo chat para editar.
-    expect(renderSessionContext({ projectId: null, projectDir: 'C:\\x', mode: 'bypass' })).toMatch(/## Agente suelto[\s\S]*sugiérele el modo chat/);
+    expect(renderSessionContext({ projectId: null, projectDir: 'C:\\x', mode: 'bypass' })).toMatch(/## Conversación\n[\s\S]*sugiérele el modo chat/);
   });
 
   it('effortNote: la línea del esfuerzo del turno, en español', () => {

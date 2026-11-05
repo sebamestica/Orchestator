@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, redactSecrets } from '../../shared/index.ts';
 import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
-import { AttachmentStore, ChatService, registerChatRoutes } from '../chat/index.ts';
+import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes } from '../chat/index.ts';
 import { CONDUCTOR_AGENT_ID, type ConductorQueryFn, type FleetPort, type FleetTaskStatus } from '../conductor/index.ts';
 import type { QueueEntry } from '../orchestrator/index.ts';
 import type { RouteModule } from '../server/index.ts';
@@ -29,6 +29,8 @@ export interface ChatWiring {
   query?: ConductorQueryFn;
   idleMs?: number;
   drives?: () => readonly string[];
+  /** Raíz de las carpetas internas de las conversaciones; por defecto `conversationsRoot(dataDir)`. */
+  conversationsRoot?: string;
   /** Recibe el servicio armado (para `shutdown()` al detener el núcleo, o pruebas). */
   onReady?: (service: ChatService, attachments: AttachmentStore) => void;
 }
@@ -115,6 +117,7 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
       attachments,
       mcpServersFor: wiring.mcpServersFor ?? ((agentId) => plugins?.servers(agentId) ?? {}),
       readRoots: existsSync(skillsRoot) ? [skillsRoot] : [],
+      conversationsRoot: wiring.conversationsRoot ?? conversationsRoot(comp.config.dataDir),
       // Bóveda de claves, base del núcleo y memoria de Obsidian (la de todos los proyectos; también en bypass).
       denyPaths: mindDenyPaths(comp),
       ...(wiring.drives ? { drives: wiring.drives } : {}),

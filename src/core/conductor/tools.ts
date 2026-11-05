@@ -17,7 +17,7 @@ export const CONDUCTOR_SERVER_NAME = 'orquestador';
 export const CONDUCTOR_TOOL_NAMES = ['crear_tareas', 'delegar', 'estado', 'cupos', 'leer_memoria', 'escribir_memoria', 'buscar_skills'] as const;
 export type ConductorToolName = (typeof CONDUCTOR_TOOL_NAMES)[number];
 
-/** Herramientas que necesitan proyecto y flota: no existen para un agente suelto. */
+/** Herramientas que necesitan proyecto y flota: no existen en una conversación sin proyecto. */
 export const FLEET_TOOL_NAMES: readonly ConductorToolName[] = ['crear_tareas', 'delegar', 'estado', 'escribir_memoria'];
 /** Tope del plan de implementación que recibe `crear_tareas` (llega íntegro al planificador). */
 export const MAX_PLAN_CHARS = 100_000;
@@ -117,7 +117,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
   const delegating = new Set<string>();
   const mode = (): MindMode | undefined => opts.mode?.();
   const standalone = opts.standalone === true;
-  const noFleet = (name: ConductorToolName) => fail(`${name} no está disponible para un agente suelto (sin proyecto ni flota). Sugiere abrir la carpeta como proyecto.`);
+  const noFleet = (name: ConductorToolName) => fail(`${name} no está disponible en una conversación (sin proyecto ni flota). Sugiere abrir la carpeta como proyecto.`);
 
   function define<S extends z.ZodRawShape>(
     name: ConductorToolName,

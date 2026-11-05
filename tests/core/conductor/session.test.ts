@@ -307,7 +307,7 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     expect(s.projectId).toBeNull();
     for (const name of ['crear_tareas', 'delegar', 'estado', 'escribir_memoria']) expect(o.allowedTools).not.toContain(`mcp__orquestador__${name}`);
     expect(o.allowedTools).toEqual(['mcp__orquestador__cupos', 'mcp__orquestador__leer_memoria', 'mcp__orquestador__buscar_skills', 'Read', 'Grep', 'Glob', 'Agent']);
-    expect((o.systemPrompt as string[])[2]).toMatch(/agente suelto/);
+    expect((o.systemPrompt as string[])[2]).toMatch(/Proyecto: ninguno \(conversación/);
     expect(await hookOf(o)('mcp__orquestador__crear_tareas', { plan: 'x' })).toMatch(/"permissionDecision":"deny"/);
     s.close();
   });
@@ -565,9 +565,9 @@ describe('ConductorSession: modo chat (como Claude Code, sin flota)', () => {
     const o = optionsOf(q);
     expect(o.allowedTools).toEqual(['mcp__orquestador__cupos', 'mcp__orquestador__leer_memoria', 'mcp__orquestador__buscar_skills', 'Read', 'Grep', 'Glob', 'Agent', ...BYPASS_TOOLS]);
     const prompt = (o.systemPrompt as string[])[2] ?? '';
-    expect(prompt).toMatch(/Proyecto: ninguno \(agente suelto\)/);
+    expect(prompt).toMatch(/Proyecto: ninguno \(conversación/);
     expect(prompt).toMatch(/## Modo: chat/);
-    expect(prompt).not.toMatch(/## Agente suelto/);
+    expect(prompt).not.toMatch(/## Conversación\n/);
     const pre = guardAt(o, folder);
     expect(await pre('Write', { file_path: join(folder, 'notas.md'), content: 'x' })).toBe('{}');
     expect(await pre('Write', { file_path: join(extra, 'notas.md'), content: 'x' })).toBe('{}');

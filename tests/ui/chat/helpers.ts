@@ -134,12 +134,16 @@ export function fakeCore(init: Partial<CoreState> = {}, extra?: Handler): { stat
     let m: RegExpExecArray | null;
     if (p === '/chats' && method === 'GET') return { body: { chats: state.chats } };
     if (p === '/chats' && method === 'POST') {
+      const id = `chat_new00${++seq}`;
+      // Como el núcleo: una conversación sin proyecto ni carpeta recibe una carpeta interna.
+      const internal = b.projectId === null && b.cwd === undefined;
       const chat = makeChat({
-        id: `chat_new00${++seq}`,
+        id,
         projectId: (b.projectId as string | null) ?? null,
         title: '',
         mode: (b.mode as Chat['mode']) ?? 'plan',
-        cwd: (b.cwd as string) ?? 'C:\\dev\\demo',
+        cwd: internal ? `C:\\Users\\yo\\AppData\\Local\\berland-conversaciones\\${id}` : ((b.cwd as string) ?? 'C:\\dev\\demo'),
+        ...(internal ? { internalFolder: true as const } : {}),
         extraRoots: (b.extraRoots as string[]) ?? [],
         sessionId: `sess_new_${seq}`,
         costUsd: 0,

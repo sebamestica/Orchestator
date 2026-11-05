@@ -24,7 +24,7 @@ export function HomeView() {
         <h1 className="mb-4 text-[0.9375rem] font-medium text-foreground">Retoma donde quedaste</h1>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <ActionCard icon={<FolderOpen className="size-[18px]" />} label="Abrir una carpeta local" onClick={() => setAdding(true)} />
-          <ActionCard icon={<MessageSquarePlus className="size-[18px]" />} label="Agente suelto" onClick={() => navigate({ name: 'standalone' })} />
+          <ActionCard icon={<MessageSquarePlus className="size-[18px]" />} label="Conversaciones" onClick={() => navigate({ name: 'standalone' })} />
           <ActionCard icon={<ListPlus className="size-[18px]" />} label="Darle una tarea a mano" onClick={() => navigate({ name: 'board' })} />
           <ActionCard icon={<FolderGit2 className="size-[18px]" />} label="Clonar un repo" hint="Próximamente" disabled />
         </div>

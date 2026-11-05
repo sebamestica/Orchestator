@@ -6,7 +6,7 @@ import { IconButton } from '../../../components/IconButton.tsx';
 import { baseName, chatTitle, formatCost, relativeTime } from '../format.ts';
 
 interface ChatHeaderProps {
-  /** `null`: agente suelto. */
+  /** `null`: conversación sin proyecto («Conversaciones»). */
   projectName: string | null;
   folder: string | null;
   chats: readonly Chat[];
@@ -226,9 +226,13 @@ export function ChatHeader(props: ChatHeaderProps) {
   return (
     <header className="flex h-[var(--app-header-height)] shrink-0 items-center gap-3 px-4 lg:px-6">
       <div className="flex min-w-0 items-center gap-2.5">
-        <FolderOpen className="size-4 shrink-0 text-muted" aria-hidden="true" />
+        {projectName !== null ? (
+          <FolderOpen className="size-4 shrink-0 text-muted" aria-hidden="true" />
+        ) : (
+          <MessagesSquare className="size-4 shrink-0 text-muted" aria-hidden="true" />
+        )}
         <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[0.875rem] font-medium text-foreground">{projectName ?? 'Agente suelto'}</span>
+          <span className="truncate text-[0.875rem] font-medium text-foreground">{projectName ?? 'Conversaciones'}</span>
           {folder ? (
             <span className="selectable truncate text-[0.6875rem] text-muted" title={folder}>
               {folder}
@@ -244,10 +248,13 @@ export function ChatHeader(props: ChatHeaderProps) {
           </span>
         ) : null}
         <ExtraRoots roots={extraRoots} mode={mode} isDisabled={isDisabled} onAdd={onAddRoot} onRemove={onRemoveRoot} />
-        <Button variant="ghost" size="sm" onPress={onClose} aria-label="Cerrar carpeta" className="h-8 gap-1.5 px-2.5 text-[0.8125rem]">
-          <FolderX className="size-4 text-muted" aria-hidden="true" />
-          <span className="hidden md:inline">Cerrar carpeta</span>
-        </Button>
+        {/* Una conversación no tiene carpeta abierta que cerrar. */}
+        {projectName !== null ? (
+          <Button variant="ghost" size="sm" onPress={onClose} aria-label="Cerrar carpeta" className="h-8 gap-1.5 px-2.5 text-[0.8125rem]">
+            <FolderX className="size-4 text-muted" aria-hidden="true" />
+            <span className="hidden md:inline">Cerrar carpeta</span>
+          </Button>
+        ) : null}
       </div>
     </header>
   );

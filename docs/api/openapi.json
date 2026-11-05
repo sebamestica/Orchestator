@@ -8140,6 +8140,10 @@
                   "backgroundTasks": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "internalFolder": {
+                    "type": "boolean",
+                    "const": true
                   }
                 },
                 "required": [

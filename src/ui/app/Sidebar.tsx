@@ -33,7 +33,7 @@ export function Sidebar({ route }: { route: Route }) {
         </a>
 
         <ul className="mt-1 flex flex-col gap-0.5">
-          <NavItem icon={MessageSquarePlus} label="Agente suelto" href={routeHash({ name: 'standalone' })} active={route.name === 'standalone'} />
+          <NavItem icon={MessageSquarePlus} label="Conversaciones" href={routeHash({ name: 'standalone' })} active={route.name === 'standalone'} />
           <NavItem icon={KanbanSquare} label="Tablero" href={routeHash({ name: 'board' })} active={route.name === 'board' && !route.projectId} />
           <NavItem icon={Puzzle} label="Plugins" href={routeHash({ name: 'plugins' })} active={route.name === 'plugins'} />
         </ul>

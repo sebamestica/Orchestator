@@ -141,7 +141,7 @@ export type ConductorQueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>;
 
 export interface ConductorSessionOptions {
   ports: ConductorPorts;
-  /** `null`: agente suelto (sin flota: crear_tareas, delegar, estado y escribir_memoria no están disponibles). */
+  /** `null`: conversación sin proyecto (sin flota: crear_tareas, delegar, estado y escribir_memoria no están disponibles). */
   projectId: string | null;
   /** Carpeta del proyecto: `cwd` del SDK y raíz de lectura. */
   cwd: string;
@@ -312,7 +312,7 @@ export class ConductorSession {
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
       ...(acts ? { writeRoots: [o.cwd, ...extraRoots], shellRoot: o.cwd } : {}),
       deny: (name) => {
-        if (standalone && fleetTools.has(name)) return `${name} no está disponible para un agente suelto (sin proyecto ni flota).`;
+        if (standalone && fleetTools.has(name)) return `${name} no está disponible en una conversación (sin proyecto ni flota).`;
         if (name === mcpToolName('delegar') && mode?.() === 'plan') return 'delegar no está disponible en modo plan: el usuario aprueba y la tarea pasa sola a la flota.';
         // La sesión sigue viva si el modo cambia con subagentes trabajando: la guardia lee el modo vigente.
         const current = mode?.();

@@ -374,16 +374,27 @@ describe('estado vacío y primer mensaje', () => {
     expect(patches(calls)).toEqual([]);
   });
 
-  it('el agente suelto pide una carpeta de trabajo antes de crear el chat', async () => {
-    const { calls } = fakeCore({ chats: [] }, (method, path) => (method === 'POST' && path === '/fs/pick-folder' ? { body: { path: null } } : undefined));
+  it('Conversaciones: no pide carpeta; crea el chat sin cwd y no muestra la carpeta interna', async () => {
+    const pickFolder = vi.fn(async () => 'D:\\datos');
+    setBridge({ pickFolder });
+    const { calls } = fakeCore({ chats: [] });
     render(<ChatView projectId={null} />);
     expect(await screen.findByText('¿En qué te ayudo?')).toBeTruthy();
-    expect(screen.getByText('Agente suelto')).toBeTruthy();
+    expect(screen.getByText('Conversaciones')).toBeTruthy();
+    // Sin carpeta: ni «Cerrar carpeta» ni la línea de destino.
+    expect(screen.queryByRole('button', { name: 'Cerrar carpeta' })).toBeNull();
+    expect(screen.queryByTestId('target-line')).toBeNull();
     fireEvent.change(screen.getByLabelText('Mensaje'), { target: { value: 'hola' } });
     fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
-    expect(await screen.findByRole('alert')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('Elige una carpeta de trabajo');
-    expect(posts(calls)).toEqual(['/fs/pick-folder']);
+    await waitFor(() => expect(posts(calls)).toEqual(['/chats', '/chats/chat_new001/messages']));
+    expect(pickFolder).not.toHaveBeenCalled();
+    const body = calls.find((c) => c.method === 'POST' && c.path === '/chats')?.body as Record<string, unknown>;
+    expect(body.projectId).toBeNull();
+    expect(body).not.toHaveProperty('cwd');
+    expect(window.location.hash).toBe('#/conversaciones/chat_new001');
+    expect(screen.queryByText(/berland-conversaciones/)).toBeNull();
+    expect(screen.queryByTestId('target-line')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 

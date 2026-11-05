@@ -10,7 +10,7 @@ export type Route =
   | { name: 'project'; projectId: string; chatId?: string }
   /** Tablero de tareas (de un proyecto o de todos). */
   | { name: 'board'; projectId?: string }
-  /** Agente suelto: chat sin proyecto. */
+  /** Conversaciones: chats sin proyecto (antes «agente suelto»). */
   | { name: 'standalone'; chatId?: string }
   | { name: 'settings'; section: SettingsSection }
   | { name: 'plugins' };
@@ -31,7 +31,8 @@ export function parseRoute(hash: string): Route {
       const projectId = seg(b);
       return projectId ? { name: 'board', projectId } : { name: 'board' };
     }
-    case 'suelto': {
+    case 'conversaciones':
+    case 'suelto': { // `#/suelto`: enlaces de antes del cambio de nombre
       const chatId = seg(b);
       return chatId ? { name: 'standalone', chatId } : { name: 'standalone' };
     }
@@ -59,7 +60,7 @@ export function routeHash(route: Route): string {
     case 'board':
       return route.projectId ? `#/tablero/${enc(route.projectId)}` : '#/tablero';
     case 'standalone':
-      return route.chatId ? `#/suelto/${enc(route.chatId)}` : '#/suelto';
+      return route.chatId ? `#/conversaciones/${enc(route.chatId)}` : '#/conversaciones';
     case 'settings':
       return `#/ajustes/${route.section}`;
     case 'plugins':

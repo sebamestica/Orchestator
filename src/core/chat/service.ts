@@ -14,7 +14,7 @@
  *   que indicó el usuario; cada cambio se difunde como `chat_target`.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { McpServerConfig, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -63,6 +63,7 @@ import type { SqliteStore } from '../store/index.ts';
 import { AttachmentError, sniffImage, type AttachmentStore } from './attachments.ts';
 import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
 import { ChatProposals, toProposal } from './proposals.ts';
+import { conversationDir } from './conversations.ts';
 import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
 
 /** Sesión ociosa: se cierra y se reanuda con el próximo mensaje. */
@@ -115,6 +116,11 @@ export interface ChatServiceDeps {
   readRoots?: readonly string[];
   /** Archivos que la mente nunca lee (bóveda y base de datos del núcleo). */
   denyPaths?: readonly string[];
+  /**
+   * Raíz de las carpetas internas de las conversaciones (chats sin proyecto): una por chat, que Berland crea solo.
+   * Sin ella, una conversación tiene que traer su `cwd`.
+   */
+  conversationsRoot?: string;
   /** Unidades locales para el modo bypass (por defecto las letras de unidad que existen). */
   drives?: () => readonly string[];
   query?: ConductorQueryFn;
@@ -284,23 +290,41 @@ export class ChatService {
   /** El chat con lo que solo vive en memoria: los subagentes que siguen en segundo plano. */
   #withLive(chat: Chat): Chat {
     const n = this.#live.get(chat.id)?.background.size ?? 0;
-    return n > 0 ? { ...chat, backgroundTasks: n } : chat;
+    let out = n > 0 ? { ...chat, backgroundTasks: n } : chat;
+    if (this.#isInternalFolder(chat.cwd)) out = { ...out, internalFolder: true };
+    return out;
+  }
+
+  /** `cwd` es una carpeta interna de conversación (dentro de `conversationsRoot`). */
+  #isInternalFolder(cwd: string): boolean {
+    const root = this.#deps.conversationsRoot;
+    if (!root) return false;
+    const rel = path.relative(path.resolve(root), path.resolve(cwd));
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
   }
 
   create(body: CreateChatBody): Chat {
     const settings = this.#deps.settings();
     let cwd: string;
+    let id: string | undefined;
     if (body.projectId !== null) {
       const project = this.#deps.store.getProject(body.projectId);
       if (!project) throw new ChatError('not_found', `No existe el proyecto ${body.projectId}`);
       cwd = requireDir(body.cwd ?? project.repoPath, 'cwd');
-    } else {
-      if (!body.cwd) throw new ChatError('invalid', 'Un agente suelto necesita su carpeta (cwd)');
+    } else if (body.cwd) {
       cwd = requireDir(body.cwd, 'cwd');
+    } else {
+      // Una conversación no pide carpeta: trabaja en una interna, propia del chat.
+      const root = this.#deps.conversationsRoot;
+      if (!root) throw new ChatError('invalid', 'Una conversación sin proyecto necesita su carpeta (cwd)');
+      id = this.#newId();
+      cwd = conversationDir(root, id);
     }
     const extraRoots = uniqueDirs(body.extraRoots ?? []);
     const mind = resolveMind(settings, this.#deps.mind.agents());
-    const id = this.#newId();
+    // La carpeta interna se crea solo cuando el chat ya es válido.
+    if (id !== undefined) mkdirSync(cwd, { recursive: true });
+    id ??= this.#newId();
     const at = this.#iso();
     const { chat } = this.#repo.insert({
       id,
@@ -316,8 +340,9 @@ export class ChatService {
       createdAt: at,
       updatedAt: at,
     });
-    this.#deps.hub.publish({ type: 'chat', chat });
-    return chat;
+    const out = this.#withLive(chat);
+    this.#deps.hub.publish({ type: 'chat', chat: out });
+    return out;
   }
 
   /** Renombrar, cambiar el modo o las carpetas extra. Rige desde el turno siguiente (la guardia ve el modo al instante). */
@@ -630,6 +655,8 @@ export class ChatService {
    */
   async #ensureSession(chatId: string, live: Live, turnEffort?: Effort): Promise<ConductorSession> {
     const { chat, sdkSessionId } = this.#require(chatId);
+    // La carpeta interna de una conversación vuelve a existir si alguien la vació (Ajustes › Almacenamiento).
+    if (this.#isInternalFolder(chat.cwd)) mkdirSync(chat.cwd, { recursive: true });
     const settings = this.#deps.settings();
     const mind = resolveMind(settings, this.#deps.mind.agents());
     const model = settings.mind.model ?? mind.model;

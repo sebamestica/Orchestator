@@ -25,7 +25,7 @@ import { ChatError, type ChatService } from './service.ts';
 export const chatIdParam = opaqueIdSchema;
 export const attachmentIdParam = opaqueIdSchema;
 export const proposalTaskIdParam = idSchema;
-/** `projectId` vacío: agentes sueltos; ausente: todos los chats. */
+/** `projectId` vacío: conversaciones sin proyecto; ausente: todos los chats. */
 export const chatsQuery = z.strictObject({ projectId: z.union([idSchema, z.literal('')]).optional() });
 export const messagesQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(5000).optional() });
 export const uploadQuery = z.strictObject({ name: z.string().min(1).max(255) });
@@ -91,7 +91,7 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       path: '/chats',
       tag: 'Chats',
       summary: 'Lista los chats con la mente (más recientes primero)',
-      description: 'Con `projectId` los de ese proyecto; con `projectId=` (vacío) los de agentes sueltos; sin él, todos.',
+      description: 'Con `projectId` los de ese proyecto; con `projectId=` (vacío) las conversaciones sin proyecto; sin él, todos.',
       query: chatsQuery,
       response: chatsResponse,
       errors: [400],
@@ -106,7 +106,7 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       tag: 'Chats',
       summary: 'Crea un chat con la mente',
       description:
-        'La mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; para un agente suelto (`projectId: null`, sin flota) es obligatoria. `mode` por defecto: `settings.defaultMode`; `chat` (como Claude Code, sin flota) vale también sin proyecto.',
+        'La mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; una conversación sin proyecto (`projectId: null`, sin flota) no la necesita: sin `cwd`, Berland le crea una carpeta interna propia. `mode` por defecto: `settings.defaultMode`; `chat` (como Claude Code, sin flota) vale también sin proyecto.',
       body: createChatBody,
       response: chatResponse,
       status: 201,

@@ -356,7 +356,7 @@ describe('ChatService: modos', () => {
     const o = optionsOf(b);
     expect(o.cwd).toBe(b.dir);
     for (const t of ['crear_tareas', 'delegar', 'estado', 'escribir_memoria']) expect(o.allowedTools).not.toContain(`mcp__orquestador__${t}`);
-    expect((o.systemPrompt as string[])[2]).toMatch(/agente suelto/);
+    expect((o.systemPrompt as string[])[2]).toMatch(/Proyecto: ninguno \(conversación/);
     const res = await b.service.sessionOf(chat.id)?.tools.call('crear_tareas', { plan: 'x', proyecto: 'demo' });
     expect(res?.isError).toBe(true);
     expect(b.service.proposals(chat.id)).toEqual([]);

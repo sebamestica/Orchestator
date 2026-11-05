@@ -136,7 +136,7 @@ export const chatStateSchema = z.enum(['idle', 'running', 'error', 'closed']);
 
 export const chatSchema = z.strictObject({
   id: opaqueIdSchema,
-  /** `null`: agente suelto, sin proyecto (no delega a la flota). */
+  /** `null`: conversación sin proyecto (no delega a la flota). */
   projectId: idSchema.nullable(),
   title: z.string().max(200),
   /** Carpeta de trabajo de la mente. */
@@ -156,6 +156,11 @@ export const chatSchema = z.strictObject({
    * terminado. Solo en memoria: falta o es 0 si no hay ninguno.
    */
   backgroundTasks: z.number().int().nonnegative().optional(),
+  /**
+   * La carpeta de trabajo es interna de Berland: una conversación sin proyecto que no eligió carpeta. La interfaz no la
+   * muestra. Se calcula al leer; no se guarda.
+   */
+  internalFolder: z.literal(true).optional(),
 });
 export type Chat = z.infer<typeof chatSchema>;
 
@@ -173,7 +178,7 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 
 export const createChatBody = z.strictObject({
   projectId: idSchema.nullable(),
-  /** Por defecto, `repoPath` del proyecto; obligatoria para un agente suelto. */
+  /** Por defecto, `repoPath` del proyecto; sin proyecto y sin `cwd`, una carpeta interna propia del chat. */
   cwd: z.string().min(1).max(4096).optional(),
   extraRoots: z.array(z.string().min(1).max(4096)).max(20).optional(),
   mode: mindModeSchema.optional(),
@@ -306,7 +311,7 @@ export type UsageModelRow = z.infer<typeof usageModelRowSchema>;
 export const usageDayRowSchema = z.strictObject({ day: usageDaySchema, api: usageBucketSchema, subscription: usageBucketSchema });
 export const usageRoleRowSchema = z.strictObject({ role: usageRoleSchema, api: usageBucketSchema, subscription: usageBucketSchema });
 export const usageProjectRowSchema = z.strictObject({
-  /** `null`: sin proyecto (agente suelto, planificador o sesión sin tarea). */
+  /** `null`: sin proyecto (conversación, planificador o sesión sin tarea). */
   projectId: z.string().nullable(),
   name: z.string().nullable(),
   api: usageBucketSchema,

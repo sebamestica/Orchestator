@@ -4,7 +4,7 @@ import { draftLineParts, targetLineParts, targetLineText, useChangesTarget } fro
 interface TargetLineProps {
   /** Chat activo; `null` mientras no hay conversación. */
   chatId: string | null;
-  /** Chat sin proyecto (agente suelto): solo «Local · <carpeta>». */
+  /** Conversación sin proyecto con carpeta elegida: solo «Local · <carpeta>». */
   standalone: boolean;
   /** Sin chat todavía: carpeta del proyecto donde arrancará la conversación nueva (siempre en local). */
   draft?: { path: string; worktrees: boolean } | null;

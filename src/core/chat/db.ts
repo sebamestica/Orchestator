@@ -200,7 +200,7 @@ export class ChatRepo {
     return raw ? toChat(raw) : undefined;
   }
 
-  /** Más recientes primero. `projectId: null` lista los agentes sueltos; `undefined`, todos. */
+  /** Más recientes primero. `projectId: null` lista las conversaciones sin proyecto; `undefined`, todos. */
   list(projectId?: string | null): Chat[] {
     const order = 'ORDER BY updated_at DESC, rowid DESC';
     const rows =
