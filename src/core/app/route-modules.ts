@@ -10,6 +10,7 @@ import { pluginsRouteModule } from './f5-plugins.ts';
 import { settingsStoreFor } from '../settings/index.ts';
 import { f5Servidor } from './f5-servidor.ts';
 import { usageRouteModule } from './f5-uso.ts';
+import { storageRouteModule } from './f5-almacenamiento.ts';
 
 export type RouteModuleFactory = (comp: Composition) => RouteModule;
 
@@ -23,6 +24,8 @@ export const ROUTE_MODULE_FACTORIES: readonly RouteModuleFactory[] = [
   pluginsRouteModule,
   // c29-uso: uso de tokens y gasto de la API por modelo (issue 5)
   usageRouteModule,
+  // c34-almacenamiento: cuánto ocupa Berland en disco y su vaciado (issue 13)
+  storageRouteModule,
 ];
 
 export function routeModulesFor(comp: Composition): RouteModule[] {

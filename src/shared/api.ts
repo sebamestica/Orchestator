@@ -392,6 +392,135 @@ export const patchUsageRatesBody = z.strictObject({
 });
 export type PatchUsageRatesBody = z.infer<typeof patchUsageRatesBody>;
 
+// ── Almacenamiento (GET /storage y vaciado; issue 13) ────────────────────────────────────────
+
+const byteCountSchema = z.number().int().nonnegative();
+
+/** Cantidad de elementos y lo que ocupan en disco. */
+export const storageAmountSchema = z.strictObject({ count: byteCountSchema, bytes: byteCountSchema });
+export type StorageAmount = z.infer<typeof storageAmountSchema>;
+
+/** Antigüedad mínima de lo que se vacía sin estar en uso (un adjunto sin enviar, una carpeta recién creada). */
+export const STORAGE_GRACE_MS = 60 * 60 * 1000;
+/** Tope de días de «chats de más de N días». */
+export const MAX_STORAGE_OLDER_DAYS = 3650;
+
+/** Copias de imágenes y archivos subidos (`<dataDir>/attachments`). Los registrados por ruta son tuyos: no cuentan. */
+export const storageAttachmentsSchema = z.strictObject({
+  dir: z.string(),
+  total: storageAmountSchema,
+  images: storageAmountSchema,
+  others: storageAmountSchema,
+  /** Sin ningún mensaje que las use (de chats borrados o nunca enviadas) y archivos sueltos sin registro. */
+  orphans: storageAmountSchema,
+  /** Adjuntos registrados por ruta: archivos tuyos que Berland no copia ni borra. */
+  linkedFiles: byteCountSchema,
+});
+
+/** Chats con la mente dentro de la base: mensajes, propuestas, eventos y sesiones (también las de sus subagentes). */
+export const storageChatsSchema = z.strictObject({
+  chats: byteCountSchema,
+  /** Chats que están respondiendo o con subagentes trabajando: no se borran. */
+  busy: byteCountSchema,
+  messages: byteCountSchema,
+  events: byteCountSchema,
+  sessions: byteCountSchema,
+  /** Bytes aproximados de esas filas en la base (sin el historial de uso, que se conserva). */
+  bytes: byteCountSchema,
+  /** Restos de chats ya borrados: filas (mensajes, propuestas, eventos y sesiones) sin chat. */
+  leftovers: storageAmountSchema,
+  /** Última actividad del chat más antiguo; `null` sin chats. */
+  oldestUpdatedAt: isoSchema.nullable(),
+});
+
+/** Carpetas internas de las conversaciones sin proyecto (`berland-conversaciones`, una por chat). */
+export const storageConversationsSchema = z.strictObject({
+  root: z.string(),
+  exists: z.boolean(),
+  /** `count`: carpetas. */
+  total: storageAmountSchema,
+  /** Carpetas cuyo chat ya no existe. */
+  orphans: storageAmountSchema,
+  /** El recorrido se cortó por tamaño: las cifras son un mínimo. */
+  truncated: z.boolean(),
+});
+
+/** El archivo SQLite del núcleo. */
+export const storageDatabaseSchema = z.strictObject({
+  path: z.string(),
+  fileBytes: byteCountSchema,
+  walBytes: byteCountSchema,
+  shmBytes: byteCountSchema,
+  totalBytes: byteCountSchema,
+  /** Páginas libres dentro del archivo: se recuperan al compactar. */
+  freeBytes: byteCountSchema,
+  /** Lo que ocupan los chats dentro de la base (aprox.; igual a `chats.bytes` + `chats.leftovers.bytes`). */
+  chatBytes: byteCountSchema,
+  /** Lo demás: historial de tareas de la flota, uso, ajustes… (no se vacía desde aquí). */
+  otherBytes: byteCountSchema,
+});
+
+export const storageSummarySchema = z.strictObject({
+  measuredAt: isoSchema,
+  /** Lo que ocupa Berland en disco: adjuntos + carpetas de conversaciones + base. Los proyectos no cuentan. */
+  totalBytes: byteCountSchema,
+  attachments: storageAttachmentsSchema,
+  chats: storageChatsSchema,
+  conversations: storageConversationsSchema,
+  database: storageDatabaseSchema,
+});
+export type StorageSummary = z.infer<typeof storageSummarySchema>;
+export const storageResponse = z.strictObject({ storage: storageSummarySchema });
+
+/** `orphans`: solo lo que ningún mensaje usa; `all`: todas las copias subidas (no las de chats en curso). */
+export const storageCleanAttachmentsBody = z.strictObject({ scope: z.enum(['orphans', 'all']) });
+export type StorageCleanAttachmentsBody = z.infer<typeof storageCleanAttachmentsBody>;
+
+/**
+ * `leftovers`: restos de chats ya borrados; `older`: chats sin actividad en `olderThanDays` días; `all`: todos los
+ * chats. Nunca los que están respondiendo o con subagentes. `compact` (por defecto `true`): compacta la base al final.
+ */
+export const storageCleanChatsBody = z
+  .strictObject({
+    scope: z.enum(['leftovers', 'older', 'all']),
+    olderThanDays: z.number().int().min(1).max(MAX_STORAGE_OLDER_DAYS).optional(),
+    compact: z.boolean().optional(),
+  })
+  .refine((b) => b.scope !== 'older' || b.olderThanDays !== undefined, { message: 'Con scope «older» falta olderThanDays', path: ['olderThanDays'] });
+export type StorageCleanChatsBody = z.infer<typeof storageCleanChatsBody>;
+
+/** Solo las carpetas cuyo chat ya no existe (las de un chat vivo se borran con el chat). */
+export const storageCleanConversationsBody = z.strictObject({ scope: z.literal('orphans') });
+export type StorageCleanConversationsBody = z.infer<typeof storageCleanConversationsBody>;
+
+export const storageTargetSchema = z.enum(['attachments', 'chats', 'conversations', 'database']);
+export type StorageTarget = z.infer<typeof storageTargetSchema>;
+
+export const storageCleanResultSchema = z.strictObject({
+  target: storageTargetSchema,
+  deleted: z.strictObject({
+    chats: byteCountSchema,
+    messages: byteCountSchema,
+    events: byteCountSchema,
+    sessions: byteCountSchema,
+    /** Adjuntos (filas) borrados. */
+    attachments: byteCountSchema,
+    /** Archivos borrados del disco. */
+    files: byteCountSchema,
+    folders: byteCountSchema,
+  }),
+  /** Bytes liberados en disco (medidos antes y después). */
+  freedBytes: byteCountSchema,
+  /** Lo que no se borró y por qué (p. ej. un chat que está respondiendo). */
+  skipped: z.array(z.strictObject({ id: z.string(), reason: z.string() })).max(200),
+  /** Se compactó la base (checkpoint del WAL + VACUUM). */
+  compacted: z.boolean(),
+  warnings: z.array(z.string()).max(20),
+});
+export type StorageCleanResult = z.infer<typeof storageCleanResultSchema>;
+export const storageCleanResponse = z.strictObject({ result: storageCleanResultSchema, storage: storageSummarySchema });
+export type StorageCleanResponse = z.infer<typeof storageCleanResponse>;
+
 // ── Tarea manual (POST /tasks/manual) ────────────────────────────────────────────────────────
 
 /** Tarea que el usuario da directamente (casos puntuales): el núcleo completa el resto del encargo. */

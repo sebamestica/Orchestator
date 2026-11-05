@@ -16,6 +16,8 @@ import type {
   ProbeResult,
   QuotaSnapshot,
   Settings,
+  StorageCleanResult,
+  StorageSummary,
   TaskBrief,
   UsageBucket,
   UsageRate,
@@ -357,6 +359,90 @@ export const usageSummary: UsageSummary = {
 };
 
 export const usageRates: UsageRate[] = [{ model: 'claude-opus-5-5', multiplier: 1.3, updatedAt: '2026-11-04T22:10:00.000Z' }];
+
+// --------------------------------------------------------------------- almacenamiento (issue 13)
+
+const DATA_DIR = 'C:\\Users\\yo\\AppData\\Local\\orquestador';
+const MB = 1024 * 1024;
+
+/** `GET /storage`: 38 adjuntos (31 imágenes), 24 chats, 6 carpetas de conversaciones y la base con su WAL. */
+export const storageSummary: StorageSummary = {
+  measuredAt: '2026-11-05T14:20:00.000Z',
+  totalBytes: 74 * MB + 52 * MB + 96 * MB + 4 * MB + 32768,
+  attachments: {
+    dir: `${DATA_DIR}\\attachments`,
+    total: { count: 38, bytes: 74 * MB },
+    images: { count: 31, bytes: 61 * MB },
+    others: { count: 7, bytes: 13 * MB },
+    orphans: { count: 9, bytes: 18 * MB },
+    linkedFiles: 4,
+  },
+  chats: {
+    chats: 24,
+    busy: 1,
+    messages: 1310,
+    events: 48210,
+    sessions: 61,
+    bytes: 71 * MB,
+    leftovers: { count: 5120, bytes: 9 * MB },
+    oldestUpdatedAt: '2026-10-02T18:04:11.000Z',
+  },
+  conversations: {
+    root: 'C:\\Users\\yo\\AppData\\Local\\berland-conversaciones',
+    exists: true,
+    total: { count: 6, bytes: 52 * MB },
+    orphans: { count: 2, bytes: 11 * MB },
+    truncated: false,
+  },
+  database: {
+    path: `${DATA_DIR}\\orquestador.db`,
+    fileBytes: 96 * MB,
+    walBytes: 4 * MB,
+    shmBytes: 32768,
+    totalBytes: 100 * MB + 32768,
+    freeBytes: 6 * MB,
+    chatBytes: 80 * MB,
+    otherBytes: 10 * MB,
+  },
+};
+
+/** `POST /storage/chats/clean` con `older` y 30 días: un chat seguía respondiendo y se omitió. */
+export const storageChatsCleaned: StorageCleanResult = {
+  target: 'chats',
+  deleted: { chats: 9, messages: 412, events: 15230, sessions: 19, attachments: 0, files: 214, folders: 2 },
+  freedBytes: 41 * MB,
+  skipped: [{ id: '3f6c1e0a-5d2b-4c8e-9a71-0b2d4e6f8a10', reason: 'está respondiendo' }],
+  compacted: true,
+  warnings: [],
+};
+
+/** `POST /storage/attachments/clean` con `orphans`. */
+export const storageAttachmentsCleaned: StorageCleanResult = {
+  target: 'attachments',
+  deleted: { chats: 0, messages: 0, events: 0, sessions: 0, attachments: 9, files: 9, folders: 0 },
+  freedBytes: 18 * MB,
+  skipped: [{ id: '8b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e', reason: 'se subió hace menos de 1 h y aún no se envía' }],
+  compacted: false,
+  warnings: [],
+};
+
+export const storageConversationsCleaned: StorageCleanResult = {
+  target: 'conversations',
+  deleted: { chats: 0, messages: 0, events: 0, sessions: 0, attachments: 0, files: 1830, folders: 2 },
+  freedBytes: 11 * MB,
+  skipped: [],
+  compacted: false,
+  warnings: [],
+};
+
+export const storageCompacted: StorageCleanResult = {
+  target: 'database',
+  deleted: { chats: 0, messages: 0, events: 0, sessions: 0, attachments: 0, files: 0, folders: 0 },
+  freedBytes: 10 * MB,
+  skipped: [],
+  compacted: true,
+  warnings: [],
+};
 
 // --------------------------------------------------------------------- skills y memoria
 

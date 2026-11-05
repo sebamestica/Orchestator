@@ -5,12 +5,16 @@
  * para leer la tabla de rutas: no escucha en ningún puerto ni toca datos del usuario.
  *
  * Incluye los módulos de rutas de F5 que se pueden armar sin la composición: c14 (`createF5ServerRoutes`, con un
- * diálogo de carpetas falso que responde `null` y sin interfaz estática) y c29-uso (`createUsageRoutes`, uso y gasto).
+ * diálogo de carpetas falso que responde `null` y sin interfaz estática), c29-uso (`createUsageRoutes`, uso y gasto) y
+ * c34-almacenamiento (`createStorageRoutes`, con carpetas de ejemplo que nunca se leen: solo se arma la tabla de rutas).
  */
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createF5ServerRoutes } from '../../src/core/app/f5-servidor.ts';
 import { DEFAULT_PORT } from '../../src/core/config/index.ts';
 import { AgentRegistry } from '../../src/core/registry/index.ts';
 import { EventHub, createApp, generateToken, loopbackHosts, type CoreApp, type RouteSpec } from '../../src/core/server/index.ts';
+import { createStorageRoutes } from '../../src/core/storage-stats/index.ts';
 import { SqliteStore } from '../../src/core/store/index.ts';
 import { createUsageRoutes } from '../../src/core/usage-stats/index.ts';
 import { MemoryVault } from '../../src/core/vault/index.ts';
@@ -31,7 +35,8 @@ export function createInMemoryApp(opts: { validateResponses?: boolean } = {}): I
     const hub = new EventHub(store);
     const token = generateToken();
     const host = loopbackHosts(DEFAULT_PORT)[0] ?? `127.0.0.1:${DEFAULT_PORT}`;
-    const routeModules = [createF5ServerRoutes({ pickFolder: async () => null }), createUsageRoutes()];
+    const storage = createStorageRoutes({ dataDir: join(tmpdir(), 'orq-docs-almacenamiento'), dbPath: ':memory:' });
+    const routeModules = [createF5ServerRoutes({ pickFolder: async () => null }), createUsageRoutes(), storage];
     const core = createApp({ token, allowedHosts: () => [host], store, registry, hub, routeModules, validateResponses: opts.validateResponses ?? false });
     return { core, token, host, close: () => store.close() };
   } catch (err) {

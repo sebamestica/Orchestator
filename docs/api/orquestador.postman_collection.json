@@ -2457,6 +2457,340 @@
       ]
     },
     {
+      "name": "Almacenamiento",
+      "description": "Cuánto ocupa Berland en disco (adjuntos subidos, chats, carpetas de conversaciones y la base) y su vaciado; los proyectos no cuentan (issue 13).",
+      "item": [
+        {
+          "name": "/storage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/storage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage"
+              ]
+            },
+            "description": "Cuánto ocupa Berland en disco: adjuntos subidos, chats, carpetas de conversaciones y la base\n\nBytes y cantidad por categoría. Los proyectos y sus worktrees no cuentan (son tus carpetas). Los bytes de los chats dentro de la base son aproximados (páginas de `dbstat` repartidas por el tamaño de las filas). `totalBytes` = adjuntos + carpetas de conversaciones + base (`.db`, `-wal` y `-shm`)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/storage",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "storage"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"storage\": {\n    \"measuredAt\": \"2026-11-05T14:20:00.000Z\",\n    \"totalBytes\": 237010944,\n    \"attachments\": {\n      \"dir\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\",\n      \"total\": {\n        \"count\": 38,\n        \"bytes\": 77594624\n      },\n      \"images\": {\n        \"count\": 31,\n        \"bytes\": 63963136\n      },\n      \"others\": {\n        \"count\": 7,\n        \"bytes\": 13631488\n      },\n      \"orphans\": {\n        \"count\": 9,\n        \"bytes\": 18874368\n      },\n      \"linkedFiles\": 4\n    },\n    \"chats\": {\n      \"chats\": 24,\n      \"busy\": 1,\n      \"messages\": 1310,\n      \"events\": 48210,\n      \"sessions\": 61,\n      \"bytes\": 74448896,\n      \"leftovers\": {\n        \"count\": 5120,\n        \"bytes\": 9437184\n      },\n      \"oldestUpdatedAt\": \"2026-10-02T18:04:11.000Z\"\n    },\n    \"conversations\": {\n      \"root\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\berland-conversaciones\",\n      \"exists\": true,\n      \"total\": {\n        \"count\": 6,\n        \"bytes\": 54525952\n      },\n      \"orphans\": {\n        \"count\": 2,\n        \"bytes\": 11534336\n      },\n      \"truncated\": false\n    },\n    \"database\": {\n      \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\orquestador.db\",\n      \"fileBytes\": 100663296,\n      \"walBytes\": 4194304,\n      \"shmBytes\": 32768,\n      \"totalBytes\": 104890368,\n      \"freeBytes\": 6291456,\n      \"chatBytes\": 83886080,\n      \"otherBytes\": 10485760\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/storage/attachments/clean",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/storage/attachments/clean",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage",
+                "attachments",
+                "clean"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"orphans\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Vacía las imágenes y archivos subidos (los sin usar o todos)\n\n`orphans`: las copias que ningún mensaje usa (de chats borrados o nunca enviadas) y los archivos sueltos de la carpeta. `all`: todas las copias subidas; los chats conservan el texto. Nunca borra los archivos registrados por ruta (son tuyos), los de un chat que está respondiendo o con subagentes, ni lo subido hace menos de 1 h sin enviar. No se puede deshacer."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/storage/attachments/clean",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "storage",
+                    "attachments",
+                    "clean"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"scope\": \"orphans\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"target\": \"attachments\",\n    \"deleted\": {\n      \"chats\": 0,\n      \"messages\": 0,\n      \"events\": 0,\n      \"sessions\": 0,\n      \"attachments\": 9,\n      \"files\": 9,\n      \"folders\": 0\n    },\n    \"freedBytes\": 18874368,\n    \"skipped\": [\n      {\n        \"id\": \"8b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e\",\n        \"reason\": \"se subió hace menos de 1 h y aún no se envía\"\n      }\n    ],\n    \"compacted\": false,\n    \"warnings\": []\n  },\n  \"storage\": {\n    \"measuredAt\": \"2026-11-05T14:20:00.000Z\",\n    \"totalBytes\": 237010944,\n    \"attachments\": {\n      \"dir\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\",\n      \"total\": {\n        \"count\": 38,\n        \"bytes\": 77594624\n      },\n      \"images\": {\n        \"count\": 31,\n        \"bytes\": 63963136\n      },\n      \"others\": {\n        \"count\": 7,\n        \"bytes\": 13631488\n      },\n      \"orphans\": {\n        \"count\": 9,\n        \"bytes\": 18874368\n      },\n      \"linkedFiles\": 4\n    },\n    \"chats\": {\n      \"chats\": 24,\n      \"busy\": 1,\n      \"messages\": 1310,\n      \"events\": 48210,\n      \"sessions\": 61,\n      \"bytes\": 74448896,\n      \"leftovers\": {\n        \"count\": 5120,\n        \"bytes\": 9437184\n      },\n      \"oldestUpdatedAt\": \"2026-10-02T18:04:11.000Z\"\n    },\n    \"conversations\": {\n      \"root\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\berland-conversaciones\",\n      \"exists\": true,\n      \"total\": {\n        \"count\": 6,\n        \"bytes\": 54525952\n      },\n      \"orphans\": {\n        \"count\": 2,\n        \"bytes\": 11534336\n      },\n      \"truncated\": false\n    },\n    \"database\": {\n      \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\orquestador.db\",\n      \"fileBytes\": 100663296,\n      \"walBytes\": 4194304,\n      \"shmBytes\": 32768,\n      \"totalBytes\": 104890368,\n      \"freeBytes\": 6291456,\n      \"chatBytes\": 83886080,\n      \"otherBytes\": 10485760\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/storage/chats/clean",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/storage/chats/clean",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage",
+                "chats",
+                "clean"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"older\",\n  \"olderThanDays\": 30\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Borra chats (todos o los de más de N días) o los restos de chats ya borrados\n\nCada chat se borra como `DELETE /chats/:id` (sesión, mensajes, propuestas y adjuntos propios) y además sus eventos, sus sesiones y las de sus subagentes, y su carpeta de conversación. Se conserva el historial de uso (`usage`). Los chats que están respondiendo o con subagentes trabajando se omiten (`skipped`). `leftovers`: mensajes, eventos y sesiones de chats ya borrados. Al final compacta la base (`compact: false` para no hacerlo). No se puede deshacer."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/storage/chats/clean",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "storage",
+                    "chats",
+                    "clean"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"scope\": \"older\",\n  \"olderThanDays\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"target\": \"chats\",\n    \"deleted\": {\n      \"chats\": 9,\n      \"messages\": 412,\n      \"events\": 15230,\n      \"sessions\": 19,\n      \"attachments\": 0,\n      \"files\": 214,\n      \"folders\": 2\n    },\n    \"freedBytes\": 42991616,\n    \"skipped\": [\n      {\n        \"id\": \"3f6c1e0a-5d2b-4c8e-9a71-0b2d4e6f8a10\",\n        \"reason\": \"está respondiendo\"\n      }\n    ],\n    \"compacted\": true,\n    \"warnings\": []\n  },\n  \"storage\": {\n    \"measuredAt\": \"2026-11-05T14:20:00.000Z\",\n    \"totalBytes\": 237010944,\n    \"attachments\": {\n      \"dir\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\",\n      \"total\": {\n        \"count\": 38,\n        \"bytes\": 77594624\n      },\n      \"images\": {\n        \"count\": 31,\n        \"bytes\": 63963136\n      },\n      \"others\": {\n        \"count\": 7,\n        \"bytes\": 13631488\n      },\n      \"orphans\": {\n        \"count\": 9,\n        \"bytes\": 18874368\n      },\n      \"linkedFiles\": 4\n    },\n    \"chats\": {\n      \"chats\": 24,\n      \"busy\": 1,\n      \"messages\": 1310,\n      \"events\": 48210,\n      \"sessions\": 61,\n      \"bytes\": 74448896,\n      \"leftovers\": {\n        \"count\": 5120,\n        \"bytes\": 9437184\n      },\n      \"oldestUpdatedAt\": \"2026-10-02T18:04:11.000Z\"\n    },\n    \"conversations\": {\n      \"root\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\berland-conversaciones\",\n      \"exists\": true,\n      \"total\": {\n        \"count\": 6,\n        \"bytes\": 54525952\n      },\n      \"orphans\": {\n        \"count\": 2,\n        \"bytes\": 11534336\n      },\n      \"truncated\": false\n    },\n    \"database\": {\n      \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\orquestador.db\",\n      \"fileBytes\": 100663296,\n      \"walBytes\": 4194304,\n      \"shmBytes\": 32768,\n      \"totalBytes\": 104890368,\n      \"freeBytes\": 6291456,\n      \"chatBytes\": 83886080,\n      \"otherBytes\": 10485760\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/storage/conversations/clean",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/storage/conversations/clean",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage",
+                "conversations",
+                "clean"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"orphans\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Borra las carpetas de conversaciones cuyo chat ya no existe\n\nSolo hijas directas de `berland-conversaciones` con nombre de chat, sin chat y sin cambios en la última hora. Los enlaces y junctions se quitan como enlace, sin entrar en ellos; nunca se toca un proyecto. No se puede deshacer."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/storage/conversations/clean",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "storage",
+                    "conversations",
+                    "clean"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"scope\": \"orphans\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"target\": \"conversations\",\n    \"deleted\": {\n      \"chats\": 0,\n      \"messages\": 0,\n      \"events\": 0,\n      \"sessions\": 0,\n      \"attachments\": 0,\n      \"files\": 1830,\n      \"folders\": 2\n    },\n    \"freedBytes\": 11534336,\n    \"skipped\": [],\n    \"compacted\": false,\n    \"warnings\": []\n  },\n  \"storage\": {\n    \"measuredAt\": \"2026-11-05T14:20:00.000Z\",\n    \"totalBytes\": 237010944,\n    \"attachments\": {\n      \"dir\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\",\n      \"total\": {\n        \"count\": 38,\n        \"bytes\": 77594624\n      },\n      \"images\": {\n        \"count\": 31,\n        \"bytes\": 63963136\n      },\n      \"others\": {\n        \"count\": 7,\n        \"bytes\": 13631488\n      },\n      \"orphans\": {\n        \"count\": 9,\n        \"bytes\": 18874368\n      },\n      \"linkedFiles\": 4\n    },\n    \"chats\": {\n      \"chats\": 24,\n      \"busy\": 1,\n      \"messages\": 1310,\n      \"events\": 48210,\n      \"sessions\": 61,\n      \"bytes\": 74448896,\n      \"leftovers\": {\n        \"count\": 5120,\n        \"bytes\": 9437184\n      },\n      \"oldestUpdatedAt\": \"2026-10-02T18:04:11.000Z\"\n    },\n    \"conversations\": {\n      \"root\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\berland-conversaciones\",\n      \"exists\": true,\n      \"total\": {\n        \"count\": 6,\n        \"bytes\": 54525952\n      },\n      \"orphans\": {\n        \"count\": 2,\n        \"bytes\": 11534336\n      },\n      \"truncated\": false\n    },\n    \"database\": {\n      \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\orquestador.db\",\n      \"fileBytes\": 100663296,\n      \"walBytes\": 4194304,\n      \"shmBytes\": 32768,\n      \"totalBytes\": 104890368,\n      \"freeBytes\": 6291456,\n      \"chatBytes\": 83886080,\n      \"otherBytes\": 10485760\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/storage/compact",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/storage/compact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "storage",
+                "compact"
+              ]
+            },
+            "description": "Compacta la base (checkpoint del WAL + VACUUM) para liberar el espacio de lo borrado\n\nPuede tardar unos segundos con una base grande. Si la base está ocupada, responde con un aviso en `warnings` y `compacted: false`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/storage/compact",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "storage",
+                    "compact"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"result\": {\n    \"target\": \"database\",\n    \"deleted\": {\n      \"chats\": 0,\n      \"messages\": 0,\n      \"events\": 0,\n      \"sessions\": 0,\n      \"attachments\": 0,\n      \"files\": 0,\n      \"folders\": 0\n    },\n    \"freedBytes\": 10485760,\n    \"skipped\": [],\n    \"compacted\": true,\n    \"warnings\": []\n  },\n  \"storage\": {\n    \"measuredAt\": \"2026-11-05T14:20:00.000Z\",\n    \"totalBytes\": 237010944,\n    \"attachments\": {\n      \"dir\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\",\n      \"total\": {\n        \"count\": 38,\n        \"bytes\": 77594624\n      },\n      \"images\": {\n        \"count\": 31,\n        \"bytes\": 63963136\n      },\n      \"others\": {\n        \"count\": 7,\n        \"bytes\": 13631488\n      },\n      \"orphans\": {\n        \"count\": 9,\n        \"bytes\": 18874368\n      },\n      \"linkedFiles\": 4\n    },\n    \"chats\": {\n      \"chats\": 24,\n      \"busy\": 1,\n      \"messages\": 1310,\n      \"events\": 48210,\n      \"sessions\": 61,\n      \"bytes\": 74448896,\n      \"leftovers\": {\n        \"count\": 5120,\n        \"bytes\": 9437184\n      },\n      \"oldestUpdatedAt\": \"2026-10-02T18:04:11.000Z\"\n    },\n    \"conversations\": {\n      \"root\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\berland-conversaciones\",\n      \"exists\": true,\n      \"total\": {\n        \"count\": 6,\n        \"bytes\": 54525952\n      },\n      \"orphans\": {\n        \"count\": 2,\n        \"bytes\": 11534336\n      },\n      \"truncated\": false\n    },\n    \"database\": {\n      \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\orquestador.db\",\n      \"fileBytes\": 100663296,\n      \"walBytes\": 4194304,\n      \"shmBytes\": 32768,\n      \"totalBytes\": 104890368,\n      \"freeBytes\": 6291456,\n      \"chatBytes\": 83886080,\n      \"otherBytes\": 10485760\n    }\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Skills",
       "description": "Hub de skills con cuarentena.",
       "item": [

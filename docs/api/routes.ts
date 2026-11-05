@@ -53,6 +53,7 @@ export const tags: readonly { name: string; description: string }[] = [
   { name: 'Planes y tareas', description: 'Plan en texto → tareas propuestas → aprobación → ejecución.' },
   { name: 'Sesiones', description: 'Sesiones de agente y sus eventos normalizados (con reconexión por `seq`).' },
   { name: 'Uso', description: 'Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5).' },
+  { name: 'Almacenamiento', description: 'Cuánto ocupa Berland en disco (adjuntos subidos, chats, carpetas de conversaciones y la base) y su vaciado; los proyectos no cuentan (issue 13).' },
   { name: 'Skills', description: 'Hub de skills con cuarentena.' },
   { name: 'Memoria', description: 'Extractos de la memoria en Obsidian para ahorrar contexto.' },
   { name: 'Ajustes', description: 'Ajustes de la interfaz (F5): la mente, los subagentes de la flota, el modo inicial, el umbral de cupo, la concurrencia y la apariencia.' },
@@ -131,6 +132,12 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'GET /usage/summary': { responseExample: ex.usageSummary },
   'GET /usage/rates': { responseExample: { rates: ex.usageRates } },
   'PATCH /usage/rates': { responseExample: { rates: ex.usageRates } },
+
+  'GET /storage': { responseExample: { storage: ex.storageSummary } },
+  'POST /storage/attachments/clean': { responseExample: { result: ex.storageAttachmentsCleaned, storage: ex.storageSummary } },
+  'POST /storage/chats/clean': { responseExample: { result: ex.storageChatsCleaned, storage: ex.storageSummary } },
+  'POST /storage/conversations/clean': { responseExample: { result: ex.storageConversationsCleaned, storage: ex.storageSummary } },
+  'POST /storage/compact': { responseExample: { result: ex.storageCompacted, storage: ex.storageSummary } },
 
   'GET /skills': { responseExample: { skills: ex.skillsList } },
   'POST /skills/import': { responseExample: { result: ex.skillImport } },

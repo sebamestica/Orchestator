@@ -53,6 +53,10 @@
       "description": "Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5)."
     },
     {
+      "name": "Almacenamiento",
+      "description": "Cuánto ocupa Berland en disco (adjuntos subidos, chats, carpetas de conversaciones y la base) y su vaciado; los proyectos no cuentan (issue 13)."
+    },
+    {
       "name": "Skills",
       "description": "Hub de skills con cuarentena."
     },
@@ -4500,6 +4504,2527 @@
           },
           "403": {
             "$ref": "#/components/responses/E403"
+          }
+        }
+      }
+    },
+    "/storage": {
+      "get": {
+        "tags": [
+          "Almacenamiento"
+        ],
+        "summary": "Cuánto ocupa Berland en disco: adjuntos subidos, chats, carpetas de conversaciones y la base",
+        "operationId": "getStorage",
+        "description": "Bytes y cantidad por categoría. Los proyectos y sus worktrees no cuentan (son tus carpetas). Los bytes de los chats dentro de la base son aproximados (páginas de `dbstat` repartidas por el tamaño de las filas). `totalBytes` = adjuntos + carpetas de conversaciones + base (`.db`, `-wal` y `-shm`).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "totalBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "attachments": {
+                          "type": "object",
+                          "properties": {
+                            "dir": {
+                              "type": "string"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "images": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "others": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "linkedFiles": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "dir",
+                            "total",
+                            "images",
+                            "others",
+                            "orphans",
+                            "linkedFiles"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "chats": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "busy": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "leftovers": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "oldestUpdatedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "busy",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "bytes",
+                            "leftovers",
+                            "oldestUpdatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conversations": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "exists": {
+                              "type": "boolean"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "exists",
+                            "total",
+                            "orphans",
+                            "truncated"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "fileBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "walBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "shmBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "freeBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "chatBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "otherBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "fileBytes",
+                            "walBytes",
+                            "shmBytes",
+                            "totalBytes",
+                            "freeBytes",
+                            "chatBytes",
+                            "otherBytes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "measuredAt",
+                        "totalBytes",
+                        "attachments",
+                        "chats",
+                        "conversations",
+                        "database"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "storage"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "storage": {
+                    "measuredAt": "2026-11-05T14:20:00.000Z",
+                    "totalBytes": 237010944,
+                    "attachments": {
+                      "dir": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments",
+                      "total": {
+                        "count": 38,
+                        "bytes": 77594624
+                      },
+                      "images": {
+                        "count": 31,
+                        "bytes": 63963136
+                      },
+                      "others": {
+                        "count": 7,
+                        "bytes": 13631488
+                      },
+                      "orphans": {
+                        "count": 9,
+                        "bytes": 18874368
+                      },
+                      "linkedFiles": 4
+                    },
+                    "chats": {
+                      "chats": 24,
+                      "busy": 1,
+                      "messages": 1310,
+                      "events": 48210,
+                      "sessions": 61,
+                      "bytes": 74448896,
+                      "leftovers": {
+                        "count": 5120,
+                        "bytes": 9437184
+                      },
+                      "oldestUpdatedAt": "2026-10-02T18:04:11.000Z"
+                    },
+                    "conversations": {
+                      "root": "C:\\Users\\yo\\AppData\\Local\\berland-conversaciones",
+                      "exists": true,
+                      "total": {
+                        "count": 6,
+                        "bytes": 54525952
+                      },
+                      "orphans": {
+                        "count": 2,
+                        "bytes": 11534336
+                      },
+                      "truncated": false
+                    },
+                    "database": {
+                      "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\orquestador.db",
+                      "fileBytes": 100663296,
+                      "walBytes": 4194304,
+                      "shmBytes": 32768,
+                      "totalBytes": 104890368,
+                      "freeBytes": 6291456,
+                      "chatBytes": 83886080,
+                      "otherBytes": 10485760
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          }
+        }
+      }
+    },
+    "/storage/attachments/clean": {
+      "post": {
+        "tags": [
+          "Almacenamiento"
+        ],
+        "summary": "Vacía las imágenes y archivos subidos (los sin usar o todos)",
+        "operationId": "postStorageAttachmentsClean",
+        "description": "`orphans`: las copias que ningún mensaje usa (de chats borrados o nunca enviadas) y los archivos sueltos de la carpeta. `all`: todas las copias subidas; los chats conservan el texto. Nunca borra los archivos registrados por ruta (son tuyos), los de un chat que está respondiendo o con subagentes, ni lo subido hace menos de 1 h sin enviar. No se puede deshacer.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "orphans",
+                      "all"
+                    ]
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "scope": "orphans"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "enum": [
+                            "attachments",
+                            "chats",
+                            "conversations",
+                            "database"
+                          ]
+                        },
+                        "deleted": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "attachments": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "files": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "folders": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "attachments",
+                            "files",
+                            "folders"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "freedBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "maxItems": 200,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "compacted": {
+                          "type": "boolean"
+                        },
+                        "warnings": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "target",
+                        "deleted",
+                        "freedBytes",
+                        "skipped",
+                        "compacted",
+                        "warnings"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "totalBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "attachments": {
+                          "type": "object",
+                          "properties": {
+                            "dir": {
+                              "type": "string"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "images": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "others": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "linkedFiles": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "dir",
+                            "total",
+                            "images",
+                            "others",
+                            "orphans",
+                            "linkedFiles"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "chats": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "busy": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "leftovers": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "oldestUpdatedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "busy",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "bytes",
+                            "leftovers",
+                            "oldestUpdatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conversations": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "exists": {
+                              "type": "boolean"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "exists",
+                            "total",
+                            "orphans",
+                            "truncated"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "fileBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "walBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "shmBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "freeBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "chatBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "otherBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "fileBytes",
+                            "walBytes",
+                            "shmBytes",
+                            "totalBytes",
+                            "freeBytes",
+                            "chatBytes",
+                            "otherBytes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "measuredAt",
+                        "totalBytes",
+                        "attachments",
+                        "chats",
+                        "conversations",
+                        "database"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "storage"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "result": {
+                    "target": "attachments",
+                    "deleted": {
+                      "chats": 0,
+                      "messages": 0,
+                      "events": 0,
+                      "sessions": 0,
+                      "attachments": 9,
+                      "files": 9,
+                      "folders": 0
+                    },
+                    "freedBytes": 18874368,
+                    "skipped": [
+                      {
+                        "id": "8b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+                        "reason": "se subió hace menos de 1 h y aún no se envía"
+                      }
+                    ],
+                    "compacted": false,
+                    "warnings": []
+                  },
+                  "storage": {
+                    "measuredAt": "2026-11-05T14:20:00.000Z",
+                    "totalBytes": 237010944,
+                    "attachments": {
+                      "dir": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments",
+                      "total": {
+                        "count": 38,
+                        "bytes": 77594624
+                      },
+                      "images": {
+                        "count": 31,
+                        "bytes": 63963136
+                      },
+                      "others": {
+                        "count": 7,
+                        "bytes": 13631488
+                      },
+                      "orphans": {
+                        "count": 9,
+                        "bytes": 18874368
+                      },
+                      "linkedFiles": 4
+                    },
+                    "chats": {
+                      "chats": 24,
+                      "busy": 1,
+                      "messages": 1310,
+                      "events": 48210,
+                      "sessions": 61,
+                      "bytes": 74448896,
+                      "leftovers": {
+                        "count": 5120,
+                        "bytes": 9437184
+                      },
+                      "oldestUpdatedAt": "2026-10-02T18:04:11.000Z"
+                    },
+                    "conversations": {
+                      "root": "C:\\Users\\yo\\AppData\\Local\\berland-conversaciones",
+                      "exists": true,
+                      "total": {
+                        "count": 6,
+                        "bytes": 54525952
+                      },
+                      "orphans": {
+                        "count": 2,
+                        "bytes": 11534336
+                      },
+                      "truncated": false
+                    },
+                    "database": {
+                      "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\orquestador.db",
+                      "fileBytes": 100663296,
+                      "walBytes": 4194304,
+                      "shmBytes": 32768,
+                      "totalBytes": 104890368,
+                      "freeBytes": 6291456,
+                      "chatBytes": 83886080,
+                      "otherBytes": 10485760
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/storage/chats/clean": {
+      "post": {
+        "tags": [
+          "Almacenamiento"
+        ],
+        "summary": "Borra chats (todos o los de más de N días) o los restos de chats ya borrados",
+        "operationId": "postStorageChatsClean",
+        "description": "Cada chat se borra como `DELETE /chats/:id` (sesión, mensajes, propuestas y adjuntos propios) y además sus eventos, sus sesiones y las de sus subagentes, y su carpeta de conversación. Se conserva el historial de uso (`usage`). Los chats que están respondiendo o con subagentes trabajando se omiten (`skipped`). `leftovers`: mensajes, eventos y sesiones de chats ya borrados. Al final compacta la base (`compact: false` para no hacerlo). No se puede deshacer.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "leftovers",
+                      "older",
+                      "all"
+                    ]
+                  },
+                  "olderThanDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  },
+                  "compact": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "scope": "older",
+                "olderThanDays": 30
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "enum": [
+                            "attachments",
+                            "chats",
+                            "conversations",
+                            "database"
+                          ]
+                        },
+                        "deleted": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "attachments": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "files": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "folders": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "attachments",
+                            "files",
+                            "folders"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "freedBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "maxItems": 200,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "compacted": {
+                          "type": "boolean"
+                        },
+                        "warnings": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "target",
+                        "deleted",
+                        "freedBytes",
+                        "skipped",
+                        "compacted",
+                        "warnings"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "totalBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "attachments": {
+                          "type": "object",
+                          "properties": {
+                            "dir": {
+                              "type": "string"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "images": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "others": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "linkedFiles": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "dir",
+                            "total",
+                            "images",
+                            "others",
+                            "orphans",
+                            "linkedFiles"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "chats": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "busy": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "leftovers": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "oldestUpdatedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "busy",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "bytes",
+                            "leftovers",
+                            "oldestUpdatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conversations": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "exists": {
+                              "type": "boolean"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "exists",
+                            "total",
+                            "orphans",
+                            "truncated"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "fileBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "walBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "shmBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "freeBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "chatBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "otherBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "fileBytes",
+                            "walBytes",
+                            "shmBytes",
+                            "totalBytes",
+                            "freeBytes",
+                            "chatBytes",
+                            "otherBytes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "measuredAt",
+                        "totalBytes",
+                        "attachments",
+                        "chats",
+                        "conversations",
+                        "database"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "storage"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "result": {
+                    "target": "chats",
+                    "deleted": {
+                      "chats": 9,
+                      "messages": 412,
+                      "events": 15230,
+                      "sessions": 19,
+                      "attachments": 0,
+                      "files": 214,
+                      "folders": 2
+                    },
+                    "freedBytes": 42991616,
+                    "skipped": [
+                      {
+                        "id": "3f6c1e0a-5d2b-4c8e-9a71-0b2d4e6f8a10",
+                        "reason": "está respondiendo"
+                      }
+                    ],
+                    "compacted": true,
+                    "warnings": []
+                  },
+                  "storage": {
+                    "measuredAt": "2026-11-05T14:20:00.000Z",
+                    "totalBytes": 237010944,
+                    "attachments": {
+                      "dir": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments",
+                      "total": {
+                        "count": 38,
+                        "bytes": 77594624
+                      },
+                      "images": {
+                        "count": 31,
+                        "bytes": 63963136
+                      },
+                      "others": {
+                        "count": 7,
+                        "bytes": 13631488
+                      },
+                      "orphans": {
+                        "count": 9,
+                        "bytes": 18874368
+                      },
+                      "linkedFiles": 4
+                    },
+                    "chats": {
+                      "chats": 24,
+                      "busy": 1,
+                      "messages": 1310,
+                      "events": 48210,
+                      "sessions": 61,
+                      "bytes": 74448896,
+                      "leftovers": {
+                        "count": 5120,
+                        "bytes": 9437184
+                      },
+                      "oldestUpdatedAt": "2026-10-02T18:04:11.000Z"
+                    },
+                    "conversations": {
+                      "root": "C:\\Users\\yo\\AppData\\Local\\berland-conversaciones",
+                      "exists": true,
+                      "total": {
+                        "count": 6,
+                        "bytes": 54525952
+                      },
+                      "orphans": {
+                        "count": 2,
+                        "bytes": 11534336
+                      },
+                      "truncated": false
+                    },
+                    "database": {
+                      "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\orquestador.db",
+                      "fileBytes": 100663296,
+                      "walBytes": 4194304,
+                      "shmBytes": 32768,
+                      "totalBytes": 104890368,
+                      "freeBytes": 6291456,
+                      "chatBytes": 83886080,
+                      "otherBytes": 10485760
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          },
+          "501": {
+            "$ref": "#/components/responses/E501"
+          }
+        }
+      }
+    },
+    "/storage/conversations/clean": {
+      "post": {
+        "tags": [
+          "Almacenamiento"
+        ],
+        "summary": "Borra las carpetas de conversaciones cuyo chat ya no existe",
+        "operationId": "postStorageConversationsClean",
+        "description": "Solo hijas directas de `berland-conversaciones` con nombre de chat, sin chat y sin cambios en la última hora. Los enlaces y junctions se quitan como enlace, sin entrar en ellos; nunca se toca un proyecto. No se puede deshacer.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "const": "orphans"
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "scope": "orphans"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "enum": [
+                            "attachments",
+                            "chats",
+                            "conversations",
+                            "database"
+                          ]
+                        },
+                        "deleted": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "attachments": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "files": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "folders": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "attachments",
+                            "files",
+                            "folders"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "freedBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "maxItems": 200,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "compacted": {
+                          "type": "boolean"
+                        },
+                        "warnings": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "target",
+                        "deleted",
+                        "freedBytes",
+                        "skipped",
+                        "compacted",
+                        "warnings"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "totalBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "attachments": {
+                          "type": "object",
+                          "properties": {
+                            "dir": {
+                              "type": "string"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "images": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "others": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "linkedFiles": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "dir",
+                            "total",
+                            "images",
+                            "others",
+                            "orphans",
+                            "linkedFiles"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "chats": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "busy": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "leftovers": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "oldestUpdatedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "busy",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "bytes",
+                            "leftovers",
+                            "oldestUpdatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conversations": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "exists": {
+                              "type": "boolean"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "exists",
+                            "total",
+                            "orphans",
+                            "truncated"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "fileBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "walBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "shmBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "freeBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "chatBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "otherBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "fileBytes",
+                            "walBytes",
+                            "shmBytes",
+                            "totalBytes",
+                            "freeBytes",
+                            "chatBytes",
+                            "otherBytes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "measuredAt",
+                        "totalBytes",
+                        "attachments",
+                        "chats",
+                        "conversations",
+                        "database"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "storage"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "result": {
+                    "target": "conversations",
+                    "deleted": {
+                      "chats": 0,
+                      "messages": 0,
+                      "events": 0,
+                      "sessions": 0,
+                      "attachments": 0,
+                      "files": 1830,
+                      "folders": 2
+                    },
+                    "freedBytes": 11534336,
+                    "skipped": [],
+                    "compacted": false,
+                    "warnings": []
+                  },
+                  "storage": {
+                    "measuredAt": "2026-11-05T14:20:00.000Z",
+                    "totalBytes": 237010944,
+                    "attachments": {
+                      "dir": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments",
+                      "total": {
+                        "count": 38,
+                        "bytes": 77594624
+                      },
+                      "images": {
+                        "count": 31,
+                        "bytes": 63963136
+                      },
+                      "others": {
+                        "count": 7,
+                        "bytes": 13631488
+                      },
+                      "orphans": {
+                        "count": 9,
+                        "bytes": 18874368
+                      },
+                      "linkedFiles": 4
+                    },
+                    "chats": {
+                      "chats": 24,
+                      "busy": 1,
+                      "messages": 1310,
+                      "events": 48210,
+                      "sessions": 61,
+                      "bytes": 74448896,
+                      "leftovers": {
+                        "count": 5120,
+                        "bytes": 9437184
+                      },
+                      "oldestUpdatedAt": "2026-10-02T18:04:11.000Z"
+                    },
+                    "conversations": {
+                      "root": "C:\\Users\\yo\\AppData\\Local\\berland-conversaciones",
+                      "exists": true,
+                      "total": {
+                        "count": 6,
+                        "bytes": 54525952
+                      },
+                      "orphans": {
+                        "count": 2,
+                        "bytes": 11534336
+                      },
+                      "truncated": false
+                    },
+                    "database": {
+                      "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\orquestador.db",
+                      "fileBytes": 100663296,
+                      "walBytes": 4194304,
+                      "shmBytes": 32768,
+                      "totalBytes": 104890368,
+                      "freeBytes": 6291456,
+                      "chatBytes": 83886080,
+                      "otherBytes": 10485760
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/storage/compact": {
+      "post": {
+        "tags": [
+          "Almacenamiento"
+        ],
+        "summary": "Compacta la base (checkpoint del WAL + VACUUM) para liberar el espacio de lo borrado",
+        "operationId": "postStorageCompact",
+        "description": "Puede tardar unos segundos con una base grande. Si la base está ocupada, responde con un aviso en `warnings` y `compacted: false`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "target": {
+                          "type": "string",
+                          "enum": [
+                            "attachments",
+                            "chats",
+                            "conversations",
+                            "database"
+                          ]
+                        },
+                        "deleted": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "attachments": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "files": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "folders": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "attachments",
+                            "files",
+                            "folders"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "freedBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "maxItems": 200,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "compacted": {
+                          "type": "boolean"
+                        },
+                        "warnings": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "target",
+                        "deleted",
+                        "freedBytes",
+                        "skipped",
+                        "compacted",
+                        "warnings"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "measuredAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "totalBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "attachments": {
+                          "type": "object",
+                          "properties": {
+                            "dir": {
+                              "type": "string"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "images": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "others": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "linkedFiles": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "dir",
+                            "total",
+                            "images",
+                            "others",
+                            "orphans",
+                            "linkedFiles"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "chats": {
+                          "type": "object",
+                          "properties": {
+                            "chats": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "busy": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "messages": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "events": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "sessions": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "bytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "leftovers": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "oldestUpdatedAt": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "chats",
+                            "busy",
+                            "messages",
+                            "events",
+                            "sessions",
+                            "bytes",
+                            "leftovers",
+                            "oldestUpdatedAt"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "conversations": {
+                          "type": "object",
+                          "properties": {
+                            "root": {
+                              "type": "string"
+                            },
+                            "exists": {
+                              "type": "boolean"
+                            },
+                            "total": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "orphans": {
+                              "type": "object",
+                              "properties": {
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "bytes": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "bytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "root",
+                            "exists",
+                            "total",
+                            "orphans",
+                            "truncated"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "database": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string"
+                            },
+                            "fileBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "walBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "shmBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "totalBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "freeBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "chatBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "otherBytes": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "fileBytes",
+                            "walBytes",
+                            "shmBytes",
+                            "totalBytes",
+                            "freeBytes",
+                            "chatBytes",
+                            "otherBytes"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "measuredAt",
+                        "totalBytes",
+                        "attachments",
+                        "chats",
+                        "conversations",
+                        "database"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "storage"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "result": {
+                    "target": "database",
+                    "deleted": {
+                      "chats": 0,
+                      "messages": 0,
+                      "events": 0,
+                      "sessions": 0,
+                      "attachments": 0,
+                      "files": 0,
+                      "folders": 0
+                    },
+                    "freedBytes": 10485760,
+                    "skipped": [],
+                    "compacted": true,
+                    "warnings": []
+                  },
+                  "storage": {
+                    "measuredAt": "2026-11-05T14:20:00.000Z",
+                    "totalBytes": 237010944,
+                    "attachments": {
+                      "dir": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments",
+                      "total": {
+                        "count": 38,
+                        "bytes": 77594624
+                      },
+                      "images": {
+                        "count": 31,
+                        "bytes": 63963136
+                      },
+                      "others": {
+                        "count": 7,
+                        "bytes": 13631488
+                      },
+                      "orphans": {
+                        "count": 9,
+                        "bytes": 18874368
+                      },
+                      "linkedFiles": 4
+                    },
+                    "chats": {
+                      "chats": 24,
+                      "busy": 1,
+                      "messages": 1310,
+                      "events": 48210,
+                      "sessions": 61,
+                      "bytes": 74448896,
+                      "leftovers": {
+                        "count": 5120,
+                        "bytes": 9437184
+                      },
+                      "oldestUpdatedAt": "2026-10-02T18:04:11.000Z"
+                    },
+                    "conversations": {
+                      "root": "C:\\Users\\yo\\AppData\\Local\\berland-conversaciones",
+                      "exists": true,
+                      "total": {
+                        "count": 6,
+                        "bytes": 54525952
+                      },
+                      "orphans": {
+                        "count": 2,
+                        "bytes": 11534336
+                      },
+                      "truncated": false
+                    },
+                    "database": {
+                      "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\orquestador.db",
+                      "fileBytes": 100663296,
+                      "walBytes": 4194304,
+                      "shmBytes": 32768,
+                      "totalBytes": 104890368,
+                      "freeBytes": 6291456,
+                      "chatBytes": 83886080,
+                      "otherBytes": 10485760
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
           }
         }
       }

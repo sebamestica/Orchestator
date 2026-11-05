@@ -143,7 +143,7 @@ describe('navegación', () => {
     render(<SettingsView section="general" />);
     const nav = screen.getByRole('navigation', { name: 'Secciones de ajustes' });
     const links = within(nav).getAllByRole('link');
-    expect(links.map((l) => l.getAttribute('href'))).toEqual(['#/ajustes/general', '#/ajustes/mente', '#/ajustes/agentes', '#/ajustes/proyectos', '#/ajustes/memoria', '#/ajustes/skills', '#/ajustes/uso']);
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['#/ajustes/general', '#/ajustes/mente', '#/ajustes/agentes', '#/ajustes/proyectos', '#/ajustes/memoria', '#/ajustes/skills', '#/ajustes/uso', '#/ajustes/almacenamiento']);
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page');
   });
 });
