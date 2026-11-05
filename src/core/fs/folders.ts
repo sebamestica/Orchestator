@@ -366,11 +366,11 @@ export async function inspectFolder(raw: string, opts: FsEnv & { projects?: read
 
   if (registeredAs) warnings.push(`La carpeta ya está registrada como el proyecto ${registeredAs}`);
   if (suggestedId !== base) warnings.push(`Ya existe un proyecto con id ${base}: se sugiere ${suggestedId}`);
-  if (!git) warnings.push('No es un repositorio git: se registrará sin worktrees y la flota no podrá ejecutar tareas en él');
+  if (!git) warnings.push('No es un repositorio git: se trabajará en local, directamente en la carpeta (sin worktrees ni commits)');
   else if (!branch) warnings.push('HEAD separado: se usará main como rama base');
   if (!gate) {
     warnings.push(
-      `No se encontró una verificación (gate): agrega un script ${GATE_SCRIPTS.join(', ')} en package.json o pruebas con pytest; sin gate se registrará sin worktrees`,
+      `No se encontró una verificación (gate): se trabajará en local, directamente en la carpeta. Para usar worktrees por tarea, agrega un script ${GATE_SCRIPTS.join(', ')} en package.json o pruebas con pytest`,
     );
   }
   return {

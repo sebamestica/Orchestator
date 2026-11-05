@@ -58,6 +58,13 @@ export interface FleetOptions {
   planMemory?: PlanMemory | null;
   /** Resumen del diff para el revisor. Por defecto: archivos de los eventos `file_change` y resumen del autor. */
   diffSummary?: (workspace: Workspace, task: TaskBrief, run: ExecuteResult) => Promise<string>;
+  /**
+   * Clave de exclusión por proyecto: dos tareas con la misma clave nunca están en curso a la vez (modo local: la
+   * misma carpeta del usuario). `undefined` = sin restricción (worktrees).
+   */
+  exclusiveKey?: (projectId: string) => string | undefined;
+  /** El workspace es la carpeta del usuario en modo local (cambia el encargo: sin commits ni ramas). */
+  isLocal?: (workspace: Workspace) => boolean;
   memoryBudgetChars?: number;
   maxRounds?: number;
   rulesFiles?: readonly string[];
@@ -139,6 +146,10 @@ export class Fleet {
   readonly #planFor: PlanFor | undefined;
   readonly #planMemory: PlanMemory | undefined;
   readonly #diffSummary: (workspace: Workspace, task: TaskBrief, run: ExecuteResult) => Promise<string>;
+  readonly #exclusiveKey: (projectId: string) => string | undefined;
+  readonly #isLocal: (workspace: Workspace) => boolean;
+  /** Claves de exclusión de las tareas con su ciclo en curso. */
+  readonly #exclusive = new Map<string, string>();
   readonly #memoryBudget: number;
   readonly #maxRounds: number;
   readonly #rulesFiles: readonly string[] | undefined;
@@ -165,6 +176,8 @@ export class Fleet {
     this.#planFor = opts.planFor;
     this.#planMemory = opts.planMemory === null ? undefined : (opts.planMemory ?? asPlanMemory(opts.memory));
     this.#diffSummary = opts.diffSummary ?? (async (_ws, _task, run) => defaultDiffSummary(run));
+    this.#exclusiveKey = opts.exclusiveKey ?? (() => undefined);
+    this.#isLocal = opts.isLocal ?? (() => false);
     this.#memoryBudget = opts.memoryBudgetChars ?? DEFAULT_MEMORY_BUDGET_CHARS;
     this.#maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
     this.#rulesFiles = opts.rulesFiles;
@@ -199,12 +212,21 @@ export class Fleet {
       while (true) {
         readied = false;
         if (!opts.signal?.aborted) {
-          for (let task = this.#queue.next(); task; task = this.#queue.next()) {
+          const canStart = (t: TaskBrief) => {
+            const key = this.#keyOf(t);
+            return key === undefined || ![...this.#exclusive.values()].includes(key);
+          };
+          for (let task = this.#queue.next(canStart); task; task = this.#queue.next(canStart)) {
             const id = task.id;
+            const key = this.#keyOf(task);
+            if (key !== undefined) this.#exclusive.set(id, key);
             const job = this.#runTask(task)
               .then((r) => { reports.push(r); })
               .catch((err: unknown) => { this.#warn(`${id}: ${err instanceof Error ? err.message : String(err)}`); })
-              .finally(() => { running.delete(id); });
+              .finally(() => {
+                running.delete(id);
+                this.#exclusive.delete(id);
+              });
             running.set(id, job);
           }
         }
@@ -247,6 +269,15 @@ export class Fleet {
     return [...this.#inFlight];
   }
 
+  /** Clave de exclusión de la tarea; si falla la consulta, sin clave (la creación del workspace dará el error). */
+  #keyOf(task: TaskBrief): string | undefined {
+    try {
+      return this.#exclusiveKey(task.projectId);
+    } catch {
+      return undefined;
+    }
+  }
+
   async #runTask(task: TaskBrief): Promise<TaskReport> {
     this.#inFlight.add(task.id);
     try {
@@ -282,6 +313,7 @@ export class Fleet {
     const workspace = await this.#workspaces.create(task.projectId, task);
     run.workspace = workspace;
     report.workspace = workspace;
+    const local = this.#isLocal(workspace) ? { path: workspace.path } : undefined;
     const memoryContext = await this.#memoryContext(task);
     const plan = await this.#generalPlan(task);
     report.plan = { id: plan.id, source: plan.source, ...(plan.note ? { note: plan.note } : {}), exists: false, done: 0, pending: 0 };
@@ -298,7 +330,7 @@ export class Fleet {
         info.handoff.partialSummary = withTaskPlanNote(info.handoff.partialSummary, status);
       }
       await this.#writeFile(join(workspace.path, PLAN_FILE), plan.file);
-      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles }));
+      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles, ...(local ? { local } : {}) }));
     };
 
     const decision = await this.#router.route(task);

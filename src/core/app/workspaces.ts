@@ -3,12 +3,18 @@ import type { ProjectRecord } from '../store/index.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { GATE_REQUIRED, INTEGRATION_DIR, isInside, physicalPath, projectsOverlapProblem, WorkspaceError, WorktreeManager, type WorkspaceProject } from '../workspace/index.ts';
+import { LocalWorkspaces, type LocalProject } from './local-workspaces.ts';
 
 export interface ProjectWorktreesOptions {
   /** Configuración de c3 explícita por proyecto (con `gate`, `links`, `worktreesRoot`…); gana sobre el almacén. */
   projects?: readonly unknown[];
-  /** Proyectos del almacén (`POST /projects`): `{ id, repoPath, workspace? }`; `workspace` es la misma configuración de c3. */
+  /**
+   * Proyectos del almacén (`POST /projects`): `{ id, repoPath, workspace? }`; `workspace` es la misma configuración de
+   * c3. Un proyecto del almacén **sin** `workspace` (carpeta sin git o sin gate) trabaja en modo local.
+   */
   storeProject?: (projectId: string) => ProjectRecord | undefined;
+  /** Gestor del modo local (por defecto uno propio). */
+  local?: LocalWorkspaces;
   gitPath?: string;
   log?: (line: string) => void;
 }
@@ -36,9 +42,10 @@ interface Entry {
  * proyectos agregados después de arrancar. Los del almacén se releen en cada uso, y una tarea nueva usa la
  * configuración guardada en ese momento. Cada worktree queda ligado al gestor (y a la configuración) con que se creó
  * hasta quitarlo: se integra y se limpia con esa configuración aunque el proyecto se haya vuelto a registrar. Las
- * integraciones del mismo repositorio físico nunca se intercalan, sea cual sea el gestor (`WorktreeManager`). Sin
- * `gate` no se crea ni se integra ninguna tarea. El servidor rechaza borrar (y por tanto reconfigurar) un proyecto con
- * tareas activas.
+ * integraciones del mismo repositorio físico nunca se intercalan, sea cual sea el gestor (`WorktreeManager`). Con
+ * configuración de worktrees y sin `gate` no se crea ni se integra ninguna tarea. Un proyecto del almacén **sin**
+ * `workspace` (carpeta sin git o sin gate) trabaja en **modo local** (`LocalWorkspaces`): directamente en la carpeta,
+ * sin ramas ni commits. El servidor rechaza borrar (y por tanto reconfigurar) un proyecto con tareas activas.
  */
 export class ProjectWorktrees implements WorkspaceManager {
   readonly #opts: ProjectWorktreesOptions;
@@ -47,9 +54,11 @@ export class ProjectWorktrees implements WorkspaceManager {
   readonly #bound = new Map<string, { projectId: string; entry: Entry }>();
   /** Configuraciones retiradas cuya raíz aún tiene `_integracion` (no se quita al limpiar las tareas). */
   readonly #retired = new Map<Entry, string>();
+  readonly #local: LocalWorkspaces;
 
   constructor(opts: ProjectWorktreesOptions) {
     this.#opts = opts;
+    this.#local = opts.local ?? new LocalWorkspaces({ ...(opts.log ? { log: opts.log } : {}) });
     for (const raw of opts.projects ?? []) {
       const id = typeof raw === 'object' && raw !== null && 'id' in raw ? String((raw as { id: unknown }).id) : '';
       this.#explicit.set(id, raw);
@@ -68,7 +77,33 @@ export class ProjectWorktrees implements WorkspaceManager {
     return (this.#bound.get(bindKey(workspace.path))?.entry ?? this.#entry(projectId)).manager.project(projectId);
   }
 
+  /**
+   * Proyecto en modo local: del almacén y sin `workspace` (carpeta sin git o sin gate). Una configuración explícita
+   * de compose nunca es local: quien la pasa quiere worktrees (y sin gate se rechaza).
+   */
+  localProject(projectId: string): LocalProject | undefined {
+    if (this.#explicit.has(projectId)) return undefined;
+    const record = this.#opts.storeProject?.(projectId);
+    return record && !record.workspace ? { id: record.id, repoPath: record.repoPath } : undefined;
+  }
+
+  /** El workspace es una carpeta en modo local (no un worktree). */
+  isLocal(workspace: Workspace): boolean {
+    return this.#local.isLocal(workspace);
+  }
+
+  /**
+   * Clave de exclusión de las tareas del proyecto: la carpeta, si es local (dos tareas en la misma carpeta se
+   * pisarían); `undefined` si usa worktrees (cada tarea tiene el suyo).
+   */
+  exclusiveKey(projectId: string): string | undefined {
+    const local = this.localProject(projectId);
+    return local ? `local:${LocalWorkspaces.key(local.repoPath)}` : undefined;
+  }
+
   async create(projectId: string, task: TaskBrief): Promise<Workspace> {
+    const local = this.localProject(projectId);
+    if (local) return this.#local.create(local, task);
     const entry = this.#entry(projectId);
     // Antes de crear nada: una tarea sin gate se pararía al integrar, después de gastar el cupo del agente.
     if (entry.manager.project(projectId).gate.length === 0) throw gateMissing(projectId);
@@ -78,6 +113,11 @@ export class ProjectWorktrees implements WorkspaceManager {
   }
 
   async integrate(projectId: string, workspace: Workspace): Promise<IntegrationResult> {
+    const local = this.#local.projectOf(workspace);
+    if (local) {
+      if (local.id !== projectId) throw new WorkspaceError(`la carpeta ${workspace.path} es del proyecto ${local.id}, no de ${projectId}`);
+      return this.#local.integrate(local, workspace);
+    }
     const bound = this.#bound.get(bindKey(workspace.path));
     if (bound && bound.projectId !== projectId) {
       throw new WorkspaceError(`el worktree ${workspace.path} es del proyecto ${bound.projectId}, no de ${projectId}`);
@@ -92,6 +132,7 @@ export class ProjectWorktrees implements WorkspaceManager {
   }
 
   async remove(workspace: Workspace): Promise<void> {
+    if (this.#local.isLocal(workspace)) return this.#local.remove(workspace);
     const key = bindKey(workspace.path);
     const bound = this.#bound.get(key);
     if (bound) {

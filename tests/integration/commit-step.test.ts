@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CommittingWorkspaces, FLEET_IDENTITY, OwnedPathsError, outsideOwnedPaths, parsePorcelainZ } from '../../src/core/app/commit-step.ts';
+import { CommittingWorkspaces, GitIdentityError, isMissingIdentity, OwnedPathsError, outsideOwnedPaths, parsePorcelainZ } from '../../src/core/app/commit-step.ts';
 import { WorktreeManager } from '../../src/core/workspace/index.ts';
 import { taskBriefSchema, type TaskBrief, type Workspace } from '../../src/shared/index.ts';
 import { cleanupDirs, tempDir } from './helpers.ts';
@@ -30,6 +30,8 @@ async function setup(opts: { ignoreOrq?: boolean } = {}) {
   }
   writeFileSync(join(repo, 'src', 'a.mjs'), 'export const a = 1;\n');
   for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'inicio']]) expect(git(repo, ...args).status).toBe(0);
+  // Identidad del «usuario» en la config del repositorio (la heredan los worktrees): la flota confirma con ella.
+  for (const args of [['config', 'user.name', 'Usuario Prueba'], ['config', 'user.email', 'usuario@prueba.local']]) expect(git(repo, ...args).status).toBe(0);
   const manager = new WorktreeManager({ projects: [{ id: 'demo', repoPath: repo, worktreesRoot: join(root, 'wt') }], removeRetryDelayMs: 200 });
   const ws = new CommittingWorkspaces({ inner: manager, integrationBranch: (id) => manager.project(id).integrationBranch });
   const entry = { ws, created: [] as Workspace[] };
@@ -63,7 +65,9 @@ describe('paso de commit de la flota', () => {
     const summary = await ws.reviewSummary(w);
     expect(summary).toMatch(/src\/a\.mjs/);
     expect(summary).toMatch(/tarea-a: Tarea tarea-a/);
-    expect(git(w.path, 'log', '-1', '--format=%an <%ae>').stdout.trim()).toBe(`${FLEET_IDENTITY.name} <${FLEET_IDENTITY.email}>`);
+    // A nombre del usuario (autor y committer), sin trailers de coautoría.
+    expect(git(w.path, 'log', '-1', '--format=%an <%ae>|%cn <%ce>').stdout.trim()).toBe('Usuario Prueba <usuario@prueba.local>|Usuario Prueba <usuario@prueba.local>');
+    expect(git(w.path, 'log', '-1', '--format=%B').stdout).not.toMatch(/Co-Authored-By|Generated with/i);
     expect(git(w.path, 'show', '--name-only', '--format=', 'HEAD').stdout.trim().split('\n').sort()).toEqual(['src/a.mjs', 'test/a.test.mjs']);
 
     const result = await ws.integrate('demo', w);
@@ -106,6 +110,24 @@ describe('paso de commit de la flota', () => {
     // Deshecho el cambio ajeno, se confirma e integra.
     expect(git(w.path, 'checkout', '--', 'package.json').status).toBe(0);
     expect(await ws.integrate('demo', w)).toMatchObject({ ok: true });
+  });
+
+  it('sin identidad git del usuario no confirma nada: error claro, nunca un autor inventado', async () => {
+    const { repo, ws, create, head } = await setup();
+    const w = await create(task('tarea-sin-autor', ['src/a.mjs']));
+    const before = head(w.path);
+    writeFileSync(join(w.path, 'src', 'a.mjs'), 'export const a = 9;\n');
+    // Nombre vacío en la config del repo: git rechaza el commit aunque haya identidad global.
+    expect(git(repo, 'config', 'user.name', '').status).toBe(0);
+    await expect(ws.integrate('demo', w)).rejects.toBeInstanceOf(GitIdentityError);
+    await expect(ws.reviewSummary(w)).rejects.toThrow(/identidad git/);
+    expect(head(w.path)).toBe(before);
+  });
+
+  it('isMissingIdentity reconoce los mensajes de git', () => {
+    expect(isMissingIdentity('Author identity unknown\n\n*** Please tell me who you are.')).toBe(true);
+    expect(isMissingIdentity('fatal: empty ident name (for <x@y>) not allowed')).toBe(true);
+    expect(isMissingIdentity('fatal: pathspec did not match')).toBe(false);
   });
 
   it('también revisa lo que el agente confirmó por su cuenta', async () => {

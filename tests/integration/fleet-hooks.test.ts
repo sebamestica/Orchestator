@@ -47,7 +47,9 @@ describe('servidor → flota real (sin red)', () => {
     mkdirSync(join(repo, 'src'), { recursive: true });
     writeFileSync(join(repo, 'README.md'), '# demo\n');
     const git = (...args: string[]) => spawnSync('git', ['-c', 'user.name=u', '-c', 'user.email=u@local', ...args], { cwd: repo, encoding: 'utf8' });
-    for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'inicio']]) expect(git(...args).status).toBe(0);
+    for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'inicio'], ['config', 'user.name', 'Usuario Prueba'], ['config', 'user.email', 'usuario@prueba.local']]) {
+      expect(git(...args).status).toBe(0);
+    }
 
     const runs: string[] = [];
     const comp = compose({
@@ -101,7 +103,9 @@ describe('servidor → flota real (sin red)', () => {
     expect(runs.slice(2)).toEqual(['claude:tarea-dos', 'codex:tarea-dos-revision']);
     expect(git('show', 'orq/integracion:src/dos.mjs').stdout).toBe('// hecho por claude\n');
     expect(git('show', 'orq/integracion:src/uno.mjs').stdout).toBe('// hecho por codex\n');
-    expect(git('log', '--format=%an', 'orq/tarea-uno', '-1').stdout.trim()).toBe('Orquestador (flota)');
+    // El commit de la flota va a nombre del usuario (su identidad git), sin trailers.
+    expect(git('log', '--format=%an <%ae>', 'orq/tarea-uno', '-1').stdout.trim()).toBe('Usuario Prueba <usuario@prueba.local>');
+    expect(git('log', '--format=%B', 'orq/tarea-uno', '-1').stdout).not.toMatch(/Co-Authored-By/i);
     expect(git('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim()).toBe('main');
     expect(git('status', '--porcelain').stdout).toBe('');
   }, 60_000);

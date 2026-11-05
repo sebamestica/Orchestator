@@ -183,7 +183,10 @@ export class FleetService {
       memory: d.memory,
       // Plan general de cada tarea (.orq/PLAN.md): el de `POST /plans` o el de `crear_tareas` de la mente (c17).
       planFor: combinedPlanFor(d.store, d.plans ?? new PlanRegistry()),
-      diffSummary: (workspace) => workspaces.reviewSummary(workspace),
+      diffSummary: (workspace, _task, run) => workspaces.reviewSummary(workspace, run),
+      // Modo local: una tarea a la vez por carpeta y encargo sin commits ni ramas.
+      exclusiveKey: (projectId) => workspaces.exclusiveKey(projectId),
+      isLocal: (workspace) => workspaces.isLocal(workspace),
       warn: this.#log,
       ...(this.#tuning.timeoutMs ? { timeoutMs: this.#tuning.timeoutMs } : {}),
       ...(this.#tuning.maxRounds ? { maxRounds: this.#tuning.maxRounds } : {}),

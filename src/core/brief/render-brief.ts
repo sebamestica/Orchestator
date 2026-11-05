@@ -6,6 +6,20 @@ export interface RenderBriefOptions {
   memoryContext?: string;
   /** Rutas de reglas del repo que el agente debe leer primero. */
   rulesFiles?: readonly string[];
+  /** Modo local: se trabaja directamente en la carpeta del usuario (sin worktree, ramas ni commits). */
+  local?: { path: string };
+}
+
+/** Reglas del modo local (carpeta del usuario): van al principio, antes del objetivo. */
+export function localModeSection(path: string): string[] {
+  return [
+    '## Modo local (sin worktree)',
+    `Trabajas directamente en la carpeta del usuario (\`${path}\`), no en una copia: lo que cambies queda guardado ahí al instante.`,
+    '- No hagas commits ni ramas, y no uses `git init`, `git stash`, `git reset`, `git checkout`, `git switch`, `git restore` ni `git clean`: la carpeta es del usuario y en modo local Berland no confirma nada.',
+    '- Toca solo tus rutas propias. No borres, muevas ni reformatees archivos fuera de ellas.',
+    '- `.orq/` es la carpeta de trabajo de Berland: no la borres.',
+    '',
+  ];
 }
 
 /**
@@ -43,11 +57,14 @@ export function renderBrief(task: TaskBrief, handoff?: Handoff, opts: RenderBrie
   } else {
     lines.push(...implementationPlanSection());
   }
+  if (opts.local) lines.push(...localModeSection(opts.local.path));
   if (handoff) {
     lines.push(
       '## Continuación de otro agente',
-      `Esta tarea la empezó \`${handoff.fromAgent}\` y se detuvo por: ${handoff.reason}. Trabajas en el mismo worktree.`,
-      'Antes de seguir: lee `.orq/HANDOFF.md` si existe, revisa `git status`, `git diff` y `git log` de esta rama, y continúa desde ahí sin rehacer lo que ya funciona.',
+      `Esta tarea la empezó \`${handoff.fromAgent}\` y se detuvo por: ${handoff.reason}. ${opts.local ? 'Trabajas en la misma carpeta.' : 'Trabajas en el mismo worktree.'}`,
+      opts.local
+        ? 'Antes de seguir: lee `.orq/HANDOFF.md` si existe, revisa los archivos de tus rutas propias y continúa desde ahí sin rehacer lo que ya funciona.'
+        : 'Antes de seguir: lee `.orq/HANDOFF.md` si existe, revisa `git status`, `git diff` y `git log` de esta rama, y continúa desde ahí sin rehacer lo que ya funciona.',
     );
     if (!review) {
       lines.push(`Lee \`${PLAN_FILES.taskPlan}\` del agente anterior y sigue desde el primer paso sin marcar (si no existe, escríbelo antes de seguir).`);

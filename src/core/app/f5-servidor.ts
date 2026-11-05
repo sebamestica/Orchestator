@@ -184,7 +184,7 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
         tag: 'Proyectos',
         summary: 'Deduce id, nombre, gate y enlaces de una carpeta antes de registrarla',
         description:
-          'Gate: el primer script de `package.json` entre `check`, `gate` y `test` (`npm run -s <script>`), o pytest (`python -m pytest -q`), o `null`. `links`: `node_modules` si existe. Avisa si no es git, si no hay gate o si la carpeta ya es un proyecto.',
+          'Gate: el primer script de `package.json` entre `check`, `gate` y `test` (`npm run -s <script>`), o pytest (`python -m pytest -q`), o `null`. `links`: `node_modules` si existe. Avisa si no es git o si no hay gate (entonces se trabajará en local) y si la carpeta ya es un proyecto.',
         body: inspectFolderBody,
         response: folderInspectionSchema,
         errors: [400, 404, 415],
@@ -199,7 +199,7 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
         tag: 'Proyectos',
         summary: 'Registra un proyecto apuntando a una carpeta',
         description:
-          'Con git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git o sin gate se registra sin `workspace` (la flota no ejecuta sus tareas hasta reconfigurarlo). 409 si el id ya existe o la carpeta ya es un proyecto.',
+          'Con git y gate deducido, con `workspace`: worktrees en `C:\\dev\\.worktrees\\<id>-orq`, rama base la actual (o `main`), integración en `orq/integracion`, enlaces y gate (30 min). Sin git o sin gate se registra sin `workspace`: la flota trabaja en **modo local**, directamente en la carpeta (sin worktrees, ramas ni commits; una tarea a la vez; el gate se corre si aparece uno). 409 si el id ya existe o la carpeta ya es un proyecto.',
         body: projectFromFolderBody,
         response: apiSchemas.projectResponse,
         status: 201,

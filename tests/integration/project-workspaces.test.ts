@@ -147,18 +147,18 @@ describe('receta de Vetworld (docs/proyectos)', () => {
 });
 
 describe('sin gate la flota no crea ni integra', () => {
-  it('proyecto del almacén sin workspace (alta antigua): create e integrate fallan antes de tocar nada', async () => {
+  it('proyecto del almacén sin workspace: modo local (carpeta del usuario), nada en C:\\dev\\.worktrees', async () => {
     const base = await tempDir('orq-sin-gate-');
-    // repoPath inexistente: aunque fallara la comprobación, git no podría crear nada en C:\dev\.worktrees.
+    // repoPath inexistente: el modo local exige la carpeta y no crea worktrees en ningún caso.
     const record: ProjectRecord = { id: 'sin-gate-c13', name: 'Sin gate', repoPath: join(base, 'no-existe'), createdAt: '2026-11-03T00:00:00.000Z' };
     const log: string[] = [];
     const pw = new ProjectWorktrees({ storeProject: (id) => (id === record.id ? record : undefined), log: (l) => log.push(l) });
-    await expect(pw.create(record.id, brief('t1', record.id))).rejects.toThrow(/sin gate configurado.*workspace\.gate/);
-    await expect(pw.integrate(record.id, { taskId: 't1', path: join(base, 'wt', 't1'), branch: 'orq/t1' })).rejects.toThrow(/sin gate configurado/);
+    expect(pw.localProject(record.id)).toEqual({ id: record.id, repoPath: record.repoPath });
+    expect(pw.exclusiveKey(record.id)).toMatch(/^local:/);
+    await expect(pw.create(record.id, brief('t1', record.id))).rejects.toThrow(/la carpeta .* no existe/);
     expect(existsSync(defaultWorktreesRoot(record.id))).toBe(false);
-    expect(log).toEqual(['proyecto sin-gate-c13: sin gate configurado; la flota no creará ni integrará sus tareas hasta configurarlo']);
-    // `project()` sigue sirviendo (el paso de commit pide la rama de integración).
-    expect(pw.project(record.id).integrationBranch).toBe('orq/integracion');
+    // Un workspace que no es local de este gestor sigue el camino de worktrees (y sin gate, se rechaza).
+    await expect(pw.integrate(record.id, { taskId: 't1', path: join(base, 'wt', 't1'), branch: 'orq/t1' })).rejects.toThrow(/sin gate configurado/);
   });
 
   it('configuración explícita sin gate (compose): también se rechaza', async () => {

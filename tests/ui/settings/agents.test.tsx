@@ -172,7 +172,8 @@ describe('Proyectos', () => {
     useApp.setState({ projects: [{ id: 'vetworld', name: 'Vetworld', repoPath: 'C:\\dev\\Vetworld', createdAt: '2026-11-04T10:00:00.000Z' }] });
     const calls = fakeCore({ 'DELETE /projects/vetworld': () => ({ body: { deleted: true, id: 'vetworld' } }), 'GET /projects': () => ({ body: { projects: [] } }) });
     render(<SettingsView section="proyectos" />);
-    expect(screen.getByText(/Sin gate/)).toBeTruthy();
+    // Sin `workspace`, el proyecto trabaja en modo local (directo en la carpeta).
+    expect(screen.getByText(/Modo local: se trabaja directo en la carpeta/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Quitar/ }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/no toca la carpeta/)).toBeTruthy();

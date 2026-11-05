@@ -131,11 +131,15 @@ export class TaskQueue {
     return [...this.#entries.values()].map((e) => ({ ...e }));
   }
 
-  /** Toma la siguiente tarea lista (pasa a `running`) si hay cupo de concurrencia. */
-  next(): TaskBrief | undefined {
+  /**
+   * Toma la siguiente tarea lista (pasa a `running`) si hay cupo de concurrencia. `canStart` permite saltar tareas
+   * listas que aún no pueden empezar (p. ej. otra tarea trabaja en la misma carpeta local): siguen `ready` y se
+   * prueba la siguiente en orden de llegada.
+   */
+  next(canStart?: (task: TaskBrief) => boolean): TaskBrief | undefined {
     if (this.active >= this.#concurrency) return undefined;
     for (const e of this.#entries.values()) {
-      if (e.state === 'ready') {
+      if (e.state === 'ready' && (!canStart || canStart(e.task))) {
         this.transition(e.task.id, 'running');
         return e.task;
       }

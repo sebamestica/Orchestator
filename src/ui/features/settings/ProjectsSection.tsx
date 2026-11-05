@@ -9,6 +9,7 @@ import { errorText, Notice, SettingsCard } from './shared.tsx';
 
 function gateText(project: ProjectRecord): string {
   const gate = project.workspace?.gate;
+  if (!project.workspace) return 'Modo local: se trabaja directo en la carpeta, sin worktrees ni commits';
   if (!gate || gate.length === 0) return 'Sin gate: la flota no ejecuta sus tareas';
   return gate.map((g) => [g.command, ...g.args].join(' ')).join(' && ');
 }

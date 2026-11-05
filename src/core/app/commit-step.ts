@@ -1,15 +1,31 @@
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace, WorkspaceManager } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
-import { normalizeOwnedPath, pathsOverlap } from '../orchestrator/index.ts';
-import { createGitRunner, DEFAULT_INTEGRATION_BRANCH, type GitRunner } from '../workspace/index.ts';
+import { normalizeOwnedPath, pathsOverlap, type ExecuteResult } from '../orchestrator/index.ts';
+import { createGitRunner, DEFAULT_INTEGRATION_BRANCH, GitError, isInside, type GitRunner } from '../workspace/index.ts';
 
 /** Carpeta de trabajo del orquestador en cada worktree (BRIEF, HANDOFF, último mensaje): nunca se confirma. */
 export const ORQ_SCRATCH = '.orq';
 
-/** Identidad de los commits que hace la flota por el agente. */
-export const FLEET_IDENTITY = { name: 'Orquestador (flota)', email: 'orquestador@localhost' };
+/**
+ * Los commits de la flota van a nombre del usuario: la identidad git que tenga configurada (`user.name` y
+ * `user.email` del repositorio o globales). Nunca se inventa un autor ni se añaden trailers `Co-Authored-By`.
+ */
+export const NO_IDENTITY_MESSAGE =
+  'No hay identidad git configurada (user.name y user.email): Berland confirma el trabajo a tu nombre y nunca inventa un autor. Configúrala con «git config --global user.name "Tu nombre"» y «git config --global user.email tu@correo».';
+
+export class GitIdentityError extends Error {
+  override readonly name = 'GitIdentityError';
+  constructor() {
+    super(NO_IDENTITY_MESSAGE);
+  }
+}
+
+/** git rechazó el commit por falta de identidad (mensajes de git en inglés, con `LC_ALL=C`). */
+export function isMissingIdentity(stderr: string): boolean {
+  return /Author identity unknown|Please tell me who you are|empty ident name|unable to auto-detect email address/i.test(stderr);
+}
 
 export class OwnedPathsError extends Error {
   override readonly name = 'OwnedPathsError';
@@ -77,13 +93,6 @@ export interface CommitResult {
 /** Archivos por llamada a `git add` (la línea de órdenes de Windows admite ~32 000 caracteres). */
 const ADD_BATCH = 100;
 
-const COMMIT_ENV = {
-  GIT_AUTHOR_NAME: FLEET_IDENTITY.name,
-  GIT_AUTHOR_EMAIL: FLEET_IDENTITY.email,
-  GIT_COMMITTER_NAME: FLEET_IDENTITY.name,
-  GIT_COMMITTER_EMAIL: FLEET_IDENTITY.email,
-};
-
 /**
  * Comprueba que todo lo que cambió la tarea (sin confirmar y ya confirmado desde `baseRef`) está dentro de sus
  * `ownedPaths` y confirma lo pendiente en la rama de la tarea. Lanza `OwnedPathsError` si algo queda fuera
@@ -103,10 +112,15 @@ export async function commitTaskWork(git: GitRunner, worktreePath: string, task:
   for (let i = 0; i < files.length; i += ADD_BATCH) {
     await git(worktreePath, ['add', '-A', '--', ...files.slice(i, i + ADD_BATCH)]);
   }
-  const message = redactSecrets(`${task.id}: ${task.title}\n\nCommit de la flota del orquestador con el trabajo del agente.`);
-  await git(worktreePath, ['commit', '-q', '-m', message], { env: COMMIT_ENV });
-  const commit = (await git(worktreePath, ['rev-parse', 'HEAD'])).stdout.trim();
-  return { files: [...new Set(pending.map(normalizeOwnedPath))], commit };
+  const message = redactSecrets(`${task.id}: ${task.title}\n\nTrabajo de la tarea ${task.id}, confirmado por Berland.`);
+  // Sin variables GIT_AUTHOR_*: git usa la identidad configurada del usuario. Si no hay, error claro y ningún commit.
+  const commit = await git(worktreePath, ['commit', '-q', '-m', message], { check: false });
+  if (commit.code !== 0) {
+    if (isMissingIdentity(commit.stderr)) throw new GitIdentityError();
+    throw new GitError(`git commit falló (código ${String(commit.code)}): ${redactSecrets(commit.stderr.trim()).slice(0, 400)}`, ['commit'], commit);
+  }
+  const head = (await git(worktreePath, ['rev-parse', 'HEAD'])).stdout.trim();
+  return { files: [...new Set(pending.map(normalizeOwnedPath))], commit: head };
 }
 
 export interface CommittingWorkspacesOptions {
@@ -117,11 +131,29 @@ export interface CommittingWorkspacesOptions {
   log?: (line: string) => void;
 }
 
+/** Gestor interno que distingue el modo local (lo implementa `ProjectWorktrees`). */
+interface LocalAware {
+  isLocal(workspace: Workspace): boolean;
+  exclusiveKey(projectId: string): string | undefined;
+}
+
+function isLocalAware(inner: WorkspaceManager): inner is WorkspaceManager & LocalAware {
+  const m = inner as Partial<LocalAware>;
+  return typeof m.isLocal === 'function' && typeof m.exclusiveKey === 'function';
+}
+
+/** Máximo de archivos que se listan en el resumen del modo local. */
+const LOCAL_SUMMARY_FILES = 200;
+
 /**
  * Decorador de `WorkspaceManager`: antes de integrar comprueba las rutas propias y confirma el trabajo del agente
  * (ver `commitTaskWork`); si algo queda fuera, `integrate` lanza `OwnedPathsError` y la flota da la tarea por fallida
  * con ese mensaje. `prepare` hace lo mismo antes de la revisión (`diffSummaryStep`). Al quitar un worktree borra
  * primero su `.orq` si no está versionada, para que `remove` no lo tome por trabajo sin confirmar.
+ *
+ * En **modo local** (carpeta del usuario, sin worktree) no hay nada que confirmar: no se ejecuta ningún git que
+ * escriba. El resumen para el revisor sale de los archivos que informó el agente, y los que caen fuera de sus rutas
+ * propias se le señalan para que rechace la tarea (sin git no se pueden bloquear).
  */
 export class CommittingWorkspaces implements WorkspaceManager {
   readonly #inner: WorkspaceManager;
@@ -137,33 +169,51 @@ export class CommittingWorkspaces implements WorkspaceManager {
     this.#log = opts.log ?? (() => undefined);
   }
 
+  /** El workspace es la carpeta del usuario en modo local. */
+  isLocal(workspace: Workspace): boolean {
+    return isLocalAware(this.#inner) && this.#inner.isLocal(workspace);
+  }
+
+  /** Clave para no correr a la vez dos tareas en la misma carpeta local (`undefined` con worktrees). */
+  exclusiveKey(projectId: string): string | undefined {
+    if (!isLocalAware(this.#inner)) return undefined;
+    try {
+      return this.#inner.exclusiveKey(projectId);
+    } catch {
+      return undefined;
+    }
+  }
+
   async create(projectId: string, task: TaskBrief): Promise<Workspace> {
     const workspace = await this.#inner.create(projectId, task);
-    this.#tasks.set(workspace.path, { projectId, task });
+    this.#tasks.set(taskKey(workspace), { projectId, task });
     return workspace;
   }
 
-  /** Comprueba rutas y confirma lo pendiente. */
+  /** Comprueba rutas y confirma lo pendiente (en modo local, nada: no se confirma). */
   async prepare(workspace: Workspace): Promise<CommitResult> {
-    const entry = this.#tasks.get(workspace.path);
+    const entry = this.#tasks.get(taskKey(workspace));
     if (!entry) throw new OwnedPathsError(workspace.taskId, ['(tarea desconocida: no se puede comprobar ownedPaths)']);
+    if (this.isLocal(workspace)) return { files: [] };
     const result = await commitTaskWork(this.#git, workspace.path, entry.task, this.#branch(entry.projectId, workspace));
-    if (result.commit) this.#log(`${workspace.taskId}: commit ${result.commit.slice(0, 10)} de la flota (${result.files.length} archivos)`);
+    if (result.commit) this.#log(`${workspace.taskId}: commit ${result.commit.slice(0, 10)} a nombre del usuario (${result.files.length} archivos)`);
     return result;
   }
 
   /**
    * Paso de la flota antes de la revisión (`FleetOptions.diffSummary`): confirma el trabajo y resume el diff de la
-   * rama. Si hay archivos fuera de las rutas propias, se lo dice al revisor (y `integrate` hará fallar la tarea).
+   * rama. Si hay archivos fuera de las rutas propias, se lo dice al revisor (y `integrate` hará fallar la tarea). En
+   * modo local resume los archivos que informó el agente (`run`).
    */
-  async reviewSummary(workspace: Workspace): Promise<string> {
+  async reviewSummary(workspace: Workspace, run?: ExecuteResult): Promise<string> {
+    if (this.isLocal(workspace)) return this.#localSummary(workspace, run);
     try {
       await this.prepare(workspace);
     } catch (err) {
       if (err instanceof OwnedPathsError) return `ATENCIÓN: ${err.message}. Rechaza la tarea y pide deshacer esos cambios.`;
       throw err;
     }
-    const entry = this.#tasks.get(workspace.path);
+    const entry = this.#tasks.get(taskKey(workspace));
     const base = this.#branch(entry?.projectId ?? '', workspace);
     const stat = await this.#git(workspace.path, ['diff', '--stat', `${base}...HEAD`]);
     const log = await this.#git(workspace.path, ['log', '--oneline', `${base}..HEAD`]);
@@ -171,14 +221,49 @@ export class CommittingWorkspaces implements WorkspaceManager {
   }
 
   async integrate(projectId: string, workspace: Workspace): Promise<IntegrationResult> {
-    await this.prepare(workspace);
+    if (!this.isLocal(workspace)) await this.prepare(workspace);
     return this.#inner.integrate(projectId, workspace);
   }
 
   async remove(workspace: Workspace): Promise<void> {
-    const tracked = await this.#git(workspace.path, ['ls-files', '--', ORQ_SCRATCH], { check: false });
-    if (tracked.code === 0 && tracked.stdout.trim() === '') await rm(join(workspace.path, ORQ_SCRATCH), { recursive: true, force: true });
+    if (!this.isLocal(workspace)) {
+      const tracked = await this.#git(workspace.path, ['ls-files', '--', ORQ_SCRATCH], { check: false });
+      if (tracked.code === 0 && tracked.stdout.trim() === '') await rm(join(workspace.path, ORQ_SCRATCH), { recursive: true, force: true });
+    }
     await this.#inner.remove(workspace);
-    this.#tasks.delete(workspace.path);
+    this.#tasks.delete(taskKey(workspace));
   }
+
+  #localSummary(workspace: Workspace, run?: ExecuteResult): string {
+    const entry = this.#tasks.get(taskKey(workspace));
+    const reported = [...new Set((run?.attempts ?? []).flatMap((a) => a.filesChanged))];
+    const outsideFolder: string[] = [];
+    const files: string[] = [];
+    for (const f of reported) {
+      if (!isAbsolute(f)) files.push(normalizeOwnedPath(f));
+      else if (isInside(f, workspace.path)) files.push(normalizeOwnedPath(relative(workspace.path, f)));
+      else outsideFolder.push(f);
+    }
+    const visible = [...new Set(files)].filter((f) => f && f !== ORQ_SCRATCH && !f.startsWith(`${ORQ_SCRATCH}/`));
+    const outside = entry ? outsideOwnedPaths(visible, entry.task.ownedPaths) : [];
+    const lines = [
+      `Modo local: la tarea trabajó directamente en la carpeta del usuario (${workspace.path}), sin rama ni commits.`,
+      visible.length
+        ? `Archivos cambiados según los eventos del agente (${String(visible.length)}): ${visible.slice(0, LOCAL_SUMMARY_FILES).join(', ')}${visible.length > LOCAL_SUMMARY_FILES ? ' …' : ''}`
+        : 'El agente no informó archivos cambiados: revisa la carpeta.',
+    ];
+    if (outside.length || outsideFolder.length) {
+      lines.push(
+        `ATENCIÓN: archivos fuera de las rutas propias (${[...outside, ...outsideFolder].slice(0, 20).join(', ')}). En modo local no se pueden bloquear: rechaza la tarea y pide deshacer esos cambios.`,
+      );
+    }
+    const last = run?.attempts.at(-1);
+    if (last?.summary) lines.push(`Resumen del autor: ${last.summary}`);
+    else if (last?.texts.length) lines.push(`Último mensaje del autor: ${last.texts.at(-1) ?? ''}`);
+    return redactSecrets(lines.join('\n'));
+  }
+}
+
+function taskKey(workspace: Workspace): string {
+  return `${workspace.path}\u0000${workspace.taskId}`;
 }
