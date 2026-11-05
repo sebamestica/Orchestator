@@ -62,7 +62,8 @@ describe('REST: reconfigurar con una integración en curso', () => {
     const open = join(root, 'abrir');
     const barrier = {
       command: 'node',
-      args: ['-e', `const fs=require('fs');fs.writeFileSync(${JSON.stringify(started)},'');const t0=Date.now();const w=()=>{if(fs.existsSync(${JSON.stringify(open)}))process.exit(0);if(Date.now()-t0>120000)process.exit(9);setTimeout(w,50)};w()`],
+      // Solo se detiene al integrar (en `_integracion`): el gate previo a la revisión (issue 6) pasa enseguida.
+      args: ['-e', `const fs=require('fs');if(!process.cwd().includes('_integracion'))process.exit(0);fs.writeFileSync(${JSON.stringify(started)},'');const t0=Date.now();const w=()=>{if(fs.existsSync(${JSON.stringify(open)}))process.exit(0);if(Date.now()-t0>120000)process.exit(9);setTimeout(w,50)};w()`],
     };
 
     const comp = compose({

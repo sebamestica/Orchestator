@@ -8,7 +8,16 @@ export interface RenderBriefOptions {
   rulesFiles?: readonly string[];
   /** Modo local: se trabaja directamente en la carpeta del usuario (sin worktree, ramas ni commits). */
   local?: { path: string };
+  /**
+   * Las reglas de la raíz del repo (`AGENTS.md`, `CLAUDE.md`) ya le llegan al agente por otra vía (el prompt de
+   * sistema de Claude, la carga propia de Codex): «Lee primero» no las repite.
+   */
+  rulesInSystemPrompt?: boolean;
 }
+
+/** Archivos de reglas de la raíz que Claude (prompt de sistema) y Codex (carga propia) ya tienen. */
+const ROOT_RULES: ReadonlySet<string> = new Set(['agents.md', 'claude.md']);
+const isRootRules = (file: string) => ROOT_RULES.has(file.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').toLowerCase());
 
 /** Reglas del modo local (carpeta del usuario): van al principio, antes del objetivo. */
 export function localModeSection(path: string): string[] {
@@ -49,9 +58,10 @@ export function renderBrief(task: TaskBrief, handoff?: Handoff, opts: RenderBrie
   const lines: string[] = [];
   lines.push(`# Tarea ${task.id}: ${task.title}`, '');
   if (review) {
+    // El objetivo de la revisión ya trae el plan del autor, los criterios y las rutas: no se reenvía `.orq/PLAN.md`.
     lines.push(
       '## Plan de la tarea revisada',
-      `Compara el trabajo con el plan del autor (\`${PLAN_FILES.taskPlan}\`) y con el plan general (\`${PLAN_FILES.plan}\`). No modifiques esos archivos.`,
+      `El plan del autor (\`${PLAN_FILES.taskPlan}\`) va en el objetivo: compáralo con el trabajo. No modifiques \`${PLAN_FILES.taskPlan}\` ni \`${PLAN_FILES.plan}\`.`,
       '',
     );
   } else {
@@ -74,18 +84,24 @@ export function renderBrief(task: TaskBrief, handoff?: Handoff, opts: RenderBrie
   lines.push('## Objetivo', task.objective, '');
   lines.push('## Rutas que puedes modificar (solo estas)', ...task.ownedPaths.map((p) => `- \`${p}\``), '');
   lines.push('## Criterios de aceptación', ...task.acceptance.map((a) => `- [ ] ${a}`), '');
-  const rules = opts.rulesFiles ?? ['AGENTS.md'];
-  lines.push('## Lee primero', `- \`${PLAN_FILES.plan}\` (plan general)`, ...rules.map((r) => `- \`${r}\``));
-  for (const ref of task.skillRefs) lines.push(`- skill: \`${ref}\``);
-  for (const ref of task.contextRefs) lines.push(`- memoria: \`${ref}\``);
-  lines.push('');
+  const rules = (opts.rulesFiles ?? ['AGENTS.md']).filter((r) => !(opts.rulesInSystemPrompt && isRootRules(r)));
+  const reads = [
+    ...(review ? [] : [`- \`${PLAN_FILES.plan}\` (plan general)`]),
+    ...rules.map((r) => `- \`${r}\``),
+    ...task.skillRefs.map((ref) => `- skill: \`${ref}\``),
+    ...task.contextRefs.map((ref) => `- memoria: \`${ref}\``),
+  ];
+  if (reads.length) lines.push('## Lee primero', ...reads, '');
   if (opts.memoryContext?.trim()) lines.push('## Contexto de memoria', opts.memoryContext.trim(), '');
-  lines.push(
-    '## Al terminar',
-    review
-      ? 'Entrega un informe con: archivos cambiados; comandos ejecutados y su salida real resumida; pruebas aprobadas y fallidas; lo no ejecutado; cambios propuestos fuera de tus rutas; bloqueos.'
-      : `Entrega un informe con: pasos de \`${PLAN_FILES.taskPlan}\` hechos y pendientes; archivos cambiados; comandos ejecutados y su salida real resumida; pruebas aprobadas y fallidas; lo no ejecutado; cambios propuestos fuera de tus rutas; bloqueos.`,
-    'Si te quedas sin cupo o sin tiempo: escribe `.orq/HANDOFF.md` con lo hecho, lo pendiente y lo probado, para que otro agente continúe.',
-  );
+  if (review) {
+    // El revisor solo entrega un veredicto: un informe largo es salida (la parte cara) que nadie lee.
+    lines.push('## Al terminar', 'Responde breve: qué comprobaste y, si algo falla, qué y cómo corregirlo. La última línea es el veredicto en JSON.');
+  } else {
+    lines.push(
+      '## Al terminar',
+      `Entrega un informe con: pasos de \`${PLAN_FILES.taskPlan}\` hechos y pendientes; archivos cambiados; comandos ejecutados y su salida real resumida; pruebas aprobadas y fallidas; lo no ejecutado; cambios propuestos fuera de tus rutas; bloqueos.`,
+      'Si te quedas sin cupo o sin tiempo: escribe `.orq/HANDOFF.md` con lo hecho, lo pendiente y lo probado, para que otro agente continúe.',
+    );
+  }
   return redactSecrets(lines.join('\n'));
 }

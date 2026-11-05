@@ -34,15 +34,27 @@ describe('renderPlanFile (.orq/PLAN.md)', () => {
     expect(renderPlanFile(a, plan, { forMemory: true })).toBe(text);
   });
 
-  it('tarea suelta: plan mínimo con objetivo, rutas, criterios y dependencias', () => {
+  it('tarea suelta en el worktree: sin repetir el encargo (objetivo, rutas, criterios), solo sus dependencias', () => {
     const text = renderPlanFile(b);
     expect(text.startsWith('# Plan de la tarea suelta citas-pruebas\n')).toBe(true);
+    expect(text).toContain('Copia de solo lectura');
+    expect(text).toContain('no viene de un plan general (no hay tareas hermanas)');
+    expect(text).not.toContain('## Objetivo');
+    expect(text).not.toContain('Implementar citas-pruebas');
+    expect(text).not.toContain('## Criterios de aceptación');
+    expect(text).toContain('## Dependencias\n- `citas-form` (integrada antes de empezar)');
+    expect(renderPlanFile(a)).toContain('## Dependencias\nNinguna.');
+  });
+
+  it('tarea suelta en la memoria: plan mínimo con objetivo, rutas, criterios y dependencias', () => {
+    const text = renderPlanFile(b, undefined, { forMemory: true });
+    expect(text.startsWith('# Plan de la tarea suelta citas-pruebas\n')).toBe(true);
+    expect(text).not.toContain('Copia de solo lectura');
     expect(text).toContain('el orquestador generó este plan mínimo a partir del encargo');
     expect(text).toContain('## Objetivo: Tarea citas-pruebas\nImplementar citas-pruebas');
     expect(text).toContain('## Rutas propias\n- `tests/citas/**`\n- `fixtures/citas/**`');
     expect(text).toContain('## Criterios de aceptación\n- npm test en verde');
     expect(text).toContain('## Dependencias\n- `citas-form` (integrada antes de empezar)');
-    expect(renderPlanFile(a)).toContain('## Dependencias\nNinguna.');
   });
 
   it('un plan sin id ni tareas lista solo la propia; recorta un texto enorme y tacha secretos', () => {

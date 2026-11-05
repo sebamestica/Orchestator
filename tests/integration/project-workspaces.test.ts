@@ -136,6 +136,10 @@ describe('receta de Vetworld (docs/proyectos)', () => {
     write(join(ws.path, 'src', 'malo.txt'), 'x\n');
     git(ws.path, 'add', 'src/malo.txt');
     git(ws.path, 'commit', '-q', '-m', 'trabajo');
+    // Antes de revisar (issue 6): el gate en el worktree de la tarea, sin tocar la integración.
+    const verified = await pw.verify(ws, brief('vw-roto'));
+    expect(verified?.ok).toBe(false);
+    expect(verified?.summary).toMatch(/gate fallido[\s\S]*gate roto/);
     const before = git(repo, 'rev-parse', 'orq/integracion').trim();
     const result = await pw.integrate('vetworld', ws);
     expect(result.ok).toBe(false);

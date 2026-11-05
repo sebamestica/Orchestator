@@ -4,11 +4,12 @@ import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import type { CanUseTool, HookCallbackMatcher, HookEvent, McpServerConfig, Options, SettingSource } from '@anthropic-ai/claude-agent-sdk';
+import type { CanUseTool, EffortLevel, HookCallbackMatcher, HookEvent, McpServerConfig, Options, SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { AgentAdapter } from '../../../shared/contracts.ts';
 import type { AgentConfig, AgentEvent, ProbeResult, RunContext, TaskBrief } from '../../../shared/index.ts';
 import { redactSecrets } from '../../../shared/index.ts';
+import { effortFor, runHints, taskRole, type TaskRole } from '../../brief/reasoning.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
 import { assertRealInside } from '../../memory/safe-fs.ts';
 import { mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
@@ -28,13 +29,27 @@ import { ClaudeSdkTranslator } from './translate.ts';
  *   sus reglas allow, hooks de comandos, `.mcp.json` ni plugins del repo) y `strictMcpConfig`. Las reglas
  *   del repo (`CLAUDE.md`, `AGENTS.md` de la raíz del worktree) van como texto en el prompt de sistema
  *   de Claude Code (`preset: 'claude_code'` + `append`).
- * - Cancelación con `ctx.signal`, tope de tiempo `ctx.timeoutMs` y tope de gasto `config.budgetUsd`.
+ * - Cancelación con `ctx.signal`, tope de tiempo `ctx.timeoutMs` y tope de gasto: `config.budgetUsd` del agente y,
+ *   si el Supervisor lo pasa (`RunHints.budgetUsd`), lo que le queda a la tarea; el menor va como `maxBudgetUsd`.
+ * - Razonamiento por rol y dificultad (issue 6, `brief/reasoning.ts`): el autor con esfuerzo low/medium/high según la
+ *   dificultad y el revisor en `medium`; cada reintento sube un nivel. Las revisiones de tareas low y medium van a
+ *   `reviewModel` (Sonnet 5.5). El prompt de sistema va con `excludeDynamicSections` para que su prefijo sea igual en
+ *   todos los workers del proyecto y la caché se comparta.
+ * - Commits sin atribución del agente: `settings.attribution` vacío y una regla en el prompt de sistema.
  * - Plugins (F5): `plugins` entrega servidores MCP por ejecución (Chrome, Canva). Van en `mcpServers` con los
  *   secretos como `${VAR}` (Claude Code los expande del entorno: el token no viaja en `--mcp-config`), sus
  *   herramientas `mcp__<servidor>__*` quedan permitidas en la política y sus notas se agregan al prompt de sistema.
  */
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
+/** Modelo de las revisiones de tareas low y medium (decisión del usuario, issue 6). */
+export const REVIEW_MODEL = 'claude-sonnet-5-5';
+/** Dificultades cuyas revisiones van a `REVIEW_MODEL`; las de `high` las hace el modelo del agente. */
+const CHEAP_REVIEWS: ReadonlySet<TaskBrief['difficulty']> = new Set(['low', 'medium']);
+/** Los commits y PR de los agentes van sin «Co-Authored-By» ni «Generated with» (regla del usuario). */
+export const NO_ATTRIBUTION = { commit: '', pr: '', sessionUrl: false } as const;
+export const NO_ATTRIBUTION_RULE =
+  '# Commits\n\nNo agregues trailers «Co-Authored-By» ni líneas «Generated with …» a los mensajes de commit ni a los PR: el trabajo se confirma a nombre del usuario.';
 export const DEFAULT_SETTING_SOURCES: readonly SettingSource[] = [];
 /** Archivos de reglas de la raíz del worktree que se pasan en el prompt de sistema. */
 export const RULES_FILES = ['CLAUDE.md', 'AGENTS.md'] as const;
@@ -73,6 +88,11 @@ export interface ClaudeSdkAdapterOptions {
    * fuentes de configuración ni señal; sus hooks se agregan después del hook de la política.
    */
   extraOptions?: Partial<Options>;
+  /**
+   * Modelo de las revisiones de tareas low y medium (por defecto `REVIEW_MODEL`); `null`: el del agente. Las de
+   * tareas high siempre usan el del agente.
+   */
+  reviewModel?: string | null;
   /** Seguir esperando los reintentos del SDK ante 401/403 o falta de saldo (por defecto se corta al primero). */
   retryPermanentErrors?: boolean;
   /** Recibe cada mensaje crudo del SDK (para grabar fixtures o depurar). ¡Puede contener rutas y texto del usuario! */
@@ -189,6 +209,17 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     return this.config.model ?? DEFAULT_CLAUDE_MODEL;
   }
 
+  /**
+   * Modelo y esfuerzo de una ejecución: el rol sale de `isReviewTask` y el esfuerzo de la dificultad, un nivel más por
+   * reintento. Un `effort` fijo en `extraOptions` manda sobre la política.
+   */
+  profile(task: TaskBrief, retries = 0): { role: TaskRole; model: string; effort: EffortLevel } {
+    const role = taskRole(task);
+    const reviewModel = this.#opts.reviewModel === undefined ? REVIEW_MODEL : this.#opts.reviewModel;
+    const model = role === 'reviewer' && reviewModel && CHEAP_REVIEWS.has(task.difficulty) ? reviewModel : this.model;
+    return { role, model, effort: this.#opts.extraOptions?.effort ?? effortFor(task, { retries }) };
+  }
+
   /** Entorno del subproceso: base (sin variables de una sesión de Claude Code anfitriona) + baseUrl + ctx.env. */
   buildEnv(ctxEnv: Readonly<Record<string, string>>): Record<string, string> {
     const env: Record<string, string> = {};
@@ -275,6 +306,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     const env = { ...this.buildEnv(ctx.env), ...plugins.env };
     const secrets = [...secretsOf(env), ...mcpSecrets(grant.servers)];
     const pluginNames = Object.keys(plugins.mcpServers);
+    const hints = runHints(ctx);
+    const profile = this.profile(task, hints.retries);
     const tr = new ClaudeSdkTranslator({
       agentId: this.config.id,
       sessionId: (this.#opts.newSessionId ?? randomUUID)(),
@@ -282,7 +315,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       secrets,
       cwd: ctx.worktreePath,
     });
-    yield tr.status('starting', `Claude (${this.model}) en ${ctx.worktreePath}${pluginNames.length ? ` · plugins: ${pluginNames.join(', ')}` : ''}`);
+    const who = `${profile.model} · ${profile.role === 'reviewer' ? 'revisión' : 'autor'} · esfuerzo ${profile.effort}`;
+    yield tr.status('starting', `Claude (${who}) en ${ctx.worktreePath}${pluginNames.length ? ` · plugins: ${pluginNames.join(', ')}` : ''}`);
 
     // Tope de gasto: presupuesto del agente menos lo ya gastado.
     let budgetLeft: number | undefined;
@@ -304,6 +338,16 @@ export class ClaudeSdkAdapter implements AgentAdapter {
         return;
       }
     }
+
+    // Tope de la tarea (lo que le queda según el Supervisor): manda si es menor que el del agente.
+    const taskLeft = hints.budgetUsd;
+    if (taskLeft !== undefined && taskLeft <= 0) {
+      yield tr.error('quota_exhausted', 'Tope de gasto de la tarea agotado antes de empezar.');
+      yield tr.done(false);
+      return;
+    }
+    const taskBound = taskLeft !== undefined && (budgetLeft === undefined || taskLeft < budgetLeft);
+    const cap = taskBound ? taskLeft : budgetLeft;
 
     if (ctx.signal.aborted) {
       yield tr.error('cancelled', 'Tarea cancelada antes de empezar.');
@@ -334,19 +378,23 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     };
     const section = pluginsSection(grant);
     const repoRules = await loadRepoRules(ctx.worktreePath);
-    const rules = [repoRules, section].filter((t): t is string => Boolean(t)).join('\n\n') || undefined;
+    const rules = [repoRules, section, NO_ATTRIBUTION_RULE].filter((t): t is string => Boolean(t)).join('\n\n');
     const options: Options = {
       ...extra,
       cwd: ctx.worktreePath,
       env,
-      model: this.model,
+      model: profile.model,
+      effort: profile.effort,
+      settings: typeof extra.settings === 'string' ? extra.settings : { ...extra.settings, attribution: { ...NO_ATTRIBUTION } },
       permissionMode: 'acceptEdits',
       hooks: mergeHooks(createPolicyHook(ctx.worktreePath, policy), extra.hooks),
       canUseTool: (this.#opts.canUseTool ?? createToolPolicy)(ctx.worktreePath, policy),
       settingSources: [...(this.#opts.settingSources ?? DEFAULT_SETTING_SOURCES)],
       strictMcpConfig: true,
       mcpServers,
-      systemPrompt: rules ? { type: 'preset', preset: 'claude_code', append: rules } : { type: 'preset', preset: 'claude_code' },
+      // Sin las secciones dinámicas (carpeta, git status), el prefijo es el mismo en todos los workers del proyecto y su
+      // caché se comparte; el SDK las pasa al primer mensaje del usuario.
+      systemPrompt: { type: 'preset', preset: 'claude_code', append: rules, excludeDynamicSections: true },
       // Texto de los subagentes con parent_tool_use_id: alimenta el árbol en vivo.
       forwardSubagentText: true,
       abortController: controller,
@@ -355,18 +403,19 @@ export class ClaudeSdkAdapter implements AgentAdapter {
         if (stderr.length > STDERR_LINES) stderr.splice(0, stderr.length - STDERR_LINES);
       },
     };
-    if (budgetLeft !== undefined) options.maxBudgetUsd = budgetLeft;
+    if (cap !== undefined) options.maxBudgetUsd = cap;
 
     let q: (AsyncIterable<unknown> & { close?: () => void }) | undefined;
     let thrown: unknown;
     try {
       const queryFn = this.#opts.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
-      q = queryFn({ prompt: renderBrief(task, ctx.handoff), options });
+      // Las reglas del repo ya van en el prompt de sistema: el encargo no pide volver a leerlas.
+      q = queryFn({ prompt: renderBrief(task, ctx.handoff, { rulesInSystemPrompt: repoRules !== undefined }), options });
       for await (const message of q) {
         this.#opts.onSdkMessage?.(message);
         for (const event of tr.translate(message)) yield event;
         if (tr.finished) break;
-        if (budgetLeft !== undefined && tr.spentUsd > budgetLeft) stop('budget');
+        if (cap !== undefined && tr.spentUsd > cap) stop('budget');
         if (tr.fatal && !this.#opts.retryPermanentErrors) stop('fatal');
         if (stopReason) break;
       }
@@ -388,7 +437,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     if (stopReason === 'fatal' && tr.fatal) {
       yield tr.error(tr.fatal.code, tr.fatal.code === 'auth' ? `Autenticación rechazada: ${tr.fatal.message}` : `Sin saldo: ${tr.fatal.message}`);
     } else if (stopReason === 'budget') {
-      yield tr.error('quota_exhausted', `Se superó el presupuesto en curso: ~${tr.spentUsd.toFixed(4)} USD de ${budgetLeft?.toFixed(4)} USD disponibles.`);
+      const what = taskBound ? 'el tope de gasto de la tarea' : 'el presupuesto en curso';
+      yield tr.error('quota_exhausted', `Se superó ${what}: ~${tr.spentUsd.toFixed(4)} USD de ${cap?.toFixed(4)} USD disponibles.`);
     } else if (stopReason === 'timeout') {
       yield tr.error('timeout', `Se agotó el tiempo de la tarea (${Math.round(ctx.timeoutMs / 1000)} s).`);
     } else if (stopReason === 'cancelled') {

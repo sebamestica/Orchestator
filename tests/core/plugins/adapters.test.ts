@@ -164,7 +164,8 @@ describe('traducción a Codex CLI', () => {
     const ctx: RunContext = { worktreePath: await worktree(), env: { CODEX_HOME: 'C:\\codex' }, signal: new AbortController().signal, timeoutMs: 1000 };
     const events = await collect(adapter.run(task, ctx));
     const opts = run.mock.calls[0]?.[0];
-    expect(opts?.args.slice(0, 5)).toEqual(['codex.js', 'exec', '--json', '-c', `mcp_servers.chrome-personal.command="C:\\\\Windows\\\\System32\\\\cmd.exe"`]);
+    // Primero el esfuerzo de razonamiento (issue 6), después los servidores MCP.
+    expect(opts?.args.slice(0, 7)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-c', `mcp_servers.chrome-personal.command="C:\\\\Windows\\\\System32\\\\cmd.exe"`]);
     expect(opts?.args).toContain('mcp_servers.canva.bearer_token_env_var="ORQ_MCP_CANVA_TOKEN"');
     expect(opts?.args.join(' ')).not.toContain(TOKEN);
     expect(opts?.env).toEqual({ CODEX_HOME: 'C:\\codex', ORQ_MCP_CANVA_TOKEN: TOKEN });
@@ -183,7 +184,7 @@ describe('traducción a Codex CLI', () => {
     });
     const ctx: RunContext = { worktreePath: await worktree(), env: {}, signal: new AbortController().signal, timeoutMs: 1000 };
     await collect(new CodexCliAdapter(config, { runner: run, executable: { command: 'node', args: ['codex.js'] } }).run(task, ctx));
-    expect(run.mock.calls[0]?.[0].args.slice(0, 5)).toEqual(['codex.js', 'exec', '--json', '-s', 'workspace-write']);
+    expect(run.mock.calls[0]?.[0].args.slice(0, 7)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-s', 'workspace-write']);
   });
 });
 

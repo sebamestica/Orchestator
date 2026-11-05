@@ -77,11 +77,59 @@ describe('ClaudeSdkTranslator con la fixture real (tarea con un subagente)', () 
   it('estima el costo en curso con el usage de cada mensaje (antes del resultado)', () => {
     const tr = translator();
     translateAll(messages.slice(0, 2), tr); // init + primer mensaje del asistente
-    // 31486 tokens de entrada y 1 de salida de Opus 5.5 a 4 y 20 USD por millón.
-    expect(tr.estimatedCostUsd).toBeCloseTo((31486 * 4 + 1 * 20) / 1e6, 9);
+    // El servidor intermedio adelanta 31486 de entrada sin repartir la caché: ×1,4 = 44080, primera llamada del hilo →
+    // todo se escribe en caché (5 USD/M en Opus 5.5). Salida: 48 tokens (los ~168 caracteres de la llamada Agent).
+    expect(tr.estimatedCostUsd).toBeCloseTo((44080 * 5 + 48 * 20) / 1e6, 9);
     expect(tr.spentUsd).toBe(tr.estimatedCostUsd);
     const partial = tr.partialUsageEvents().map((e) => e.payload);
-    expect(partial).toEqual([{ inputTokens: 31486, outputTokens: 1, cachedInputTokens: 0, costUsd: 0.125964, model: 'claude-opus-5-5' }]);
+    expect(partial).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
+  });
+});
+
+describe('ClaudeSdkTranslator: costo de una sesión cortada (sesión de 14,55 USD del 2026-11-04)', () => {
+  /** Traduce la fixture sin su `result`, como una sesión cancelada a medias. */
+  function cut(name: string, now?: () => Date) {
+    const all = loadJsonl(name);
+    const tr = new ClaudeSdkTranslator({ agentId: 'claude-main', sessionId: MAIN, ...(now ? { now } : {}) });
+    translateAll(all.filter((m) => (m as { type?: string }).type !== 'result'), tr);
+    type ModelUsage = { inputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number };
+    const result = all.find((m) => (m as { type?: string }).type === 'result') as { total_cost_usd: number; modelUsage: Record<string, ModelUsage> };
+    return { tr, real: result };
+  }
+
+  for (const name of ['hook-deny.jsonl', 'subagent-run.jsonl']) {
+    it(`${name}: la estimación queda a ±10 % del costo real (antes, «todo sin caché»)`, () => {
+      const { tr, real } = cut(name);
+      const ratio = tr.estimatedCostUsd / real.total_cost_usd;
+      expect(ratio).toBeGreaterThan(0.9);
+      expect(ratio).toBeLessThan(1.1);
+      const [usage] = payload(tr.partialUsageEvents(), 'usage');
+      expect(tr.partialUsageEvents()).toHaveLength(1);
+      // Entrada real de todas las llamadas (también las del subagente): la de `modelUsage`.
+      const realInput = Object.values(real.modelUsage).reduce((n, u) => n + u.inputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens, 0);
+      expect(Math.abs((usage?.inputTokens ?? 0) / realInput - 1)).toBeLessThan(0.05);
+      // Lo leído de caché ya no es 0: es el prompt de la llamada anterior de cada hilo.
+      expect(usage?.cachedInputTokens).toBeGreaterThan(40_000);
+    });
+  }
+
+  it('tras más de 5 min entre llamadas del mismo hilo la caché expiró: se cuenta como escritura', () => {
+    let t = Date.parse('2026-11-04T18:00:00Z');
+    const { tr } = cut('hook-deny.jsonl', () => new Date((t += 6 * 60_000)));
+    const [usage] = payload(tr.partialUsageEvents(), 'usage');
+    expect(usage?.cachedInputTokens).toBe(0);
+    const warm = cut('hook-deny.jsonl').tr.estimatedCostUsd;
+    expect(tr.estimatedCostUsd).toBeGreaterThan(warm);
+  });
+
+  it('un usage con la caché repartida (API directa) se cuenta tal cual', () => {
+    const tr = translator();
+    tr.translate({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: { id: 'msg_1', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 2_000 } },
+    });
+    expect(tr.partialUsageEvents()[0]?.payload).toEqual({ inputTokens: 92_010, outputTokens: 1, cachedInputTokens: 90_000, costUsd: 0.02806, model: 'claude-opus-5-5' });
   });
 });
 

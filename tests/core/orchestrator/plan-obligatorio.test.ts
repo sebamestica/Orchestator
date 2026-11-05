@@ -178,7 +178,7 @@ describe('plan obligatorio: .orq/PLAN.md y traspaso', () => {
 });
 
 describe('plan obligatorio: comprobación de .orq/PLAN-TAREA.md', () => {
-  it('tarea suelta: plan mínimo generado del encargo; sin PLAN-TAREA.md avisa y la tarea se integra igual', async () => {
+  it('tarea suelta: plan mínimo (sin repetir el encargo); sin PLAN-TAREA.md avisa y la tarea se integra igual', async () => {
     const s = await setup({
       agents: [agents.claude1, agents.codex],
       quotas: [new FakeQuota('codex', 0.9)],
@@ -191,9 +191,9 @@ describe('plan obligatorio: comprobación de .orq/PLAN-TAREA.md', () => {
     const planText = s.writes[0]?.content ?? '';
     expect(s.writes[0]?.path.endsWith(join('.orq', 'PLAN.md'))).toBe(true);
     expect(planText).toContain('# Plan de la tarea suelta api');
-    expect(planText).toContain('## Objetivo: Tarea api\nImplementar api');
-    expect(planText).toContain('## Rutas propias\n- `src/api/**`');
-    expect(planText).toContain('## Criterios de aceptación\n- npm test en verde\n- sin solapes');
+    // El objetivo, las rutas y los criterios ya van en el encargo: el plan mínimo del worktree no los repite.
+    expect(planText).not.toContain('## Objetivo');
+    expect(planText).not.toContain('## Criterios de aceptación');
     expect(planText).toContain('## Dependencias\nNinguna.');
 
     const warning = 'api: codex no escribió `.orq/PLAN-TAREA.md` (aviso: la tarea sigue).';

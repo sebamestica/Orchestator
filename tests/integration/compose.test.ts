@@ -154,10 +154,11 @@ describe('compose: planificador', () => {
     expect(call?.url).toBe(`${USER_BASE_URL}/v1/messages`);
     expect(call?.headers.get('x-api-key')).toBe(key);
     const body = JSON.parse(call?.body ?? '{}') as { model?: string; output_config?: { effort?: string }; system?: string };
-    expect(body).toMatchObject({ model: 'claude-opus-5-5', output_config: { effort: 'medium' } });
+    // Issue 6: planificar es pasar a JSON un plan ya escrito → Sonnet 5.5 en esfuerzo low.
+    expect(body).toMatchObject({ model: 'claude-sonnet-5-5', output_config: { effort: 'low' } });
     expect(body.system).toContain('planificador');
 
-    // 1200 de entrada × 4 USD/M + 300 de salida × 20 USD/M (Opus 5.5).
+    // El servidor falso responde como Opus 5.5: 1200 de entrada × 4 USD/M + 300 de salida × 20 USD/M (precio del modelo que respondió).
     expect(comp.spentUsd('claude')).toBeCloseTo(0.0108, 6);
     const quota = await comp.quotaProviderFactory(comp.registry.require('claude'), { apiKey: key });
     const snap = await quota?.read();

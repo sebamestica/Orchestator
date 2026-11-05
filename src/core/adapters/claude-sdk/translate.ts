@@ -38,6 +38,19 @@ import {
 export const SUMMARY_MAX = 300;
 const DONE_SUMMARY_MAX = 2000;
 
+/** Vida de la caché de prompts: tras una pausa más larga, la llamada siguiente vuelve a escribir todo el prompt. */
+export const CACHE_TTL_MS = 5 * 60_000;
+/**
+ * El `usage` que trae cada mensaje del asistente es el de `message_start`. Tras el servidor intermedio del usuario
+ * llega sin repartir la caché (`cache_*` en 0, todo en `input_tokens`, `output_tokens: 1`) y se queda corto: en las
+ * dos ejecuciones grabadas (`hook-deny.jsonl`, `subagent-run.jsonl`) la entrada real del resultado fue 1,41 y 1,43
+ * veces la suma de esos `input_tokens`. Contarlo como entrada sin caché inflaba el costo de una sesión cortada
+ * (14,55 USD registrados el 2026-11-04 por 3,64 M «sin caché» y 32 tokens de salida, uno por llamada).
+ */
+export const UNSPLIT_INPUT_FACTOR = 1.4;
+/** Caracteres por token para estimar la salida a partir de lo visible (texto, pensamiento resumido y argumentos). */
+export const CHARS_PER_OUTPUT_TOKEN = 3.5;
+
 type EventOf<T extends AgentEvent['type']> = Extract<AgentEvent, { type: T }>;
 type State = EventOf<'status'>['payload']['state'];
 
@@ -154,8 +167,11 @@ export class ClaudeSdkTranslator {
   /** task_id → sesión del subagente. */
   readonly #taskSession = new Map<string, string>();
   readonly #announced = new Set<string>();
-  /** id de mensaje de la API → modelo y uso (máximo visto), para estimar el costo en curso. */
-  readonly #perMessage = new Map<string, { model: string | undefined; usage: TokenUsage }>();
+  /**
+   * id de mensaje de la API → modelo, uso (máximo visto), hilo (sesión principal o subagente), hora de llegada y
+   * caracteres de su contenido, para estimar el costo en curso. En orden de llegada.
+   */
+  readonly #perMessage = new Map<string, TrackedMessage>();
 
   constructor(opts: TranslatorOptions) {
     this.agentId = opts.agentId;
@@ -206,10 +222,10 @@ export class ClaudeSdkTranslator {
     });
   }
 
-  /** Costo estimado con precios públicos a partir del `usage` de cada mensaje (ver pricing.ts). */
+  /** Costo estimado con precios públicos a partir del `usage` de cada mensaje (ver pricing.ts y `#estimate`). */
   get estimatedCostUsd(): number {
     let total = 0;
-    for (const { model, usage } of this.#perMessage.values()) total += estimateCostUsd(model, usage);
+    for (const { cost } of this.#estimate().values()) total += cost;
     return total;
   }
 
@@ -224,18 +240,7 @@ export class ClaudeSdkTranslator {
    */
   partialUsageEvents(): AgentEvent[] {
     if (Object.keys(this.modelUsage).length > 0) return this.usageEvents();
-    const byModel = new Map<string, TokenUsage & { cost: number }>();
-    for (const { model, usage } of this.#perMessage.values()) {
-      const key = model ?? 'desconocido';
-      const acc = byModel.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-      acc.input += usage.input;
-      acc.output += usage.output;
-      acc.cacheRead += usage.cacheRead;
-      acc.cacheWrite += usage.cacheWrite;
-      acc.cost += estimateCostUsd(model, usage);
-      byModel.set(key, acc);
-    }
-    return [...byModel].map(([model, u]) =>
+    return [...this.#estimate()].map(([model, u]) =>
       this.#event('usage', {
         inputTokens: Math.round(u.input + u.cacheRead + u.cacheWrite),
         outputTokens: Math.round(u.output),
@@ -246,17 +251,61 @@ export class ClaudeSdkTranslator {
     );
   }
 
-  #trackUsage(id: string | undefined, model: string | undefined, usage: z.infer<typeof assistantMessageSchema>['message']['usage']): void {
+  /**
+   * Uso estimado por modelo. Un mensaje que trae la caché repartida (`cache_*` > 0, la API directa) se cuenta tal
+   * cual. Uno sin repartir (servidor intermedio) se reparte como lo hace Claude Code con la caché de prompts: dentro
+   * de cada hilo, el prompt de la llamada anterior se lee de caché si pasaron ≤ 5 min, y el resto se escribe; la
+   * primera llamada del hilo escribe todo. La salida es la mayor entre la informada y la que se deduce del contenido.
+   */
+  #estimate(): Map<string, TokenUsage & { cost: number }> {
+    const byModel = new Map<string, TokenUsage & { cost: number }>();
+    const lastPrompt = new Map<string, { tokens: number; at: number }>();
+    for (const m of this.#perMessage.values()) {
+      const u = m.usage;
+      const output = Math.max(u.output, Math.ceil(m.chars / CHARS_PER_OUTPUT_TOKEN));
+      let usage: TokenUsage;
+      if (u.cacheRead > 0 || u.cacheWrite > 0 || u.input === 0) {
+        usage = { ...u, output };
+      } else {
+        const prompt = Math.round(u.input * UNSPLIT_INPUT_FACTOR);
+        const prev = lastPrompt.get(m.thread);
+        const cacheRead = prev && m.at - prev.at <= CACHE_TTL_MS ? Math.min(prev.tokens, prompt) : 0;
+        usage = { input: 0, output, cacheRead, cacheWrite: prompt - cacheRead };
+        lastPrompt.set(m.thread, { tokens: prompt, at: m.at });
+      }
+      const key = m.model ?? 'desconocido';
+      const acc = byModel.get(key) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+      acc.input += usage.input;
+      acc.output += usage.output;
+      acc.cacheRead += usage.cacheRead;
+      acc.cacheWrite += usage.cacheWrite;
+      acc.cost += estimateCostUsd(m.model, usage);
+      byModel.set(key, acc);
+    }
+    return byModel;
+  }
+
+  #trackUsage(
+    id: string | undefined,
+    model: string | undefined,
+    usage: z.infer<typeof assistantMessageSchema>['message']['usage'],
+    seen: { thread: string; chars: number },
+  ): void {
     if (!usage) return;
     const key = id ?? `sin-id-${this.#perMessage.size}`;
-    const prev = this.#perMessage.get(key)?.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    const prev = this.#perMessage.get(key);
+    const was = prev?.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    // Varios mensajes con el mismo id son bloques de una misma llamada: el uso se toma por máximo y el contenido se suma.
     this.#perMessage.set(key, {
       model,
+      thread: prev?.thread ?? seen.thread,
+      at: prev?.at ?? this.#now().getTime(),
+      chars: (prev?.chars ?? 0) + seen.chars,
       usage: {
-        input: Math.max(prev.input, usage.input_tokens ?? 0),
-        output: Math.max(prev.output, usage.output_tokens ?? 0),
-        cacheRead: Math.max(prev.cacheRead, usage.cache_read_input_tokens ?? 0),
-        cacheWrite: Math.max(prev.cacheWrite, usage.cache_creation_input_tokens ?? 0),
+        input: Math.max(was.input, usage.input_tokens ?? 0),
+        output: Math.max(was.output, usage.output_tokens ?? 0),
+        cacheRead: Math.max(was.cacheRead, usage.cache_read_input_tokens ?? 0),
+        cacheWrite: Math.max(was.cacheWrite, usage.cache_creation_input_tokens ?? 0),
       },
     });
   }
@@ -355,8 +404,8 @@ export class ClaudeSdkTranslator {
       this.costUsd = Math.max(this.costUsd, msg.usage_report.session.total_cost_usd);
       if (msg.usage_report.session.model_usage) this.modelUsage = msg.usage_report.session.model_usage;
     }
-    this.#trackUsage(msg.message.id, msg.message.model, msg.message.usage);
     const { sessionId, parent } = this.#sessionFor(msg.parent_tool_use_id, out);
+    if (!msg.is_api_error_message) this.#trackUsage(msg.message.id, msg.message.model, msg.message.usage, { thread: sessionId, chars: contentChars(msg.message.content) });
     if (msg.error) {
       const code = classifyClaudeError({ httpStatus: msg.api_error_status, assistantError: msg.error }, 'unknown');
       if (code !== 'unknown') this.hint = { code, message: `El SDK informó ${msg.error}${msg.api_error_status ? ` (HTTP ${msg.api_error_status})` : ''}.` };
@@ -536,6 +585,43 @@ export class ClaudeSdkTranslator {
     out.push(this.done(false, r.result ?? reason));
     return out;
   }
+}
+
+interface TrackedMessage {
+  model: string | undefined;
+  usage: TokenUsage;
+  /** Sesión del mensaje: la principal o la del subagente (cada hilo tiene su propia caché de prompt). */
+  thread: string;
+  /** Llegada del primer bloque (ms). */
+  at: number;
+  /** Caracteres de texto, pensamiento y argumentos de herramientas de sus bloques. */
+  chars: number;
+}
+
+/** Caracteres que escribió el modelo en los bloques de un mensaje (para estimar su salida). */
+function contentChars(content: readonly unknown[]): number {
+  let chars = 0;
+  for (const block of content) {
+    const text = textBlockSchema.safeParse(block);
+    if (text.success) {
+      chars += text.data.text.length;
+      continue;
+    }
+    const thinking = thinkingBlockSchema.safeParse(block);
+    if (thinking.success) {
+      chars += thinking.data.thinking.length;
+      continue;
+    }
+    const tool = toolUseBlockSchema.safeParse(block);
+    if (tool.success) {
+      try {
+        chars += (JSON.stringify(tool.data.input) ?? '').length + tool.data.name.length;
+      } catch {
+        /* argumentos no serializables: no suman */
+      }
+    }
+  }
+  return chars;
 }
 
 function structuredContent(toolUseResult: unknown): unknown {

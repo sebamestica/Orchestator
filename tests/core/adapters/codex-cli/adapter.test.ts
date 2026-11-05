@@ -2,12 +2,14 @@ import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexCliAdapter } from '../../../../src/core/adapters/codex-cli/index.ts';
+import { CodexCliAdapter, codexEffortArgs } from '../../../../src/core/adapters/codex-cli/index.ts';
+import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
+import { buildReviewTask } from '../../../../src/core/orchestrator/fleet.ts';
 import { resolveCodexExecutable } from '../../../../src/core/adapters/codex-cli/executable.ts';
 import { translateCodexEvent, classifyCodexError } from '../../../../src/core/adapters/codex-cli/translate.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../../src/core/process/run-jsonl.ts';
 import { agentConfigSchema, agentEventSchema, taskBriefSchema } from '../../../../src/shared/index.ts';
-import type { AgentEvent, RunContext } from '../../../../src/shared/index.ts';
+import type { AgentEvent, RunContext, TaskBrief } from '../../../../src/shared/index.ts';
 
 const config = agentConfigSchema.parse({ id: 'codex-test', kind: 'codex-cli', provider: 'codex', displayName: 'Codex' });
 const task = taskBriefSchema.parse({ id: 'task-test', projectId: 'project-test', title: 'Prueba', objective: 'Leer y editar fixture.txt',
@@ -48,11 +50,32 @@ describe('Codex CLI', () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(new Set(events.map((e) => e.sessionId)).size).toBe(1);
     const opts = run.mock.calls[0]?.[0];
-    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '-s', 'workspace-write', '-C', ctx.worktreePath,
+    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '-c', 'model_reasoning_effort="low"', '-s', 'workspace-write', '-C', ctx.worktreePath,
       '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), '-']);
     expect(opts?.stdin).toContain(task.objective);
     expect(opts?.args).not.toContain(task.objective);
     expect(opts?.signal).toBe(ctx.signal);
+  });
+  it('esfuerzo de razonamiento según rol y dificultad; cada reintento sube un nivel hasta high', async () => {
+    const effortOf = async (t: TaskBrief, extra: Partial<HintedRunContext> = {}) => {
+      const run = runner([...await fixture('exec-ok.jsonl'), exit]);
+      const ctx = await context();
+      for await (const event of new CodexCliAdapter(config, { runner: run }).run(t, { ...ctx, ...extra })) agentEventSchema.parse(event);
+      const args = run.mock.calls[0]?.[0].args ?? [];
+      const i = args.indexOf('-c');
+      return { pair: args.slice(i, i + 2), stdin: run.mock.calls[0]?.[0].stdin ?? '' };
+    };
+    expect((await effortOf(task)).pair).toEqual(['-c', 'model_reasoning_effort="low"']);
+    expect((await effortOf({ ...task, difficulty: 'medium' })).pair).toEqual(['-c', 'model_reasoning_effort="medium"']);
+    expect((await effortOf({ ...task, difficulty: 'high' })).pair).toEqual(['-c', 'model_reasoning_effort="high"']);
+    expect((await effortOf(buildReviewTask(task, ['claude'], 'diff'))).pair).toEqual(['-c', 'model_reasoning_effort="medium"']);
+    expect((await effortOf(task, { retries: 1 })).pair).toEqual(['-c', 'model_reasoning_effort="medium"']);
+    expect((await effortOf({ ...task, difficulty: 'medium' }, { retries: 4 })).pair).toEqual(['-c', 'model_reasoning_effort="high"']);
+    expect(codexEffortArgs(task, 2)).toEqual(['-c', 'model_reasoning_effort="high"']);
+    // Codex carga AGENTS.md por su cuenta: el encargo no pide leerlo.
+    const { stdin } = await effortOf(task);
+    expect(stdin).not.toContain('- `AGENTS.md`');
+    expect(stdin).toContain('- `.orq/PLAN.md` (plan general)');
   });
   it('traduce comando, cambios y razonamiento (fixture sintético identificado)', async () => {
     const lines = await fixture('items-synthetic.jsonl');

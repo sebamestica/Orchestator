@@ -12,7 +12,9 @@ import {
   type ExecuteOptions,
   type ExecuteResult,
   type SupervisorOptions,
+  type TaskBudgets,
   type TaskStateChange,
+  type VerifyWorkspace,
 } from '../orchestrator/index.ts';
 import type { TaskHooks } from '../server/index.ts';
 import type { TaskRecord } from '../store/index.ts';
@@ -31,6 +33,13 @@ export interface FleetTuning {
   /** Tope absoluto de cada ejecución aunque el agente siga activo (por defecto el del Supervisor: 3 h). */
   maxRunMs?: number;
   maxRounds?: number;
+  /**
+   * Tope de gasto por tarea según la dificultad, en USD (por defecto 1 / 3 / 8 para low / medium / high); `null` lo
+   * desactiva. Al superarlo la tarea se detiene con `.orq/HANDOFF.md` y el motivo queda en `detail`.
+   */
+  taskBudgetUsd?: TaskBudgets | null;
+  /** Gate del proyecto antes de revisar (por defecto, `workspaces.verify` si el gestor lo tiene). */
+  verify?: VerifyWorkspace;
   /** Cada ejecución (autor o revisor) al terminar: pruebas, tablas de consumo. */
   onExecuted?: (task: TaskBrief, opts: ExecuteOptions, result: ExecuteResult) => void;
 }
@@ -382,6 +391,8 @@ export class FleetService {
       warn: this.#log,
       ...(this.#tuning.timeoutMs ? { timeoutMs: this.#tuning.timeoutMs } : {}),
       ...(this.#tuning.maxRounds ? { maxRounds: this.#tuning.maxRounds } : {}),
+      ...(this.#tuning.taskBudgetUsd !== undefined ? { taskBudgetUsd: this.#tuning.taskBudgetUsd } : {}),
+      ...(this.#tuning.verify ? { verify: this.#tuning.verify } : {}),
     });
     this.#built = { fleet };
     return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log, saved: (id) => this.#savedTask(id) }) };

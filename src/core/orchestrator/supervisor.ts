@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AgentAdapter, AgentEvent, ErrorCode, EventSink, Handoff, RunContext, TaskBrief } from '../../shared/index.ts';
+import type { AgentAdapter, AgentEvent, ErrorCode, EventSink, Handoff, TaskBrief } from '../../shared/index.ts';
 import { agentEventSchema, handoffSchema, redactSecrets } from '../../shared/index.ts';
+import type { HintedRunContext } from '../brief/reasoning.ts';
 import type { TaskQueue } from './queue.ts';
 import { RoutingError, type Router } from './router.ts';
 
@@ -22,8 +23,14 @@ export const HANDOFF_FILE = join('.orq', 'HANDOFF.md');
 
 const TEXT_TAIL = 8;
 const DEFAULT_SUMMARY_CHARS = 6_000;
+/**
+ * Margen al comparar lo gastado con el tope de la tarea: el SDK corta al llegar a `maxBudgetUsd` y los costos por
+ * modelo llegan redondeados.
+ */
+const BUDGET_TOLERANCE = 0.99;
 
-export type AttemptOutcome = 'ok' | 'failed' | 'quota_exhausted' | 'timeout' | 'cancelled';
+/** `budget`: la tarea llegó a su tope de gasto (no es falta de cupo del agente). */
+export type AttemptOutcome = 'ok' | 'failed' | 'quota_exhausted' | 'timeout' | 'cancelled' | 'budget';
 
 export interface UsageTotals {
   inputTokens: number;
@@ -59,6 +66,10 @@ export interface AttemptOptions {
   handoff?: Handoff;
   /** Número de intento (para identificar la sesión sintética si el adaptador no emitió ninguna). */
   attempt?: number;
+  /** Reintentos previos de la tarea: el adaptador sube el esfuerzo un nivel por cada uno (`RunHints.retries`). */
+  retries?: number;
+  /** Lo que la tarea aún puede gastar en USD: va al adaptador (`RunHints.budgetUsd`) y corta la ejecución si se pasa. */
+  budgetUsd?: number;
 }
 
 export interface BeforeAttemptInfo {
@@ -87,11 +98,19 @@ export interface ExecuteOptions {
   updateQueue?: boolean;
   /** Se llama antes de cada intento (p. ej. para reescribir `.orq/BRIEF.md` con el traspaso). */
   beforeAttempt?: (info: BeforeAttemptInfo) => void | Promise<void>;
+  /**
+   * Tope de gasto de esta ejecución en USD (lo que le queda a la tarea). Al llegar a él no se reintenta ni se traspasa:
+   * el resultado es `budget` y quien llama decide (la flota detiene la tarea con `.orq/HANDOFF.md`).
+   */
+  budgetUsd?: number;
+  /** Reintentos que la tarea ya lleva antes de esta ejecución (p. ej. rondas de corrección): suben el esfuerzo. */
+  retryBase?: number;
 }
 
 export interface ExecuteResult {
   ok: boolean;
-  outcome: 'ok' | 'failed' | 'cancelled';
+  /** `budget`: se llegó al tope de gasto (`ExecuteOptions.budgetUsd`). */
+  outcome: 'ok' | 'failed' | 'cancelled' | 'budget';
   /** Agente del último intento. */
   agentId: string;
   /** Agentes que trabajaron en la tarea, en orden y sin repetir. */
@@ -100,6 +119,8 @@ export interface ExecuteResult {
   handoffs: Handoff[];
   /** Fallos seguidos del último agente al terminar. */
   failureStreak: number;
+  /** USD gastados por todos los intentos (los que informaron costo). */
+  spentUsd: number;
   error?: string;
 }
 
@@ -134,7 +155,8 @@ export interface SupervisorOptions {
  * cancelación y decide qué pasa si algo falla:
  * - `quota_exhausted` → traspaso a un Claude **en el mismo worktree** con el resumen de lo hecho y `.orq/HANDOFF.md`;
  * - un fallo → reintento con el mismo agente; dos fallos seguidos → reasignación a Claude (otra instancia si el
- *   que falló ya era Claude y hay más).
+ *   que falló ya era Claude y hay más). Cada reintento por fallo o tiempo sube el esfuerzo un nivel (`RunHints`);
+ * - tope de gasto (`budgetUsd`) alcanzado → se detiene sin reintentar ni marcar al agente sin cupo.
  */
 export class Supervisor {
   readonly #adapters = new Map<string, AgentAdapter>();
@@ -183,22 +205,31 @@ export class Supervisor {
     let agentId = opts.agentId;
     let handoff = opts.handoff;
     let failures = 0;
+    let spent = 0;
+    let retries = Math.max(0, opts.retryBase ?? 0);
+    const budget = opts.budgetUsd;
     const result = (outcome: ExecuteResult['outcome'], error?: string): ExecuteResult => {
-      const out: ExecuteResult = { ok: outcome === 'ok', outcome, agentId, authors, attempts, handoffs, failureStreak: failures };
+      const out: ExecuteResult = { ok: outcome === 'ok', outcome, agentId, authors, attempts, handoffs, failureStreak: failures, spentUsd: spent };
       if (error) out.error = redactSecrets(error);
       return out;
     };
+    const overBudget = () => `tope de gasto alcanzado: ${spent.toFixed(4)} de ${(budget ?? 0).toFixed(4)} USD`;
 
     try {
       for (let n = 1; n <= maxAttempts; n++) {
         if (opts.signal?.aborted) return result('cancelled', 'cancelada');
+        if (budget !== undefined && spent >= budget * BUDGET_TOLERANCE) return result('budget', overBudget());
         await opts.beforeAttempt?.({ task, agentId, worktreePath: opts.worktreePath, attempt: n, handoff });
         const attempt = await this.runAttempt(task, agentId, {
-          worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, maxRunMs: opts.maxRunMs, handoff, attempt: n,
+          worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, maxRunMs: opts.maxRunMs, handoff, attempt: n, retries,
+          ...(budget !== undefined ? { budgetUsd: Math.max(0, budget - spent) } : {}),
         });
         attempts.push(attempt);
+        spent += attempt.usage.costUsd ?? 0;
         if (attempt.ok) return result('ok');
         if (attempt.outcome === 'cancelled') return result('cancelled', attempt.error?.message ?? 'cancelada');
+        // El tope de la tarea va antes que el cupo: un corte por gasto no es falta de saldo del agente.
+        if (budget !== undefined && (attempt.outcome === 'budget' || spent >= budget * BUDGET_TOLERANCE)) return result('budget', overBudget());
         // El agotamiento se registra siempre, también en el último intento: el bloqueo del agente no depende
         // de que quede un intento para traspasar.
         if (attempt.outcome === 'quota_exhausted') this.#router.markExhausted(agentId);
@@ -213,6 +244,7 @@ export class Supervisor {
           failures = 0;
         } else {
           failures++;
+          retries++; // el siguiente intento piensa un nivel más
           reason = attempt.outcome === 'timeout' ? 'timeout' : 'failure';
           if (failures >= FAILURES_BEFORE_REASSIGN) {
             to = this.#takeClaude(exclude, agentId, true);
@@ -261,8 +293,8 @@ export class Supervisor {
     const idleMs = opts.timeoutMs ?? this.#timeoutMs;
     const maxRunMs = opts.maxRunMs ?? this.#maxRunMs;
     const controller = new AbortController();
-    let abortReason: 'idle' | 'max' | 'cancelled' | undefined;
-    const abort = (why: 'idle' | 'max' | 'cancelled') => {
+    let abortReason: 'idle' | 'max' | 'cancelled' | 'budget' | undefined;
+    const abort = (why: 'idle' | 'max' | 'cancelled' | 'budget') => {
       abortReason ??= why;
       controller.abort();
     };
@@ -280,11 +312,16 @@ export class Supervisor {
     let grace: Promise<'grace'> | undefined;
 
     // El adaptador recibe el tope absoluto (lo usa como plazo total propio); la inactividad la vigila el Supervisor.
-    const ctx: RunContext = { worktreePath: opts.worktreePath, env, signal: controller.signal, timeoutMs: maxRunMs };
+    // `RunHints` (reintentos y tope de gasto) van en el mismo contexto: un adaptador que no los conoce los ignora.
+    const ctx: HintedRunContext = { worktreePath: opts.worktreePath, env, signal: controller.signal, timeoutMs: maxRunMs };
     if (opts.handoff) ctx.handoff = opts.handoff;
+    if (opts.retries) ctx.retries = opts.retries;
+    if (opts.budgetUsd !== undefined) ctx.budgetUsd = opts.budgetUsd;
+    const budget = opts.budgetUsd;
 
     let iterator: AsyncIterator<AgentEvent> | undefined;
     let abandoned = false;
+
     try {
       iterator = adapter.run(task, ctx)[Symbol.asyncIterator]();
       let pending: Promise<IteratorResult<AgentEvent>> | undefined;
@@ -308,6 +345,8 @@ export class Supervisor {
         if (!abortReason) idleTimer.refresh();
         this.#forward(winner.value, state, secrets, task);
         if (state.done) break;
+        // Un adaptador que informa el gasto en curso (eventos `usage` intermedios) se corta al pasar el tope.
+        if (budget !== undefined && !abortReason && (state.usage.costUsd ?? 0) > budget) abort('budget');
       }
     } catch (err) {
       state.fail('crash', `El adaptador ${agentId} falló: ${err instanceof Error ? err.message : String(err)}`);
@@ -329,7 +368,9 @@ export class Supervisor {
       }
     }
 
-    if (abortReason) {
+    if (abortReason === 'budget') {
+      state.abort('budget', `Tope de gasto de la tarea superado: ${(state.usage.costUsd ?? 0).toFixed(4)} de ${(budget ?? 0).toFixed(4)} USD.`);
+    } else if (abortReason) {
       const message =
         abortReason === 'idle'
           ? `Sin actividad del agente durante ${formatDuration(idleMs)} (plazo por inactividad).`
@@ -509,10 +550,12 @@ class AttemptState {
     this.error ??= { code, message };
   }
 
-  abort(reason: 'timeout' | 'cancelled', message: string): void {
+  abort(reason: 'timeout' | 'cancelled' | 'budget', message: string): void {
     this.outcome = reason;
-    if (this.error?.code !== reason) this.errorEmitted = false;
-    this.error = { code: reason, message };
+    // El contrato no tiene un código para el tope de la tarea: va como `quota_exhausted` con el motivo en el mensaje.
+    const code: ErrorCode = reason === 'budget' ? 'quota_exhausted' : reason;
+    if (this.error?.code !== code) this.errorEmitted = false;
+    this.error = { code, message };
   }
 
   synthetic(body: SyntheticBody, ts: string): AgentEvent {

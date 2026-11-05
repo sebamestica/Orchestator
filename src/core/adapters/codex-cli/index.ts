@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { agentConfigSchema, agentEventSchema, redactSecrets } from '../../../shared/index.ts';
 import type { AgentAdapter, AgentConfig, AgentEvent, ProbeResult, RunContext, TaskBrief } from '../../../shared/index.ts';
+import { effortFor, runHints, type Effort } from '../../brief/reasoning.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
 import { bearerToken, mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
 import { runJsonl } from '../../process/run-jsonl.ts';
@@ -21,6 +22,20 @@ export interface CodexAdapterOptions {
 
 /** Cadena TOML básica: el escape de JSON es válido en TOML (`\\`, `\"`, `\uXXXX`). */
 const tomlString = (value: string): string => JSON.stringify(value);
+
+/**
+ * Techo del esfuerzo de Codex al reintentar: `xhigh` no lo admiten todos sus modelos y la flota no le da tareas
+ * `high` (van a Claude).
+ */
+export const CODEX_MAX_EFFORT: Effort = 'high';
+
+/**
+ * `-c model_reasoning_effort=…` según el rol y la dificultad (issue 6): low → low, medium → medium, high → high, el
+ * revisor en medium; cada reintento sube un nivel hasta `CODEX_MAX_EFFORT`.
+ */
+export function codexEffortArgs(task: TaskBrief, retries = 0): string[] {
+  return ['-c', `model_reasoning_effort=${tomlString(effortFor(task, { retries, max: CODEX_MAX_EFFORT }))}`];
+}
 
 /**
  * Servidores neutros → `-c mcp_servers.<nombre>.…` de Codex y variables para su proceso. Ningún secreto va en los
@@ -108,6 +123,8 @@ export class CodexCliAdapter implements AgentAdapter {
     const childEnv = { ...ctx.env, ...plugins.env };
     const secrets = [...Object.values(ctx.env), ...mcpSecrets(grant.servers)];
     const section = pluginsSection(grant);
+    // Codex carga AGENTS.md de la raíz por su cuenta: el encargo no pide volver a leerlo.
+    const brief = renderBrief(task, ctx.handoff, { rulesInSystemPrompt: true });
     const sessionId = randomUUID();
     let seq = 0;
     let failed = false;
@@ -124,9 +141,9 @@ export class CodexCliAdapter implements AgentAdapter {
       } else {
         await mkdir(join(ctx.worktreePath, '.orq'), { recursive: true });
         for await (const line of this.runner({ command: this.executable.command,
-          args: [...this.executable.args, 'exec', '--json', ...plugins.args, '-s', 'workspace-write', '-C', ctx.worktreePath,
+          args: [...this.executable.args, 'exec', '--json', ...codexEffortArgs(task, runHints(ctx).retries), ...plugins.args, '-s', 'workspace-write', '-C', ctx.worktreePath,
             '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), ...(this.config.model ? ['-m', this.config.model] : []), '-'],
-          cwd: ctx.worktreePath, stdin: section ? `${renderBrief(task, ctx.handoff)}\n\n${section}\n` : renderBrief(task, ctx.handoff),
+          cwd: ctx.worktreePath, stdin: section ? `${brief}\n\n${section}\n` : brief,
           env: childEnv, signal: ctx.signal, timeoutMs: ctx.timeoutMs })) {
           if (line.kind === 'exit') {
             exited = true;

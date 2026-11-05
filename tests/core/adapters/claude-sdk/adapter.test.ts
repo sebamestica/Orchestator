@@ -157,7 +157,8 @@ describe('ClaudeSdkAdapter.run: errores', () => {
     const events = await collect(new ClaudeSdkAdapter({ config, query: fakeQuery(subagentRun.slice(0, 2), { throwAtEnd: new Error('spawn ENOENT') }).query }).run(task, ctx()));
     expect(payload(events, 'error')).toEqual([{ code: 'crash', message: 'spawn ENOENT' }]);
     // Registra lo estimado hasta ese momento.
-    expect(payload(events, 'usage')).toEqual([{ inputTokens: 31486, outputTokens: 1, cachedInputTokens: 0, costUsd: 0.125964, model: 'claude-opus-5-5' }]);
+    // Registra lo estimado hasta ese momento (ver translate.test.ts: prompt ×1,4 escrito en caché y salida del contenido).
+    expect(payload(events, 'usage')).toEqual([{ inputTokens: 44080, outputTokens: 48, cachedInputTokens: 0, costUsd: 0.22136, model: 'claude-opus-5-5' }]);
     expect(events.at(-1)?.payload).toEqual({ ok: false });
   });
 
@@ -187,10 +188,10 @@ describe('ClaudeSdkAdapter.run: presupuesto (config.budgetUsd)', () => {
   it('corta en curso con quota_exhausted cuando lo gastado supera lo disponible', async () => {
     const fake = fakeQuery(subagentRun);
     const events = await collect(new ClaudeSdkAdapter({ config: budget(0.05), query: fake.query }).run(task, ctx()));
-    // Se detiene tras el primer mensaje del asistente (~0,126 USD estimados), antes del subagente.
+    // Se detiene tras el primer mensaje del asistente (~0,221 USD estimados), antes del subagente.
     expect(events.some((e) => e.parentSessionId !== undefined)).toBe(false);
-    expect(payload(events, 'error')).toEqual([{ code: 'quota_exhausted', message: 'Se superó el presupuesto en curso: ~0.1260 USD de 0.0500 USD disponibles.' }]);
-    expect(payload(events, 'usage')[0]).toMatchObject({ costUsd: 0.125964 });
+    expect(payload(events, 'error')).toEqual([{ code: 'quota_exhausted', message: 'Se superó el presupuesto en curso: ~0.2214 USD de 0.0500 USD disponibles.' }]);
+    expect(payload(events, 'usage')[0]).toMatchObject({ costUsd: 0.22136 });
     expect(events.at(-1)?.payload).toEqual({ ok: false });
     expect(fake.closed).toBe(true);
   });

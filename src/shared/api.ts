@@ -64,7 +64,7 @@ export const settingsSchema = z.strictObject({
 export type Settings = z.infer<typeof settingsSchema>;
 
 export const DEFAULT_SETTINGS: Settings = {
-  mind: { agentId: null, effort: 'high' },
+  mind: { agentId: null, effort: 'medium' },
   workers: [],
   defaultMode: 'plan',
   quotaFloor: 0.2,

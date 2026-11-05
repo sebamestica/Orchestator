@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { AgentConfig, AgentEvent, EventSink } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
 import { DEFAULT_CLAUDE_MODEL, estimateCostUsd } from '../adapters/claude-sdk/index.ts';
+import type { Effort } from '../brief/reasoning.ts';
 import { planToTasks, type PlannerLlm, type PlannerRequest } from '../orchestrator/index.ts';
 import { ApiError, type Planner } from '../server/index.ts';
 import type { AgentRecord } from '../store/index.ts';
@@ -14,17 +15,23 @@ import type { SecretVault } from '../vault/index.ts';
  * (`config.baseUrl`) que el agente Claude. Se eligió la API directa y no el adaptador claude-sdk sin herramientas:
  * planificar es una sola respuesta de texto, sin herramientas ni archivos; así no se lanza el proceso de Claude Code
  * ni se paga su prompt de sistema en cada intento, y el `fetch` se puede inyectar en las pruebas.
+ *
+ * Razonamiento (issue 6): planificar es pasar a JSON un plan que la mente ya escribió, así que va a Sonnet 5.5 con
+ * esfuerzo `low` (antes, Opus en `medium`).
  */
 
 export const DEFAULT_ANTHROPIC_URL = 'https://api.anthropic.com';
 export const PLANNER_MAX_TOKENS = 16_000;
+/** Modelo del planificador (decisión del usuario, issue 6). */
+export const PLANNER_MODEL = 'claude-sonnet-5-5';
+export const PLANNER_EFFORT: Effort = 'low';
 
 export interface PlannerCredentials {
   config: AgentConfig;
   apiKey: string;
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type { Effort };
 
 export interface ClaudePlannerLlmOptions {
   /** Agente y clave con los que se llama (se leen en cada llamada: sirve un agente agregado después de arrancar). */
@@ -32,8 +39,10 @@ export interface ClaudePlannerLlmOptions {
   fetch?: typeof globalThis.fetch;
   /** Registra el consumo como una sesión del agente (cuenta para su presupuesto manual). */
   sink?: EventSink;
-  /** Esfuerzo del modelo (por defecto `medium`, el de Opus 5.5). */
+  /** Esfuerzo del modelo (por defecto `PLANNER_EFFORT`, `low`). */
   effort?: Effort;
+  /** Modelo (por defecto `PLANNER_MODEL`, Sonnet 5.5); `null`: el del agente (`config.model` o Opus 5.5). */
+  model?: string | null;
   maxTokens?: number;
   timeoutMs?: number;
   maxRetries?: number;
@@ -72,7 +81,7 @@ export function createClaudePlannerLlm(opts: ClaudePlannerLlmOptions): PlannerLl
   return {
     async complete(request: PlannerRequest): Promise<string> {
       const { config, apiKey } = await opts.credentials();
-      const model = config.model ?? DEFAULT_CLAUDE_MODEL;
+      const model = opts.model === undefined ? PLANNER_MODEL : (opts.model ?? config.model ?? DEFAULT_CLAUDE_MODEL);
       const client = new Anthropic({
         apiKey,
         authToken: null,
@@ -91,7 +100,7 @@ export function createClaudePlannerLlm(opts: ClaudePlannerLlmOptions): PlannerLl
             // reconoce patrones y una clave de un servidor propio puede no tener prefijo conocido.
             system: redactSecrets(request.system, [apiKey]),
             messages: request.messages.map((m) => ({ role: m.role, content: redactSecrets(m.content, [apiKey]) })),
-            output_config: { effort: opts.effort ?? 'medium' },
+            output_config: { effort: opts.effort ?? PLANNER_EFFORT },
           },
           request.signal ? { signal: request.signal } : undefined,
         );

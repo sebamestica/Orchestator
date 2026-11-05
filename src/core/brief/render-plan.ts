@@ -47,8 +47,8 @@ function taskLine(t: TaskBrief, currentId: string | undefined): string {
 
 /**
  * Texto de `.orq/PLAN.md`: el plan general (texto del plan y tareas hermanas con id, título, rutas propias y
- * dependencias) o, para una tarea suelta, un plan mínimo generado del encargo (objetivo, rutas, criterios y
- * dependencias). Tachado con `redactSecrets`.
+ * dependencias) o, para una tarea suelta, un plan mínimo (en el worktree, sus dependencias; en la memoria, además el
+ * objetivo, las rutas y los criterios). Tachado con `redactSecrets`.
  */
 export function renderPlanFile(task: TaskBrief, plan?: GeneralPlan, opts: RenderPlanOptions = {}): string {
   const lines = plan ? generalPlan(task, plan, opts) : minimalPlan(task, opts);
@@ -70,9 +70,25 @@ function generalPlan(task: TaskBrief, plan: GeneralPlan, opts: RenderPlanOptions
   return lines;
 }
 
+/**
+ * Plan mínimo de una tarea suelta. En el worktree solo dice que no hay plan general y lista las dependencias (que el
+ * encargo no trae): el objetivo, las rutas y los criterios ya van en el encargo y repetirlos es leerlos dos veces. La
+ * nota de memoria sí los guarda, porque es el registro del plan.
+ */
 function minimalPlan(task: TaskBrief, opts: RenderPlanOptions): string[] {
   const lines = [`# Plan de la tarea suelta ${task.id}`, ''];
-  if (!opts.forMemory) lines.push(NOTICE, '');
+  const deps = task.dependsOn.length ? task.dependsOn.map((d) => `- ${code(d)} (integrada antes de empezar)`) : ['Ninguna.'];
+  if (!opts.forMemory) {
+    lines.push(
+      NOTICE,
+      '',
+      'Esta tarea no viene de un plan general (no hay tareas hermanas): su objetivo, sus rutas propias y sus criterios son los del encargo y no se repiten aquí.',
+      '',
+      '## Dependencias',
+      ...deps,
+    );
+    return lines;
+  }
   lines.push(
     'Esta tarea no viene de un plan: el orquestador generó este plan mínimo a partir del encargo.',
     '',
@@ -86,7 +102,7 @@ function minimalPlan(task: TaskBrief, opts: RenderPlanOptions): string[] {
     ...task.acceptance.map((a) => `- ${oneLine(a)}`),
     '',
     '## Dependencias',
-    ...(task.dependsOn.length ? task.dependsOn.map((d) => `- ${code(d)} (integrada antes de empezar)`) : ['Ninguna.']),
+    ...deps,
   );
   return lines;
 }

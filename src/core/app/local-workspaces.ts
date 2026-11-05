@@ -115,18 +115,28 @@ export class LocalWorkspaces {
   }
 
   async integrate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<IntegrationResult> {
+    const check = await this.#runGate(project, workspace, signal);
+    if (!check) return { ok: true, conflicts: [], gateSummary: LOCAL_NO_GATE_SUMMARY };
+    return { ok: check.ok, conflicts: [], gateSummary: check.summary };
+  }
+
+  /** Gate de la carpeta antes de revisar (sin LLM). `undefined` si la carpeta no tiene verificación. */
+  async verify(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
+    return this.#runGate(project, workspace, signal);
+  }
+
+  async #runGate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
     let gate: CommandSpec[] | null;
     try {
       gate = await this.#gateFor(project.repoPath);
     } catch (err) {
-      return { ok: false, conflicts: [], gateSummary: `local: no se pudo leer la verificación de la carpeta (${redactSecrets(err instanceof Error ? err.message : String(err))})` };
+      return { ok: false, summary: `local: no se pudo leer la verificación de la carpeta (${redactSecrets(err instanceof Error ? err.message : String(err))})` };
     }
-    if (!gate || gate.length === 0) return { ok: true, conflicts: [], gateSummary: LOCAL_NO_GATE_SUMMARY };
+    if (!gate || gate.length === 0) return undefined;
     // El programa del gate no se busca dentro de la carpeta: el agente pudo dejar ahí un `npm.cmd` propio.
     const results = await runCommands(gate, workspace.path, signal, { untrustedRoots: [project.repoPath] });
-    const summary = summarizeCommands(results, gate.length);
     const ok = results.length === gate.length && results.every((r) => r.ok);
-    return { ok, conflicts: [], gateSummary: `local: ${summary}` };
+    return { ok, summary: `local: ${summarizeCommands(results, gate.length)}` };
   }
 
   async remove(workspace: Workspace): Promise<void> {

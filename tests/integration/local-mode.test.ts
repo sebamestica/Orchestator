@@ -159,6 +159,20 @@ describe('modo local: carpeta con gate', () => {
     const passed = await ws.integrate(id, w);
     expect(passed.ok).toBe(true);
     expect(passed.gateSummary).toMatch(/^local: gate ok/);
+    // Antes de revisar (issue 6): el mismo gate, sin LLM.
+    expect(await ws.verify(w, task('t1', id, ['estado.txt']))).toMatchObject({ ok: true, summary: expect.stringMatching(/^local: gate ok/) });
+    writeFileSync(join(folder, 'estado.txt'), 'roto\n');
+    expect(await ws.verify(w, task('t1', id, ['estado.txt']))).toMatchObject({ ok: false });
     await ws.remove(w);
   }, 60_000);
+
+  it('sin verificación en la carpeta, verify no da veredicto (lo comprueba el revisor)', async () => {
+    const root = await tempDir('orq-local-gate-');
+    const folder = join(root, 'sin-gate');
+    mkdirSync(folder, { recursive: true });
+    const { id, ws } = localSetup(folder);
+    const w = await ws.create(id, task('t2', id, ['a.txt']));
+    expect(await ws.verify(w, task('t2', id, ['a.txt']))).toBeUndefined();
+    await ws.remove(w);
+  });
 });

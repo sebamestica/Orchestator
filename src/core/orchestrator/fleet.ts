@@ -8,7 +8,7 @@ import { planTitle, renderPlanFile, type GeneralPlan } from '../brief/render-pla
 import type { TaskQueue } from './queue.ts';
 import { normalizeOwnedPath } from './paths.ts';
 import { RoutingError, type Router } from './router.ts';
-import type { AttemptResult, BeforeAttemptInfo, ExecuteResult, Supervisor } from './supervisor.ts';
+import { HANDOFF_FILE, summarizeAttempt, type AttemptResult, type BeforeAttemptInfo, type ExecuteOptions, type ExecuteResult, type Supervisor } from './supervisor.ts';
 import {
   clipTaskPlan,
   parseTaskPlan,
@@ -32,6 +32,25 @@ export const DEFAULT_MAX_ROUNDS = 3;
 /** Revisores que se prueban si uno no entrega un veredicto válido. */
 const REVIEW_TRIES = 2;
 const REVIEW_MAX_ATTEMPTS = 2;
+/** Resumen del gate que va en el encargo de revisión o en las observaciones al autor. */
+const GATE_SUMMARY_MAX = 3_000;
+
+export type Difficulty = TaskBrief['difficulty'];
+/** Tope de gasto por tarea en USD según su dificultad (autores y revisores, por ciclo de la tarea). */
+export type TaskBudgets = Partial<Record<Difficulty, number>>;
+/** Topes por defecto (decisión del usuario, issue 6): 1 / 3 / 8 USD para low / medium / high. */
+export const DEFAULT_TASK_BUDGET_USD: Readonly<Record<Difficulty, number>> = { low: 1, medium: 3, high: 8 };
+
+/** Resultado de la verificación del proyecto (gate) corrida en el worktree de la tarea, sin LLM. */
+export interface GateCheck {
+  ok: boolean;
+  summary: string;
+}
+/**
+ * Corre el gate del proyecto en el workspace de la tarea antes de revisar. `undefined`: el proyecto no tiene gate (p.
+ * ej. una carpeta local sin verificación) y el revisor la comprueba como antes.
+ */
+export type VerifyWorkspace = (workspace: Workspace, task: TaskBrief, signal: AbortSignal) => Promise<GateCheck | undefined>;
 
 export const reviewVerdictSchema = z.strictObject({
   veredicto: z.enum(['aprobado', 'rechazado']),
@@ -71,6 +90,17 @@ export interface FleetOptions {
   timeoutMs?: number;
   /** Conserva el worktree de una tarea fallida o cancelada para revisarla a mano (por defecto, sí). */
   keepFailedWorkspaces?: boolean;
+  /**
+   * Tope de gasto por tarea según la dificultad (por defecto `DEFAULT_TASK_BUDGET_USD`); `null` lo desactiva. Al
+   * llegar a él la tarea se detiene: queda `failed` con el motivo y lo hecho en `.orq/HANDOFF.md`, lista para
+   * reintentar. Cuenta lo que informan los agentes (Claude y la API; Codex y agy gastan cupo, no USD).
+   */
+  taskBudgetUsd?: TaskBudgets | null;
+  /**
+   * Gate del proyecto antes de la revisión (por defecto, `workspaces.verify` si el gestor lo tiene). Si falla, la
+   * tarea vuelve al autor sin gastar una revisión; si pasa, su resumen va en el encargo y el revisor no repite el check.
+   */
+  verify?: VerifyWorkspace;
   onHandoff?: (handoff: Handoff) => void | Promise<void>;
   warn?: (message: string) => void;
 }
@@ -91,6 +121,8 @@ export interface TaskReport {
   warnings: string[];
   /** Plan general y estado de `.orq/PLAN-TAREA.md` en la última comprobación. */
   plan?: TaskPlanReport;
+  /** USD que informaron los agentes de la tarea en este ciclo (autores y revisores). */
+  spentUsd: number;
 }
 
 export interface TaskPlanReport {
@@ -128,6 +160,20 @@ interface TaskRun {
   workspace?: Workspace;
   /** Estado de `.orq/PLAN-TAREA.md` al terminar cada intento de autor (índice en `attempts`). */
   planChecks: Map<number, TaskPlanStatus>;
+  /** USD gastados por la tarea en este ciclo (autores y revisores), para su tope. */
+  spentUsd: number;
+}
+
+/** Lo que devuelve la etapa de revisión (gate previo + revisor). */
+interface ReviewStep {
+  verdict?: ReviewVerdict;
+  reviewer?: string;
+  cancelled?: boolean;
+  /** Se llegó al tope de gasto de la tarea. */
+  overBudget?: boolean;
+  /** El gate previo falló: resumen para el autor (no hubo revisión). */
+  gateFailed?: string;
+  error?: string;
 }
 
 /**
@@ -155,6 +201,8 @@ export class Fleet {
   readonly #rulesFiles: readonly string[] | undefined;
   readonly #timeoutMs: number | undefined;
   readonly #keepFailed: boolean;
+  readonly #budgets: TaskBudgets | undefined;
+  readonly #verify: VerifyWorkspace | undefined;
   readonly #onHandoff: ((handoff: Handoff) => void | Promise<void>) | undefined;
   readonly #warn: (message: string) => void;
   readonly #controllers = new Map<string, AbortController>();
@@ -183,6 +231,8 @@ export class Fleet {
     this.#rulesFiles = opts.rulesFiles;
     this.#timeoutMs = opts.timeoutMs;
     this.#keepFailed = opts.keepFailedWorkspaces ?? true;
+    this.#budgets = opts.taskBudgetUsd === null ? undefined : (opts.taskBudgetUsd ?? DEFAULT_TASK_BUDGET_USD);
+    this.#verify = opts.verify ?? asVerifier(opts.workspaces);
     this.#onHandoff = opts.onHandoff;
     this.#warn = opts.warn ?? ((message) => console.warn(message));
   }
@@ -287,7 +337,8 @@ export class Fleet {
         task,
         attempts: [],
         planChecks: new Map(),
-        report: { taskId: task.id, state: 'running', authors: [], reviewers: [], handoffs: [], rounds: 0, warnings: [] },
+        spentUsd: 0,
+        report: { taskId: task.id, state: 'running', authors: [], reviewers: [], handoffs: [], rounds: 0, warnings: [], spentUsd: 0 },
       };
       let finalOutcome: 'ok' | 'failed' = 'failed';
       try {
@@ -343,15 +394,19 @@ export class Fleet {
 
     for (let round = 1; round <= this.#maxRounds; round++) {
       report.rounds = round;
+      // Cada ronda de corrección cuenta como reintento: el autor piensa un nivel más (`RunHints.retries`).
       const exec = await this.#supervisor.execute(current, {
         agentId: author, worktreePath: workspace.path, signal, timeoutMs: this.#timeoutMs, handoff, beforeAttempt: writeFiles('author'),
+        retryBase: round - 1, ...this.#budgetOf(run),
       });
+      this.#spend(run, exec);
       run.attempts.push(...exec.attempts);
       for (const a of exec.authors) if (!report.authors.includes(a)) report.authors.push(a);
       report.handoffs.push(...exec.handoffs);
       if (exec.outcome === 'cancelled' || signal.aborted) return this.#cancelled(run, exec.error);
       // Al terminar el intento: ¿escribió el autor su plan? Solo avisa (Codex, en su sandbox, a veces no escribe en `.orq/`).
       const planStatus = exec.attempts.length ? await this.#checkTaskPlan(run, run.attempts.length - 1, exec.agentId) : await this.#readTaskPlan(run);
+      if (exec.outcome === 'budget') return this.#overBudget(run);
       if (!exec.ok) return this.#fail(run, exec.error ?? 'el agente no terminó la tarea');
       // La racha es del agente efectivo: si dentro de execute() la tarea pasó a otro (p. ej. por cupo),
       // sus fallos de integración empiezan de cero.
@@ -359,13 +414,18 @@ export class Fleet {
       author = exec.agentId;
 
       this.#move(task.id, 'review', { agentId: author, detail: `ronda ${round} · ${taskPlanDetail(planStatus)}` });
-      const review = await this.#review(run, exec, signal, writeFiles('reviewer'), planStatus);
+      const review = await this.#review(run, exec, signal, writeFiles('reviewer'), planStatus, plan.source);
       if (review.cancelled || signal.aborted) return this.#cancelled(run);
-      if (!review.verdict) return this.#fail(run, review.error ?? 'la revisión no entregó un veredicto válido');
-      report.review = review.verdict;
+      if (review.overBudget) return this.#overBudget(run);
 
       let problem: { source: string; notes: string[] };
-      if (review.verdict.veredicto === 'aprobado') {
+      if (review.gateFailed !== undefined) {
+        // El gate previo falló: vuelve al autor sin gastar una revisión.
+        problem = { source: 'verificación del proyecto', notes: [`La verificación del proyecto (gate) falló en el worktree:\n${review.gateFailed}`] };
+      } else if (!review.verdict) {
+        return this.#fail(run, review.error ?? 'la revisión no entregó un veredicto válido');
+      } else if (review.verdict.veredicto === 'aprobado') {
+        report.review = review.verdict;
         // Punto de compromiso: una cancelación anterior impide integrar; una posterior se ignora (ver `cancel`).
         if (signal.aborted || !this.#queue.canTransition(task.id, 'integrated')) return this.#cancelled(run);
         this.#committing.add(task.id);
@@ -390,6 +450,7 @@ export class Fleet {
         if (integration.gateSummary.trim()) notes.push(`Verificación del proyecto: ${integration.gateSummary.trim()}`);
         problem = { source: 'integración', notes: notes.length ? notes : ['La integración falló sin detalle.'] };
       } else {
+        report.review = review.verdict;
         problem = { source: `revisión de ${review.reviewer ?? 'otro agente'}`, notes: review.verdict.observaciones };
       }
 
@@ -446,13 +507,18 @@ export class Fleet {
     }
   }
 
+  /**
+   * Etapa de revisión: resumen del diff (confirma el trabajo), gate del proyecto sin LLM y, si pasa, el revisor con
+   * el resumen del gate en su encargo (no repite el check). Si el gate falla, no hay revisión.
+   */
   async #review(
     run: TaskRun,
     exec: ExecuteResult,
     signal: AbortSignal,
     writeFiles: (info: BeforeAttemptInfo) => Promise<void>,
     planStatus: TaskPlanStatus,
-  ): Promise<{ verdict?: ReviewVerdict; reviewer?: string; cancelled?: boolean; error?: string }> {
+    planSource: ResolvedPlan['source'],
+  ): Promise<ReviewStep> {
     const { task, report } = run;
     const workspace = run.workspace;
     if (!workspace) return { error: 'sin workspace' };
@@ -463,7 +529,14 @@ export class Fleet {
       this.#warn(`${task.id}: no se pudo resumir el diff (${err instanceof Error ? err.message : String(err)}).`);
       diff = defaultDiffSummary(exec);
     }
-    const reviewTask = buildReviewTask(task, report.authors, diff, planStatus.exists ? planStatus.text : undefined);
+    // Después del resumen del diff (que confirma el trabajo): así los restos del gate no se cuelan en el commit.
+    const gate = await this.#runGate(run, signal);
+    if (signal.aborted) return { cancelled: true };
+    if (gate && !gate.ok) return { gateFailed: gate.summary };
+    const reviewTask = buildReviewTask(task, report.authors, diff, planStatus.exists ? planStatus.text : undefined, {
+      ...(gate ? { gate: gate.summary } : {}),
+      generalPlan: planSource === 'plan',
+    });
     const tried: string[] = [];
     let error = 'la revisión no entregó un veredicto válido';
     for (let i = 0; i < REVIEW_TRIES; i++) {
@@ -478,7 +551,10 @@ export class Fleet {
         maxAttempts: REVIEW_MAX_ATTEMPTS,
         updateQueue: false,
         beforeAttempt: writeFiles,
+        retryBase: i,
+        ...this.#budgetOf(run),
       });
+      this.#spend(run, result);
       for (const r of result.authors) {
         if (!report.reviewers.includes(r)) report.reviewers.push(r);
         tried.push(r);
@@ -487,6 +563,7 @@ export class Fleet {
       const touched = [...new Set(result.attempts.flatMap((a) => a.filesChanged))].filter((f) => !normalizeOwnedPath(f).startsWith('.orq/'));
       if (touched.length) this.#warn(`${task.id}: el revisor ${result.agentId} modificó archivos del proyecto: ${touched.join(', ')}.`);
       if (result.outcome === 'cancelled') return { cancelled: true };
+      if (result.outcome === 'budget') return { overBudget: true, ...(result.error ? { error: result.error } : {}) };
       const last = result.attempts.at(-1);
       const verdict = result.ok && last ? parseReviewVerdict([...last.texts, ...(last.summary ? [last.summary] : [])]) : undefined;
       if (verdict) return { verdict, reviewer: result.agentId };
@@ -494,6 +571,67 @@ export class Fleet {
       this.#warn(`${task.id}: ${error}`);
     }
     return { error };
+  }
+
+  /** Gate del proyecto en el worktree de la tarea (sin LLM). Si no se puede correr, el revisor lo comprueba como antes. */
+  async #runGate(run: TaskRun, signal: AbortSignal): Promise<GateCheck | undefined> {
+    if (!this.#verify || !run.workspace) return undefined;
+    try {
+      const check = await this.#verify(run.workspace, run.task, signal);
+      if (!check) return undefined;
+      const summary = redactSecrets(check.summary.trim() || (check.ok ? 'gate ok' : 'gate fallido sin detalle'));
+      return { ok: check.ok, summary: summary.length > GATE_SUMMARY_MAX ? `…${summary.slice(summary.length - GATE_SUMMARY_MAX + 1)}` : summary };
+    } catch (err) {
+      this.#warn(`${run.task.id}: no se pudo correr la verificación antes de revisar (${err instanceof Error ? err.message : String(err)}); la comprueba el revisor.`);
+      return undefined;
+    }
+  }
+
+  /** Tope de gasto de la tarea según su dificultad (`undefined`: sin tope). */
+  #taskCap(task: TaskBrief): number | undefined {
+    const cap = this.#budgets?.[task.difficulty];
+    return typeof cap === 'number' && Number.isFinite(cap) && cap > 0 ? cap : undefined;
+  }
+
+  /** Lo que la tarea aún puede gastar, para `Supervisor.execute`. */
+  #budgetOf(run: TaskRun): Pick<ExecuteOptions, 'budgetUsd'> {
+    const cap = this.#taskCap(run.task);
+    return cap === undefined ? {} : { budgetUsd: cap - run.spentUsd };
+  }
+
+  #spend(run: TaskRun, exec: ExecuteResult): void {
+    run.spentUsd += exec.spentUsd;
+    run.report.spentUsd = run.spentUsd;
+  }
+
+  /**
+   * La tarea llegó a su tope de gasto: se detiene con lo hecho en `.orq/HANDOFF.md` (para que el reintento continúe
+   * desde ahí), avisa y queda `failed` con el motivo.
+   */
+  async #overBudget(run: TaskRun): Promise<'failed'> {
+    const { task } = run;
+    const cap = this.#taskCap(task) ?? 0;
+    const detail = `tope de gasto de la tarea superado: ${run.spentUsd.toFixed(2)} de ${cap} USD (dificultad ${task.difficulty}); lo hecho queda en ${PLAN_FILES.handoff}: reintenta para continuar desde ahí`;
+    if (run.workspace) {
+      const file = join(run.workspace.path, HANDOFF_FILE);
+      try {
+        let existing: string | undefined;
+        try {
+          existing = await this.#readFile(file);
+        } catch {
+          existing = undefined;
+        }
+        const last = run.attempts.at(-1);
+        const section = [`## Detenida por el tope de gasto (${new Date().toISOString()})`, `Berland detuvo la tarea: ${detail}.`];
+        if (last) section.push('', summarizeAttempt(last, { maxChars: 3_000 }));
+        const body = existing?.trim() ? `${existing.trimEnd()}\n\n${section.join('\n')}\n` : `# Traspaso de ${task.id}\n\n${section.join('\n')}\n`;
+        await this.#writeFile(file, redactSecrets(body));
+      } catch (err) {
+        this.#warn(`${task.id}: no se pudo escribir ${PLAN_FILES.handoff} (${err instanceof Error ? err.message : String(err)}).`);
+      }
+    }
+    this.#warn(`${task.id}: ${detail}.`);
+    return this.#fail(run, detail);
   }
 
   /**
@@ -647,12 +785,21 @@ export class Fleet {
   }
 }
 
+export interface ReviewTaskOptions {
+  /** Resumen del gate que ya pasó en el worktree: el revisor no repite el check completo. */
+  gate?: string;
+  /** La tarea sale de un plan general (`.orq/PLAN.md` con tareas hermanas); si no, ese archivo no aporta nada. */
+  generalPlan?: boolean;
+}
+
 /**
  * Encargo de revisión: mismo worktree, sin tocar el proyecto, veredicto en JSON en la última línea. Incluye el plan
- * de la tarea del autor (`.orq/PLAN-TAREA.md`, recortado a 4000 caracteres) para comparar el trabajo con lo planeado.
+ * de la tarea del autor (`.orq/PLAN-TAREA.md`, recortado a 4000 caracteres) para comparar el trabajo con lo planeado
+ * y, si el gate ya pasó, su resumen: el revisor lee el diff y corre solo pruebas puntuales.
  */
-export function buildReviewTask(task: TaskBrief, authors: readonly string[], diffSummary: string, taskPlan?: string): TaskBrief {
+export function buildReviewTask(task: TaskBrief, authors: readonly string[], diffSummary: string, taskPlan?: string, opts: ReviewTaskOptions = {}): TaskBrief {
   const plan = taskPlan?.trim() ? clipTaskPlan(taskPlan) : `(el autor no escribió \`${PLAN_FILES.taskPlan}\`)`;
+  const gate = opts.gate?.trim();
   const objective = [
     `Revisa el trabajo de la tarea «${task.id}: ${task.title}», hecho por ${authors.join(' → ') || 'otro agente'}, en este mismo worktree.`,
     'Eres el revisor: no modifiques archivos del proyecto.',
@@ -672,7 +819,17 @@ export function buildReviewTask(task: TaskBrief, authors: readonly string[], dif
     '### Resumen del diff',
     redactSecrets(diffSummary.trim() || '(sin resumen)'),
     '',
-    'Comprueba con `git status`, `git diff` y `git log` de esta rama que el cambio cumple cada criterio, que solo toca las rutas propias y que la verificación del proyecto pasa.',
+    ...(gate
+      ? [
+          '### Verificación del proyecto (gate)',
+          'Berland ya la corrió en este worktree, sin LLM, y pasó:',
+          redactSecrets(gate),
+          'No vuelvas a correr la verificación completa (`npm run check` o equivalente). Si dudas de un cambio concreto, corre solo la prueba de ese archivo.',
+          '',
+          'Comprueba con `git diff` de esta rama que el cambio cumple cada criterio y que solo toca las rutas propias.',
+        ]
+      : ['Comprueba con `git status`, `git diff` y `git log` de esta rama que el cambio cumple cada criterio, que solo toca las rutas propias y que la verificación del proyecto pasa.']),
+    ...(opts.generalPlan ? [`Si necesitas el contexto de las tareas hermanas, el plan general está en \`${PLAN_FILES.plan}\`.`] : []),
     'Compara el trabajo con el plan de la tarea: los pasos marcados `- [x]` deben estar hechos de verdad; menciona los pendientes que afecten a los criterios.',
     'Rechaza solo por problemas concretos y di cómo corregirlos.',
     'Termina tu respuesta con una sola línea JSON: {"veredicto":"aprobado","observaciones":[]} o {"veredicto":"rechazado","observaciones":["…"]}.',
@@ -750,6 +907,15 @@ async function readUtf8IfExists(path: string): Promise<string | undefined> {
     if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return undefined;
     throw err;
   }
+}
+
+/**
+ * El gestor de workspaces sirve también para el gate previo a la revisión si implementa
+ * `verify(workspace, task, signal)` (propuesto para `CommittingWorkspaces`).
+ */
+function asVerifier(workspaces: WorkspaceManager): VerifyWorkspace | undefined {
+  const verify = (workspaces as WorkspaceManager & { verify?: VerifyWorkspace }).verify;
+  return typeof verify === 'function' ? (workspace, task, signal) => verify.call(workspaces, workspace, task, signal) : undefined;
 }
 
 /** La memoria sirve también para los planes si implementa `recordPlan` (p. ej. `ObsidianMemory`). */

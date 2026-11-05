@@ -2,7 +2,7 @@ import type { IntegrationResult, TaskBrief, Workspace, WorkspaceManager } from '
 import type { ProjectRecord } from '../store/index.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { GATE_REQUIRED, INTEGRATION_DIR, isInside, physicalPath, projectsOverlapProblem, WorkspaceError, WorktreeManager, type WorkspaceProject } from '../workspace/index.ts';
+import { GATE_REQUIRED, INTEGRATION_DIR, isInside, physicalPath, projectsOverlapProblem, runCommands, summarizeCommands, WorkspaceError, WorktreeManager, type WorkspaceProject } from '../workspace/index.ts';
 import { LocalWorkspaces, type LocalProject } from './local-workspaces.ts';
 
 export interface ProjectWorktreesOptions {
@@ -129,6 +129,21 @@ export class ProjectWorktrees implements WorkspaceManager {
       throw new WorkspaceError(`el worktree ${workspace.path} no está en la raíz de worktrees del proyecto ${projectId} (${project.worktreesRoot})`);
     }
     return entry.manager.integrate(projectId, workspace);
+  }
+
+  /**
+   * Gate del proyecto en la carpeta de la tarea, antes de revisar y sin LLM (issue 6): en su worktree o, en modo
+   * local, en la carpeta. `undefined` si no hay verificación configurada (el revisor la comprueba como antes).
+   */
+  async verify(workspace: Workspace, task: TaskBrief, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
+    const local = this.#local.projectOf(workspace);
+    if (local) return this.#local.verify(local, workspace, signal);
+    const project = this.projectOf(task.projectId, workspace);
+    if (project.gate.length === 0) return undefined;
+    // Como al integrar: el programa del gate no se busca dentro de la raíz de worktrees (el agente pudo plantar uno).
+    const results = await runCommands(project.gate, workspace.path, signal, { untrustedRoots: [project.worktreesRoot] });
+    const ok = results.length === project.gate.length && results.every((r) => r.ok);
+    return { ok, summary: summarizeCommands(results, project.gate.length) };
   }
 
   async remove(workspace: Workspace): Promise<void> {

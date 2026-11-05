@@ -220,6 +220,12 @@ export class CommittingWorkspaces implements WorkspaceManager {
     return [`Cambios de la rama ${workspace.branch} frente a ${base} (confirmados por la flota):`, stat.stdout.trim() || '(sin cambios)', '', 'Commits:', log.stdout.trim() || '(ninguno)'].join('\n');
   }
 
+  /** Gate antes de revisar (issue 6): lo corre el gestor interno si sabe hacerlo; si no, `undefined`. */
+  async verify(workspace: Workspace, task: TaskBrief, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
+    const inner = this.#inner as WorkspaceManager & { verify?: (w: Workspace, t: TaskBrief, s?: AbortSignal) => Promise<{ ok: boolean; summary: string } | undefined> };
+    return typeof inner.verify === 'function' ? inner.verify(workspace, task, signal) : undefined;
+  }
+
   async integrate(projectId: string, workspace: Workspace): Promise<IntegrationResult> {
     if (!this.isLocal(workspace)) await this.prepare(workspace);
     return this.#inner.integrate(projectId, workspace);

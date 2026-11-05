@@ -51,9 +51,33 @@ describe('renderBrief: plan de implementación obligatorio', () => {
     expect(text).not.toContain('Plan de implementación (obligatorio)');
     expect(text).not.toContain('sigue desde el primer paso sin marcar');
     expect(sections(text)[0]).toBe('## Plan de la tarea revisada');
-    expect(text).toContain('No modifiques esos archivos.');
-    expect(text).toContain('- `.orq/PLAN.md` (plan general)');
+    expect(text).toContain('No modifiques `.orq/PLAN-TAREA.md` ni `.orq/PLAN.md`.');
     expect(text).toContain('- [ ] 2. pruebas'); // el plan del autor va en el objetivo
+  });
+
+  it('la revisión no reenvía lecturas: sin `.orq/PLAN.md` en «Lee primero», informe breve y sin HANDOFF', () => {
+    const review = buildReviewTask(task, ['codex'], 'Archivos: src/core/x/a.ts', '- [x] 1. parser');
+    const text = renderBrief(review);
+    expect(text).not.toContain('- `.orq/PLAN.md` (plan general)');
+    expect(text).toContain('## Lee primero\n- `AGENTS.md`');
+    expect(text).toContain('## Al terminar\nResponde breve: qué comprobaste');
+    expect(text).not.toContain('HANDOFF.md');
+    // Con las reglas ya en el prompt de sistema no queda nada que leer: la sección desaparece.
+    expect(sections(renderBrief(review, undefined, { rulesInSystemPrompt: true }))).not.toContain('## Lee primero');
+  });
+
+  it('con las reglas en el prompt de sistema no pide leer AGENTS.md ni CLAUDE.md; sí otras reglas, skills y memoria', () => {
+    const t = { ...task, skillRefs: ['C:\\hub\\skill\\SKILL.md'], contextRefs: ['Proyectos/x/nota.md'] };
+    const text = renderBrief(t, undefined, { rulesFiles: ['AGENTS.md', './CLAUDE.md', 'docs/plan/F5.md'], rulesInSystemPrompt: true });
+    const read = text.slice(text.indexOf('## Lee primero'), text.indexOf('## Al terminar')).trim().split('\n');
+    expect(read).toEqual([
+      '## Lee primero',
+      '- `.orq/PLAN.md` (plan general)',
+      '- `docs/plan/F5.md`',
+      '- skill: `C:\\hub\\skill\\SKILL.md`',
+      '- memoria: `Proyectos/x/nota.md`',
+    ]);
+    expect(renderBrief(t)).toContain('- `AGENTS.md`');
   });
 
   it('una tarea con rutas dentro y fuera de .orq sí es de autor', () => {

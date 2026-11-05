@@ -23,7 +23,8 @@ describe('SettingsStore', () => {
   it('mezcla un nivel de profundidad; mind.model: null borra el modelo', () => {
     const settings = new SettingsStore(new DatabaseSync(':memory:'));
     const a = settings.update({ mind: { model: 'claude-opus-5-5' }, appearance: { reducedEffects: true } });
-    expect(a.mind).toEqual({ agentId: null, effort: 'high', model: 'claude-opus-5-5' });
+    // Esfuerzo por defecto de la mente: medium (issue 6; antes high).
+    expect(a.mind).toEqual({ agentId: null, effort: 'medium', model: 'claude-opus-5-5' });
     expect(a.appearance).toEqual({ theme: 'dark', reducedEffects: true });
     const b = settings.update({ mind: { effort: 'max' }, workers: ['codex', 'codex', 'claude'] });
     expect(b.mind).toEqual({ agentId: null, effort: 'max', model: 'claude-opus-5-5' });
@@ -122,7 +123,7 @@ describe('rutas de ajustes', () => {
     const patched = await t.req('PATCH', '/settings', { body: { mind: { agentId: 'claude', model: 'claude-opus-5-5' }, workers: ['claude'], concurrency: 2 } });
     expect(patched.status).toBe(200);
     const settings = (patched.json as { settings: Settings }).settings;
-    expect(settings).toMatchObject({ mind: { agentId: 'claude', model: 'claude-opus-5-5', effort: 'high' }, workers: ['claude'], concurrency: 2 });
+    expect(settings).toMatchObject({ mind: { agentId: 'claude', model: 'claude-opus-5-5', effort: 'medium' }, workers: ['claude'], concurrency: 2 });
     expect(t.messages.filter((m) => m.type === 'settings')).toEqual([{ type: 'settings', settings }]);
     expect((await t.req('GET', '/settings')).json).toEqual({ settings });
   });
