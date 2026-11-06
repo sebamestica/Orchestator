@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/chat/service.ts:779`, `src/core/chat/service.ts:798`, `src/core/chat/service.ts:803`, `src/core/chat/service.ts:762`, `src/core/chat/service.ts:291`, `src/core/chat/service.ts:887`, `src/core/chat/service.ts:738`, `src/core/conductor/session.ts:464`, `src/ui/features/chat/ChatView.tsx:359`, `src/ui/features/agents-panel/model.ts:74`, `apps/desktop/src/lib/core-client.ts:67`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Fusiona:** `codex-07-caida-flujo-sdk-deja-investigadores-fantasma.md` (revisión de Codex), que describía el mismo
   defecto. Ese archivo se borró. Este informe lo había calificado de severidad baja y Codex de media; se deja **media**
   porque, además del aviso falso, impide que el núcleo se apague al cerrar la ventana. Los números de línea que citó

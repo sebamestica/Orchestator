@@ -29,6 +29,14 @@ function injectableQuery(script: (message: SDKUserMessage, ctx: { index: number;
     inject: (_messages: SDKMessage[]): void => {
       throw new Error('sin proceso del SDK');
     },
+    /** El proceso del SDK muere: el iterador lanza `err` en la vuelta siguiente, sin avisos de los subagentes. */
+    crash: (_err: Error): void => {
+      throw new Error('sin proceso del SDK');
+    },
+    /** El iterador termina con `return`, sin avisos de los subagentes. */
+    end: (): void => {
+      throw new Error('sin proceso del SDK');
+    },
     fn: undefined as unknown as ConductorQueryFn,
   };
   state.fn = ({ prompt, options }) => {
@@ -37,11 +45,20 @@ function injectableQuery(script: (message: SDKUserMessage, ctx: { index: number;
     const queue: SDKMessage[] = [];
     let wake: (() => void) | undefined;
     let done = false;
+    let failure: Error | undefined;
     const push = (messages: SDKMessage[]) => {
       queue.push(...messages);
       wake?.();
     };
     state.inject = push;
+    state.crash = (err) => {
+      failure = err;
+      wake?.();
+    };
+    state.end = () => {
+      done = true;
+      wake?.();
+    };
     void (async () => {
       let index = 0;
       for await (const message of prompt) push(script(message, { index: index++, process, options }));
@@ -51,6 +68,7 @@ function injectableQuery(script: (message: SDKUserMessage, ctx: { index: number;
     const stream = (async function* () {
       while (true) {
         while (queue.length) yield queue.shift() as SDKMessage;
+        if (failure) throw failure;
         if (done) return;
         await new Promise<void>((r) => {
           wake = r;
@@ -174,6 +192,42 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     await b.settle(chat.id);
     expect(q.calls).toHaveLength(2);
     expect(q.calls[1]?.options).toMatchObject({ effort: 'low', resume: 'sdk-1' });
+  });
+
+  it.each([
+    ['lanza', (q: ReturnType<typeof injectableQuery>) => q.crash(new Error('Claude Code process exited with code 1'))],
+    ['termina sin aviso', (q: ReturnType<typeof injectableQuery>) => q.end()],
+  ])('si el proceso del SDK %s con subagentes y sin turno, el chat los da por detenidos y lo avisa', async (_how, kill) => {
+    const q = injectableQuery(launchScript);
+    const b = await bench({ query: q.fn });
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+    expect(b.service.get(chat.id).backgroundTasks).toBe(1);
+
+    kill(q);
+    await waitFor(() => b.service.sessionOf(chat.id) === undefined);
+    await tick(10);
+    expect(b.service.get(chat.id).backgroundTasks).toBeUndefined();
+    expect(b.sent('chat').at(-1)?.chat.backgroundTasks).toBeUndefined();
+    const errors = b.events(chat.sessionId).filter((e) => e.type === 'error' && !e.parentSessionId);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.type === 'error' && errors[0].payload.message).toMatch(/1 subagente/);
+  });
+
+  it('cerrar el chat con un subagente vivo no deja avisos ni difusiones de más al terminar el proceso', async () => {
+    const q = injectableQuery(launchScript);
+    const b = await bench({ query: q.fn });
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+    b.service.close(chat.id);
+    const chats = b.sent('chat').length;
+    await tick(30);
+    expect(q.closed).toBe(1);
+    expect(b.sent('chat')).toHaveLength(chats);
+    expect(b.events(chat.sessionId).filter((e) => e.type === 'error')).toHaveLength(0);
+    expect(b.service.get(chat.id).backgroundTasks).toBeUndefined();
   });
 
   it('los plugins que se refrescan al abrir la sesión no hacen que el mensaje siguiente la recree', async () => {

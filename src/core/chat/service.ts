@@ -736,10 +736,7 @@ export class ChatService {
     live.session = session;
     live.key = keyOf(plugins);
     // Los subagentes de un proceso anterior ya no existen.
-    if (live.background.size) {
-      live.background.clear();
-      this.#publishLive(chatId);
-    }
+    this.#stopBackground(chatId, live);
     // Un proceso del SDK nuevo cuenta el uso desde cero.
     live.delta = usageDeltas();
     void this.#read(chatId, live, session);
@@ -759,14 +756,12 @@ export class ChatService {
     return target;
   }
 
-  #dropSession(chatId: string, live: Live): void {
+  /** Suelta la sesión viva y la cierra; devuelve cuántos subagentes en segundo plano murieron con ella. */
+  #dropSession(chatId: string, live: Live): number {
     const session = live.session;
     live.session = undefined;
     live.key = undefined;
-    if (live.background.size) {
-      live.background.clear();
-      this.#publishLive(chatId);
-    }
+    const stopped = this.#stopBackground(chatId, live);
     if (session && !session.closed) {
       try {
         session.close();
@@ -774,10 +769,21 @@ export class ChatService {
         this.#log(`chat ${chatId}: cerrar la sesión falló: ${oneLine(err)}`);
       }
     }
+    return stopped;
+  }
+
+  /** Da por terminados los subagentes de un proceso del SDK que ya no existe y lo difunde; devuelve cuántos eran. */
+  #stopBackground(chatId: string, live: Live): number {
+    const stopped = live.background.size;
+    if (!stopped) return 0;
+    live.background.clear();
+    this.#publishLive(chatId);
+    return stopped;
   }
 
   async #read(chatId: string, live: Live, session: ConductorSession): Promise<void> {
     let known = this.#repo.get(chatId)?.sdkSessionId ?? undefined;
+    let warned = false;
     try {
       for await (const update of session.stream()) {
         const sdkId = sdkSessionIdOf(update.message);
@@ -798,12 +804,18 @@ export class ChatService {
     } catch (err) {
       if (this.#repo.get(chatId) && live.turn?.session === session && !live.turn.interrupted) {
         this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `La conversación con la mente se cortó: ${oneLine(err)}` } });
+        warned = true;
       }
       this.#log(`chat ${chatId}: la sesión terminó con error: ${oneLine(err)}`);
     } finally {
+      // El proceso del SDK terminó solo (caída, error fatal, tope de gasto): sus subagentes murieron con él y ya no
+      // llegará su aviso. Los cierres de `#dropSession` y la sesión que reemplazó `#ensureSession` no pasan por aquí.
       if (live.session === session) {
-        live.session = undefined;
-        live.key = undefined;
+        const stopped = this.#dropSession(chatId, live);
+        if (stopped && !warned) {
+          const message = `La sesión de la mente terminó; ${stopped} subagente(s) en segundo plano se detuvieron. Escríbele para retomar.`;
+          this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message } });
+        }
       }
       const turn = live.turn;
       if (turn?.session === session) this.#finishTurn(chatId, live, turn, undefined);
