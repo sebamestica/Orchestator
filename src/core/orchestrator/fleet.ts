@@ -558,7 +558,7 @@ export class Fleet {
       this.#warn(`${task.id}: no se pudo resumir el diff (${err instanceof Error ? err.message : String(err)}).`);
       diff = defaultDiffSummary(exec);
     }
-    // Después del resumen del diff (que confirma el trabajo): así los restos del gate no se cuelan en el commit.
+    // Después del resumen del diff (que confirma el trabajo); `verify` borra lo que deja el gate y falla si modifica archivos versionados.
     const gate = await this.#runGate(run, signal);
     if (signal.aborted) return { cancelled: true };
     if (gate && !gate.ok) return { gateFailed: gate.summary };

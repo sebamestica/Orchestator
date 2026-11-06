@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** media
 - **Archivos:** `src/core/orchestrator/fleet.ts:525-533`, `src/core/orchestrator/fleet.ts:434`, `src/core/orchestrator/fleet.ts:344-346`, `src/core/orchestrator/fleet.ts:563-564`, `src/core/app/workspaces.ts:138-147`, `src/core/app/commit-step.ts:101-113`, `src/core/app/commit-step.ts:208-215`, `src/core/app/commit-step.ts:229-232`, `src/core/app/fleet-service.ts:387`, `src/core/workspace/integrate.ts:81`, `src/core/workspace/integrate.ts:99-103`, `src/core/workspace/leftovers.ts:12-34`, `docs/plan/issues/06-razonamiento-modelos.md:142-144`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

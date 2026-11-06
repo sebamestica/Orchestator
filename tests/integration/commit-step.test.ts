@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { commitTaskWork, CommittingWorkspaces, GitIdentityError, isMissingIdentity, OwnedPathsError, outsideOwnedPaths, parsePorcelainZ, SecretInWorkError } from '../../src/core/app/commit-step.ts';
+import { commitTaskWork, CommittingWorkspaces, GitIdentityError, isMissingIdentity, outsideOwnedPaths, parsePorcelainZ, SecretInWorkError } from '../../src/core/app/commit-step.ts';
 import { createGitRunner, WorktreeManager } from '../../src/core/workspace/index.ts';
 import { taskBriefSchema, type TaskBrief, type Workspace } from '../../src/shared/index.ts';
 import { cleanupDirs, tempDir } from './helpers.ts';
@@ -98,14 +98,15 @@ describe('paso de commit de la flota', () => {
     expect(git(repo, 'cat-file', '-e', 'orq/integracion:src/viejo.mjs').status).not.toBe(0);
   });
 
-  it('archivos fuera de ownedPaths: no confirma, avisa al revisor e integrate falla con un error claro', async () => {
+  it('archivos fuera de ownedPaths: no confirma, avisa al revisor e integrate vuelve con un motivo claro', async () => {
     const { ws, create, head } = await setup();
     const w = await create(task('tarea-b', ['src/b.mjs']));
     const before = head(w.path);
     writeFileSync(join(w.path, 'src', 'b.mjs'), 'export const b = 1;\n');
     writeFileSync(join(w.path, 'package.json'), '{"name":"cambiado"}\n');
     expect(await ws.reviewSummary(w)).toMatch(/^ATENCIÓN: La tarea tarea-b cambió archivos fuera de sus rutas propias \(ownedPaths\): package\.json/);
-    await expect(ws.integrate('demo', w)).rejects.toBeInstanceOf(OwnedPathsError);
+    // Un resultado, no una excepción: la flota abre una ronda de corrección en vez de «Error del orquestador».
+    expect(await ws.integrate('demo', w)).toMatchObject({ ok: false, conflicts: [], gateSummary: expect.stringMatching(/^no ejecutado: .*fuera de sus rutas propias.*package\.json/) });
     expect(head(w.path)).toBe(before);
     // Deshecho el cambio ajeno, se confirma e integra.
     expect(git(w.path, 'checkout', '--', 'package.json').status).toBe(0);
@@ -219,6 +220,6 @@ describe('paso de commit de la flota', () => {
     writeFileSync(join(w.path, 'README.md'), '# ajeno\n');
     expect(git(w.path, 'add', 'README.md').status).toBe(0);
     expect(git(w.path, 'commit', '-q', '-m', 'commit del agente').status).toBe(0);
-    await expect(ws.integrate('demo', w)).rejects.toThrow(/fuera de sus rutas propias \(ownedPaths\): README\.md/);
+    expect(await ws.integrate('demo', w)).toMatchObject({ ok: false, gateSummary: expect.stringMatching(/fuera de sus rutas propias \(ownedPaths\): README\.md/) });
   });
 });

@@ -256,8 +256,8 @@ const LOCAL_SUMMARY_FILES = 200;
 
 /**
  * Decorador de `WorkspaceManager`: antes de integrar comprueba las rutas propias y confirma el trabajo del agente
- * (ver `commitTaskWork`); si algo queda fuera, `integrate` lanza `OwnedPathsError` y la flota da la tarea por fallida
- * con ese mensaje. `prepare` hace lo mismo antes de la revisión (`diffSummaryStep`). Al quitar un worktree borra
+ * (ver `commitTaskWork`); si algo queda fuera, `integrate` no integra y devuelve el motivo, y la tarea vuelve al
+ * autor. `prepare` hace lo mismo antes de la revisión (`diffSummaryStep`). Al quitar un worktree borra
  * primero su `.orq` si no está versionada, para que `remove` no lo tome por trabajo sin confirmar.
  *
  * En **modo local** (carpeta del usuario, sin worktree) no hay nada que confirmar: no se ejecuta ningún git que
@@ -349,7 +349,13 @@ export class CommittingWorkspaces implements WorkspaceManager {
 
   async integrate(projectId: string, workspace: Workspace): Promise<IntegrationResult> {
     if (!this.isLocal(workspace)) {
-      await this.prepare(workspace);
+      try {
+        await this.prepare(workspace);
+      } catch (err) {
+        // Un resultado y no una excepción: la tarea vuelve al autor con el motivo, no queda «Error del orquestador».
+        if (err instanceof OwnedPathsError && this.#tasks.has(taskKey(workspace))) return { ok: false, conflicts: [], gateSummary: `no ejecutado: ${err.message}` };
+        throw err;
+      }
       return this.#inner.integrate(projectId, workspace);
     }
     // Se vuelve a mirar la carpeta: así entra también lo que haya escrito el revisor después del resumen.

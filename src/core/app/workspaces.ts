@@ -2,7 +2,7 @@ import type { IntegrationResult, TaskBrief, Workspace, WorkspaceManager } from '
 import type { ProjectRecord } from '../store/index.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { GATE_REQUIRED, INTEGRATION_DIR, isInside, physicalPath, projectsOverlapProblem, runCommands, summarizeCommands, WorkspaceError, WorktreeManager, type WorkspaceProject } from '../workspace/index.ts';
+import { GATE_REQUIRED, INTEGRATION_DIR, isInside, physicalPath, projectsOverlapProblem, WorkspaceError, WorktreeManager, type WorkspaceProject } from '../workspace/index.ts';
 import { LocalWorkspaces, type LocalProject } from './local-workspaces.ts';
 
 export interface ProjectWorktreesOptions {
@@ -74,7 +74,12 @@ export class ProjectWorktrees implements WorkspaceManager {
 
   /** Configuración con la que se creó un worktree (o la vigente, si no lo creó este gestor). */
   projectOf(projectId: string, workspace: Workspace): WorkspaceProject {
-    return (this.#bound.get(bindKey(workspace.path))?.entry ?? this.#entry(projectId)).manager.project(projectId);
+    return this.#entryOf(projectId, workspace).manager.project(projectId);
+  }
+
+  /** Gestor con el que se creó un worktree (o el vigente, si no lo creó este gestor). */
+  #entryOf(projectId: string, workspace: Workspace): Entry {
+    return this.#bound.get(bindKey(workspace.path))?.entry ?? this.#entry(projectId);
   }
 
   /**
@@ -142,18 +147,16 @@ export class ProjectWorktrees implements WorkspaceManager {
   }
 
   /**
-   * Gate del proyecto en la carpeta de la tarea, antes de revisar y sin LLM (issue 6): en su worktree o, en modo
-   * local, en la carpeta. `undefined` si no hay verificación configurada (el revisor la comprueba como antes).
+   * Gate del proyecto en la carpeta de la tarea, antes de revisar y sin LLM (issue 6): en su worktree (sin dejar
+   * restos: ver `WorktreeManager.verifyWorktree`) o, en modo local, en la carpeta. `undefined` si no hay verificación
+   * configurada (el revisor la comprueba como antes).
    */
   async verify(workspace: Workspace, task: TaskBrief, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
     const local = this.#local.projectOf(workspace);
     if (local) return this.#local.verify(local, workspace, signal);
-    const project = this.projectOf(task.projectId, workspace);
-    if (project.gate.length === 0) return undefined;
-    // Como al integrar: el programa del gate no se busca dentro de la raíz de worktrees (el agente pudo plantar uno).
-    const results = await runCommands(project.gate, workspace.path, signal, { untrustedRoots: [project.worktreesRoot] });
-    const ok = results.length === project.gate.length && results.every((r) => r.ok);
-    return { ok, summary: summarizeCommands(results, project.gate.length) };
+    const { manager } = this.#entryOf(task.projectId, workspace);
+    if (manager.project(task.projectId).gate.length === 0) return undefined;
+    return manager.verifyWorktree(task.projectId, workspace, signal);
   }
 
   async remove(workspace: Workspace): Promise<void> {

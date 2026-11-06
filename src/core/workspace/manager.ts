@@ -5,6 +5,7 @@ import type { IntegrationResult, Workspace, WorkspaceManager } from '../../share
 import { taskBriefSchema } from '../../shared/index.ts';
 import type { TaskBrief } from '../../shared/index.ts';
 import { runCommands, summarizeCommands } from './commands.ts';
+import type { CommandResult } from './commands.ts';
 import { gitCommonDir, HOOKS_DIR, INTEGRATION_DIR, parseWorkspaceProject, TASK_BRANCH_PREFIX, worktreesRootProblem } from './config.ts';
 import type { WorkspaceProject } from './config.ts';
 import { createGitRunner, GitError } from './git.ts';
@@ -12,6 +13,7 @@ import type { GitRunner } from './git.ts';
 import { isInside } from './guard.ts';
 import { branchExists, ensureIntegrationBranch, integrateWorkspace } from './integrate.ts';
 import { createLinks, excludeLinks, removeAllLinks } from './links.ts';
+import { gateModifiedNote, listUntracked, modifiedTracked, removeUntracked } from './leftovers.ts';
 import { blockPush } from './push-block.ts';
 
 export interface WorktreeManagerOptions {
@@ -164,6 +166,30 @@ export class WorktreeManager implements WorkspaceManager {
     const project = this.project(projectId);
     const exclusive = <T>(fn: () => Promise<T>) => this.exclusive(project, fn);
     return this.serial(`integrate:${repoKey(project.repoPath)}`, () => integrateWorkspace(this.git, project, workspace, { exclusive }));
+  }
+
+  /**
+   * Gate del proyecto en el worktree de una tarea, antes de revisar (issue 6). Al terminar, pase o falle, borra lo
+   * no versionado que dejó, y si modificó archivos versionados falla con el motivo: si no, el `prepare` siguiente
+   * (al integrar o en la ronda nueva) lo confirmaría sin revisión, o lanzaría `OwnedPathsError` por archivos que el
+   * autor no tocó. Lo que ya estaba antes del gate (`.orq`, cambios sin confirmar) se conserva.
+   */
+  async verifyWorktree(projectId: string, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string }> {
+    const project = this.project(projectId);
+    // Borra archivos: nunca fuera de la raíz de worktrees (la copia del usuario no se limpia).
+    if (!isInside(workspace.path, project.worktreesRoot)) throw new WorkspaceError(`el worktree ${workspace.path} no está en la raíz de worktrees del proyecto ${projectId}`);
+    const untracked = new Set(await listUntracked(this.git, workspace.path));
+    const modified = new Set(await modifiedTracked(this.git, workspace.path));
+    let results: CommandResult[];
+    try {
+      // Como al integrar: el programa del gate no se busca dentro de la raíz de worktrees (el agente pudo plantar uno).
+      results = await runCommands(project.gate, workspace.path, signal, { untrustedRoots: [project.worktreesRoot] });
+    } finally {
+      await removeUntracked(this.git, workspace.path, untracked);
+    }
+    const touched = (await modifiedTracked(this.git, workspace.path)).filter((f) => !modified.has(f));
+    const ok = results.length === project.gate.length && results.every((r) => r.ok) && touched.length === 0;
+    return { ok, summary: summarizeCommands(results, project.gate.length) + (touched.length ? `\n${gateModifiedNote(touched)}` : '') };
   }
 
   /** Sección exclusiva por repositorio físico para todo lo que escribe en el repo (worktree add/remove, ramas, merge, commit). */

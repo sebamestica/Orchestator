@@ -140,8 +140,9 @@ Un `effort` fijo en `extraOptions` del adaptador sigue mandando sobre la tabla.
 
 ### Gate antes de revisar
 - `FleetOptions.verify(workspace, task, signal)` → `{ ok, summary }` o `undefined` (sin gate). Por defecto usa
-  `workspaces.verify` si el gestor lo tiene. Corre después del resumen del diff, que confirma el trabajo, para que los
-  restos del gate no entren en el commit.
+  `workspaces.verify` si el gestor lo tiene. Corre después del resumen del diff, que confirma el trabajo. Para que los
+  restos del gate no entren en el commit de `integrate` ni de la ronda siguiente, `WorktreeManager.verifyWorktree`
+  borra al terminar lo no versionado que dejó y falla con «el gate modificó archivos versionados: …» si cambió alguno.
 - Si pasa, el encargo de revisión lleva «### Verificación del proyecto (gate)» con el resumen y la orden de no repetir
   el check completo (solo pruebas puntuales). Si falla, la tarea vuelve al autor con el resumen como observación y no
   se gasta una revisión. Si no hay gate o `verify` falla, el revisor comprueba como antes.
