@@ -112,6 +112,32 @@ describe('paso de commit de la flota', () => {
     expect(await ws.integrate('demo', w)).toMatchObject({ ok: true });
   });
 
+  it('si el worktree ya no está en la rama de la tarea, no confirma en la rama ajena', async () => {
+    const { repo, ws, create, head } = await setup();
+    const w = await create(task('tarea-r', ['src/a.mjs']));
+    expect(git(w.path, 'checkout', '-q', '-b', 'otra').status).toBe(0);
+    const before = head(repo, 'otra');
+    writeFileSync(join(w.path, 'src', 'a.mjs'), 'export const a = 3;\n');
+    await expect(ws.prepare(w)).rejects.toThrow(/«otra».*orq\/tarea-r/);
+    expect(head(repo, 'otra')).toBe(before);
+    expect(git(w.path, 'status', '--porcelain').stdout).toMatch(/src\/a\.mjs/);
+  });
+
+  it('si el worktree pasó por otra rama (aunque haya vuelto), no confirma: pudo mover una rama compartida', async () => {
+    const { repo, ws, create, head } = await setup();
+    const w = await create(task('tarea-v', ['src/a.mjs']));
+    const before = head(w.path);
+    // Mirar un commit suelto no cuenta; pasar por una rama sí.
+    expect(git(w.path, 'checkout', '-q', 'HEAD~0').status).toBe(0);
+    expect(git(w.path, 'checkout', '-q', 'orq/tarea-v').status).toBe(0);
+    expect(git(w.path, 'checkout', '-q', '-b', 'publico').status).toBe(0);
+    expect(git(w.path, 'checkout', '-q', 'orq/tarea-v').status).toBe(0);
+    writeFileSync(join(w.path, 'src', 'a.mjs'), 'export const a = 4;\n');
+    await expect(ws.prepare(w)).rejects.toThrow(/pasó por la rama «publico»/);
+    expect(head(w.path)).toBe(before);
+    expect(head(repo, 'publico')).toBe(before);
+  });
+
   it('sin identidad git del usuario no confirma nada: error claro, nunca un autor inventado', async () => {
     const { repo, ws, create, head } = await setup();
     const w = await create(task('tarea-sin-autor', ['src/a.mjs']));

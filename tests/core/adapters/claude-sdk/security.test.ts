@@ -85,6 +85,25 @@ describe('hallazgo 3 (ALTA): comandos prohibidos que eludían las regex', () => 
     'env git push',
     'git -C ../otro-repo commit -m x',
     'gh pr create --fill',
+    // El stash y las ramas son comunes a todos los worktrees del repo (también a la copia del usuario).
+    'git stash',
+    'git stash pop',
+    'git stash drop',
+    'git stash clear',
+    'git stash apply',
+    'git stash push -m x',
+    'git stash && npm test && git stash pop',
+    'git checkout -B main',
+    'git checkout --ignore-other-worktrees -B main',
+    'git checkout -fB publico',
+    'git switch -C main',
+    'git switch --force-create main',
+    'git switch --ignore-o main',
+    'git switch --i publico',
+    'git checkout -Borq/integracion HEAD',
+    'git switch -Cmain-2',
+    'git checkout -fBpublico2',
+    'git branch -C orq/t1 publico',
   ];
   for (const command of denied) {
     it(`deniega: ${JSON.stringify(command)}`, async () => {
@@ -109,6 +128,10 @@ describe('hallazgo 3 (ALTA): comandos prohibidos que eludían las regex', () => 
     'npx vitest run tests/core',
     'echo push',
     'git stash list',
+    'git stash show -p',
+    'git switch -c otra',
+    'git checkout -b otra',
+    'git branch -c orq/t1 copia',
   ];
   for (const command of allowed) {
     it(`permite: ${JSON.stringify(command)}`, async () => {
@@ -123,6 +146,8 @@ describe('hallazgo 3 (ALTA): comandos prohibidos que eludían las regex', () => 
     expect(await ps('$c = "push"; git $c')).toBe('deny');
     expect(await ps('Invoke-Expression "git push"')).toBe('deny');
     expect(await ps('git status; git log -1')).toBe('allow');
+    expect(await ps('git stash pop')).toBe('deny');
+    expect(await ps('git checkout --ignore-other-worktrees -B main')).toBe('deny');
   });
 });
 

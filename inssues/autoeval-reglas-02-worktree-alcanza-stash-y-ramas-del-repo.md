@@ -3,7 +3,8 @@
 - **Área:** Núcleo de la flota (política de shell de los workers Claude, que también usa la mente)
 - **Severidad:** alta
 - **Archivos:** `src/core/adapters/claude-sdk/shell-policy.ts:484`, `src/core/adapters/claude-sdk/shell-policy.ts:490-497`, `src/core/adapters/claude-sdk/shell-policy.ts:537-539`, `src/core/adapters/claude-sdk/shell-policy.ts:540-580`, `src/core/adapters/claude-sdk/shell-policy.ts:547-551`, `src/core/adapters/claude-sdk/shell-policy.ts:548`, `src/core/adapters/claude-sdk/shell-policy.ts:555-559`, `src/core/adapters/claude-sdk/permissions.ts:80-84`, `src/core/conductor/guard.ts:220`, `src/core/workspace/manager.ts:124-127`, `src/core/workspace/push-block.ts:88-115`, `src/core/workspace/integrate.ts:41`, `src/core/workspace/integrate.ts:52-53`, `src/core/app/commit-step.ts:99-106`, `src/core/app/commit-step.ts:117`, `src/core/app/commit-step.ts:198`, `src/core/adapters/codex-cli/index.ts:191`, `tests/core/adapters/claude-sdk/security.test.ts:45-122`
-- **Estado:** abierta
+- **Estado:** resuelta
+- **Nota de cierre:** hechos los puntos 1 y 2, y el 8 con el reflog del HEAD del worktree. Queda fuera el punto 3: que Codex o agy muevan `refs/stash` o una rama sin mover HEAD (ver `autoeval-reglas-04` y `-07`).
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `autoeval-reglas-01-mente-git-en-tu-carpeta-sin-barrera.md`, `autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md`, `flota-01-modo-local-reglas-fuera-del-prompt.md`
 

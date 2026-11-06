@@ -1,5 +1,5 @@
-import { rm } from 'node:fs/promises';
-import { isAbsolute, join, relative } from 'node:path';
+import { readFile, rm } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace, WorkspaceManager } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
 import { normalizeOwnedPath, pathsOverlap, type ExecuteResult } from '../orchestrator/index.ts';
@@ -84,6 +84,36 @@ export function outsideOwnedPaths(files: readonly string[], ownedPaths: readonly
   return [...new Set(files.map(normalizeOwnedPath))].filter((f) => f && !isScratch(f) && !ownedPaths.some((p) => pathsOverlap(p, f)));
 }
 
+/** El worktree ya no está en la rama de la tarea (`git checkout otra`): confirmar ahí movería una rama ajena. */
+export class TaskBranchError extends Error {
+  override readonly name = 'TaskBranchError';
+  constructor(taskId: string, foreign: string, expected: string, visited = false) {
+    const where = visited ? `pasó por la rama «${foreign}» (pudo moverla: las ramas son comunes a todo el repo)` : `trabaja en la rama «${foreign}», no en «${expected}»`;
+    super(`La tarea ${taskId} ${where}: Berland no confirma ni integra ese trabajo. Revisa esa rama y descarta el intento.`);
+  }
+}
+
+/**
+ * Ramas locales, distintas de `branch`, a las que cambió el worktree (`git checkout otra`, `switch -C main`). El HEAD
+ * de cada worktree tiene su propio reflog, así que el trabajo del usuario en su copia no cuenta. Un `checkout` a un
+ * commit suelto (`HEAD~1`) no es una rama y tampoco cuenta.
+ */
+async function visitedBranches(git: GitRunner, worktreePath: string, branch: string): Promise<string[]> {
+  // La guardia de git del núcleo no deja usar `reflog`: se lee el archivo del reflog del HEAD de este worktree.
+  const logPath = (await git(worktreePath, ['rev-parse', '--git-path', 'logs/HEAD'])).stdout.trim();
+  const log = await readFile(resolve(worktreePath, logPath), 'utf8').catch(() => '');
+  const targets = new Set([...log.matchAll(/\tcheckout: moving from .+ to (.+)$/gm)].map((m) => (m[1] ?? '').trim()));
+  targets.delete(branch);
+  const visited: string[] = [];
+  for (const target of targets) {
+    // `main~1`, `HEAD^`, `v1:x` o `@{-1}` son commits, no ramas (y `rev-parse` los resolvería igual).
+    if (!target || /[~^:\s]|@\{|\.\./.test(target)) continue;
+    const ref = await git(worktreePath, ['rev-parse', '--verify', '--quiet', `refs/heads/${target}`], { check: false });
+    if (ref.code === 0) visited.push(target);
+  }
+  return visited;
+}
+
 export interface CommitResult {
   /** Archivos confirmados ahora (vacío si no había nada pendiente). */
   files: string[];
@@ -95,10 +125,15 @@ const ADD_BATCH = 100;
 
 /**
  * Comprueba que todo lo que cambió la tarea (sin confirmar y ya confirmado desde `baseRef`) está dentro de sus
- * `ownedPaths` y confirma lo pendiente en la rama de la tarea. Lanza `OwnedPathsError` si algo queda fuera
- * (entonces no confirma nada). Codex no puede hacer commits en su sandbox y otros agentes lo olvidan.
+ * `ownedPaths` y confirma lo pendiente en la rama de la tarea (`branch`). Lanza `OwnedPathsError` si algo queda fuera
+ * y `TaskBranchError` si el worktree está o estuvo en otra rama (en los dos casos no confirma nada). Codex no puede hacer commits
+ * en su sandbox y otros agentes lo olvidan.
  */
-export async function commitTaskWork(git: GitRunner, worktreePath: string, task: TaskBrief, baseRef: string): Promise<CommitResult> {
+export async function commitTaskWork(git: GitRunner, worktreePath: string, task: TaskBrief, baseRef: string, branch: string): Promise<CommitResult> {
+  const current = (await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+  if (current !== branch) throw new TaskBranchError(task.id, current, branch);
+  const visited = await visitedBranches(git, worktreePath, branch);
+  if (visited.length) throw new TaskBranchError(task.id, visited.join(', '), branch, true);
   const status = await git(worktreePath, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
   const pending = parsePorcelainZ(status.stdout).filter((f) => !isScratch(f));
   const committed = (await git(worktreePath, ['diff', '--name-only', '-z', `${baseRef}...HEAD`])).stdout.split('\0').filter(Boolean);
@@ -205,7 +240,7 @@ export class CommittingWorkspaces implements WorkspaceManager {
     const entry = this.#tasks.get(taskKey(workspace));
     if (!entry) throw new OwnedPathsError(workspace.taskId, ['(tarea desconocida: no se puede comprobar ownedPaths)']);
     if (this.isLocal(workspace)) return { files: [] };
-    const result = await commitTaskWork(this.#git, workspace.path, entry.task, this.#branch(entry.projectId, workspace));
+    const result = await commitTaskWork(this.#git, workspace.path, entry.task, this.#branch(entry.projectId, workspace), workspace.branch);
     if (result.commit) this.#log(`${workspace.taskId}: commit ${result.commit.slice(0, 10)} a nombre del usuario (${result.files.length} archivos)`);
     return result;
   }

@@ -11,7 +11,9 @@ import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
  *   `python -c`…), shells sin un comando literal, PowerShell codificado, llamadas a .NET, alias;
  * - git: `push`, `rebase`, `config`, `remote`, reescrituras, borrar o forzar ramas, `reset --hard`,
  *   `clean -f`, `-c`, `--git-dir`, `--work-tree`, variables `GIT_*`, `-C` fuera del worktree y
- *   subcomandos desconocidos (podrían ser alias);
+ *   subcomandos desconocidos (podrían ser alias). Las ramas y el stash son comunes a todos los worktrees del
+ *   repo (también a la copia del usuario): tampoco `checkout -B`, `switch -C`, `--ignore-other-worktrees`
+ *   ni `stash` salvo `list` y `show`;
  * - en la carpeta del usuario (`userCopy`, la mente en bypass y chat), además, lo que git hace sobre su
  *   trabajo real: traer cambios a su rama (`merge`, `pull`, `cherry-pick`…), moverla (`commit --amend`,
  *   `reset <commit>`), cambiar de rama y descartar cambios (`checkout`, `switch`, `restore`, `stash`);
@@ -557,6 +559,10 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
   if (['reset', 'branch', 'clean', 'tag', 'fetch', 'pull', 'worktree', 'reflog', 'bisect', 'checkout', 'switch'].includes(sub) && rest.some((w) => w.dynamic)) {
     return `argumentos de git ${sub} no verificables`;
   }
+  if (c.userCopy) {
+    const problem = await userCopyGitProblem(sub, rest, c);
+    if (problem) return problem;
+  }
   switch (sub) {
     case 'reset':
       if (texts.some((t) => longOpt(t, '--hard', 4))) return 'git reset --hard descarta trabajo';
@@ -565,7 +571,7 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
       if (shortHas(/f/) || texts.some((t) => longOpt(t, '--force'))) return 'git clean -f borra archivos sin seguimiento';
       break;
     case 'branch':
-      if (shortHas(/[dDmMf]/) || texts.some((t) => longOpt(t, '--delete') || longOpt(t, '--move') || longOpt(t, '--force'))) {
+      if (shortHas(/[dDmMfC]/) || texts.some((t) => longOpt(t, '--delete') || longOpt(t, '--move') || longOpt(t, '--force'))) {
         return 'borrar, renombrar o forzar ramas necesita la aprobación del usuario';
       }
       break;
@@ -597,10 +603,18 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
     case 'notes':
       if (texts[0] && !['list', 'show'].includes(texts[0])) return 'solo se permite consultar notas';
       break;
-  }
-  if (c.userCopy) {
-    const problem = await userCopyGitProblem(sub, rest, c);
-    if (problem) return problem;
+    case 'checkout':
+    case 'switch':
+      // `-B`/`-C` también con el nombre pegado (`-Borq/integracion`).
+      if (texts.some((t) => /^-[A-Za-z]*[BC]/.test(t) || longOpt(t, '--force-create', 8) || longOpt(t, '--ignore-other-worktrees'))) {
+        return `git ${sub} -B/-C fuerza una rama común a todos los worktrees del repo: necesita la aprobación del usuario`;
+      }
+      break;
+    case 'stash':
+      if (!['list', 'show'].includes(texts[0] ?? '')) {
+        return 'el stash es común a todos los worktrees del repo y a la copia del usuario: guarda tus cambios en un parche (git diff > .orq/cambios.patch)';
+      }
+      break;
   }
   // Salidas a archivo (`-o`, `--output`, `--output-directory`).
   for (let j = 0; j < rest.length; j++) {
