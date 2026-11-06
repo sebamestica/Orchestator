@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/app/App.tsx:38-69`, `src/ui/app/App.tsx:118-130`, `src/ui/components/EmptyState.tsx:8`, `src/ui/components/EmptyState.tsx:21`, `src/ui/api/bridge.ts:52-62`, `apps/desktop/src/main.ts:76`, `apps/desktop/src/main.ts:130`, `apps/desktop/src/main.ts:162-166`, `apps/desktop/src/main.ts:231-243`, `src/core/app/cli-commands.ts:89-91`, `src/core/app/cli-commands.ts:112-128`, `docs/plan/F5-INTERFAZ.md:7`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

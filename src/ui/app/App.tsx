@@ -1,5 +1,6 @@
+import { Button } from '@heroui/react';
 import { Plug } from 'lucide-react';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { resolveCore } from '../api/bridge.ts';
 import { setCoreEndpoint } from '../api/client.ts';
 import { startLive } from '../api/live.ts';
@@ -39,22 +40,30 @@ function View({ route }: { route: Route }) {
   }
 }
 
-function useBootstrap() {
+const MISSING_HINT = 'Abre Berland desde el escritorio, o abre el enlace «web:» que muestra el núcleo al iniciar (trae el token de la sesión).';
+
+/** Conecta con el núcleo al montar y cada vez que se llama a `retry()` (que vuelve a «Conectando…»). */
+function useBootstrap(): () => void {
   const setCore = useApp((s) => s.setCore);
   const setLive = useApp((s) => s.setLive);
   const loadAll = useApp((s) => s.loadAll);
   const applyLive = useApp((s) => s.applyLive);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let stop: (() => void) | undefined;
+    let cancelled = false;
     void (async () => {
       try {
         const core = await resolveCore();
+        if (cancelled) return;
         if (!core) {
           setCore('missing');
           return;
         }
         setCoreEndpoint(core);
         await loadAll();
+        // Un intento que ya se reemplazó no abre su propio socket.
+        if (cancelled) return;
         setCore('ready');
         const live = startLive(core);
         const offStatus = live.onStatus(setLive);
@@ -65,11 +74,18 @@ function useBootstrap() {
           live.stop();
         };
       } catch (err) {
-        setCore('error', err instanceof Error ? err.message : String(err));
+        if (!cancelled) setCore('error', err instanceof Error ? err.message : String(err));
       }
     })();
-    return () => stop?.();
-  }, [setCore, setLive, loadAll, applyLive]);
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [setCore, setLive, loadAll, applyLive, attempt]);
+  return useCallback(() => {
+    setCore('starting');
+    setAttempt((n) => n + 1);
+  }, [setCore]);
 }
 
 function useShortcuts() {
@@ -87,7 +103,7 @@ function useShortcuts() {
 }
 
 export function App() {
-  useBootstrap();
+  const retry = useBootstrap();
   useShortcuts();
   useAppearance();
   const route = useRoute();
@@ -115,10 +131,13 @@ export function App() {
                 <EmptyState
                   icon={Plug}
                   title={core === 'missing' ? 'Sin conexión con el núcleo' : 'El núcleo no responde'}
-                  description={
-                    core === 'missing'
-                      ? 'Abre el orquestador desde el escritorio, o usa el enlace «Abrir en el navegador» que trae el token de la sesión.'
-                      : (coreError ?? 'Revisa que el núcleo esté corriendo.')
+                  description={core === 'missing' ? MISSING_HINT : (coreError ?? 'Revisa que el núcleo esté corriendo.')}
+                  action={
+                    core === 'error' ? (
+                      <Button variant="secondary" size="sm" onPress={retry}>
+                        Reintentar
+                      </Button>
+                    ) : undefined
                   }
                 />
               </div>
