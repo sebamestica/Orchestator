@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/home/HomeView.tsx:8-13`, `src/ui/features/home/HomeView.tsx:19`, `src/ui/features/home/HomeView.tsx:24`, `src/ui/features/home/HomeView.tsx:39`, `src/core/store/store.ts:65-72`, `src/core/store/store.ts:351-354`, `src/core/store/schema.ts:13-18`, `src/core/server/schemas.ts:129`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre
