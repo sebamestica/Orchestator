@@ -18,8 +18,10 @@ export const PREFIXED_SECRET_PATTERNS: readonly RegExp[] = [
 
 const PATTERNS: readonly RegExp[] = [
   ...PREFIXED_SECRET_PATTERNS,
+  // Tras la palabra clave exige `:`/`=` (con comillas y espacios opcionales) o un espacio: «authorization-service»,
+  // «ApiKeyManagementService» o «src/auth/authorization/x.ts» no son claves. Sin límite delante, para no perder «openaiApiKey».
   // Blancos acotados: con `\s*` dentro del lookbehind, un tramo largo de espacios costaba O(n³) (2000 espacios, 6 s).
-  /(?<=(?:api[_-]?key|authorization|x-api-key|bearer)["']?[ \t]{0,8}[:=]?[ \t]{0,8}["']?(?:Bearer[ \t]{1,8})?)[A-Za-z0-9._~+/=-]{16,}/gi,
+  /(?<=(?:api[_-]?key|authorization|x-api-key|bearer)(?:["']?[ \t]{0,8}[:=][ \t]{0,8}["']?|["']?[ \t]{1,8})(?:Bearer[ \t]{1,8})?)[A-Za-z0-9._~+/=-]{16,}/gi,
   // Valor de `cookie`/`set-cookie`. Exige `nombre=` para no tocar frases ni el `<redacted>` de chrome-devtools-mcp.
   // Blancos y nombre acotados: sin tope, `'cookie:'.repeat(n)` o un tramo largo de blancos serían O(n²) o peor.
   // Como encabezado (`- cookie:a=b`, `Set-Cookie: a=b`), hasta el fin de línea: un valor puede llevar comillas.

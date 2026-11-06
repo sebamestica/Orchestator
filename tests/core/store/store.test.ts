@@ -461,6 +461,16 @@ describe('SqliteStore: proyectos, planes y tareas', () => {
     expect(s.listTasks().map((t) => t.task.id)).toEqual(['t-b', 't-e']);
   });
 
+  it('putTask no tacha rutas ni texto pegados a «authorization» o «ApiKey»', () => {
+    const s = newStore();
+    const task = brief('t-auth', 'proj-a', {
+      ownedPaths: ['src/auth/authorization/token-validator.ts'],
+      objective: 'Renombrar ApiKeyManagementService en bearer-token-validation-lib',
+    });
+    s.putTask(task);
+    expect(s.getTask('t-auth')?.task).toEqual(task);
+  });
+
   it('putTask, filtros de listTasks y setTaskState', () => {
     let clock = Date.parse(T0);
     const s = newStore({ now: () => new Date((clock += 1000)) });

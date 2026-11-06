@@ -264,6 +264,30 @@ describe('POST /projects/from-folder', () => {
     expect(await hasCommits(dir)).toBe(true);
   });
 
+  it('carpetas que empiezan por «authorization»: se listan, se abren y se registran con su ruta real', async () => {
+    const root = await tempDir();
+    const dir = join(root, 'authorization-service-backend');
+    const app = join(dir, 'app');
+    await mkdir(app, { recursive: true });
+    gitInitWithCommit(dir);
+    await writeFiles(dir, { 'package.json': JSON.stringify({ scripts: { check: 'vitest run' } }) });
+    const t = makeF5App();
+
+    const parent = await t.req('GET', `/fs/list?path=${encodeURIComponent(root)}`);
+    expect(parent.status).toBe(200);
+    expect(parent.text).not.toContain('[REDACTADO]');
+    const entry = fsListResponse.parse(parent.json).entries.find((e) => e.name === 'authorization-service-backend');
+    expect(entry?.path).toBe(join(normalizeFolderPath(root), 'authorization-service-backend'));
+    expect((await t.req('GET', `/fs/list?path=${encodeURIComponent(entry?.path ?? '')}`)).status).toBe(200);
+
+    for (const [path, id] of [[dir, 'authorization-service-backend'], [app, 'app']] as const) {
+      const res = await t.req('POST', '/projects/from-folder', { body: { path } });
+      expect(res.status, res.text).toBe(201);
+      expect(res.text).not.toContain('[REDACTADO]');
+      expect(t.store.getProject(id)?.repoPath).toBe(normalizeFolderPath(path));
+    }
+  });
+
   it('valida el cuerpo con Zod e informa carpetas inexistentes con 404', async () => {
     const t = makeF5App();
     expect((await t.req('POST', '/projects/from-folder', { body: { path: 'C:\\x', id: 'No Válido' } })).status).toBe(400);

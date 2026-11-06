@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** media
 - **Archivos:** `src/shared/redact.ts:13`, `src/core/server/routing.ts:102`, `src/core/store/store.ts:236`, `src/core/store/store.ts:335`, `src/core/store/store.ts:338`, `src/core/store/store.ts:417`, `src/core/server/ws.ts:46`, `src/core/server/ws.ts:53`, `src/core/app/f5-servidor.ts:229`, `src/ui/features/projects/AddProjectDialog.tsx:29`, `src/ui/features/projects/AddProjectDialog.tsx:33`, `src/ui/features/projects/AddProjectDialog.tsx:64`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

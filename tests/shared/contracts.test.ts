@@ -51,3 +51,37 @@ describe('redactSecrets: límites de palabra (hallazgo de c2)', () => {
     expect(redactSecrets(`OPENAI=sk-proj-${'b'.repeat(30)}`)).toBe(`OPENAI=${REDACTED}`);
   });
 });
+
+describe('redactSecrets: patrón genérico tras «authorization», «bearer» o «apikey»', () => {
+  it('no tacha palabras ni rutas pegadas a la palabra clave, sin separador', () => {
+    for (const text of [
+      'C:\\dev\\authorization-service-backend',
+      'C:\\dev\\authorization-service-backend\\app',
+      'ApiKeyManagementService',
+      'bearer-token-validation-lib',
+      'src/auth/authorization/token-validator.ts',
+    ]) {
+      expect(redactSecrets(text)).toBe(text);
+    }
+  });
+  it('sigue tachando el valor tras dos puntos, igual, comillas o espacio', () => {
+    const v = 'Ab1-cD2.eF3_gH4~iJ5+kL6/';
+    for (const text of [
+      `Authorization: Bearer ${v}`,
+      `Authorization:Bearer ${v}`,
+      `api_key = "${v}"`,
+      `{"apiKey":"${v}"}`,
+      `{"openaiApiKey":"${v}"}`,
+      `anthropicApiKey: ${v}`,
+      `x-api-key: ${v}`,
+      `Bearer ${v}`,
+      `--api-key ${v}`,
+      `authorization=${v}`,
+      `OPENAI_API_KEY=${v}`,
+    ]) {
+      const out = redactSecrets(text);
+      expect(out, text).not.toContain(v);
+      expect(out, text).toContain(REDACTED);
+    }
+  });
+});
