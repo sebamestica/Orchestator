@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS, type MindCandidate } from '../../../src/shared/api.ts';
+import { DEFAULT_SETTINGS, mindModeSchema, type MindCandidate } from '../../../src/shared/api.ts';
+import { MODE_INFO } from '../../../src/ui/features/chat/format.ts';
 import SettingsView from '../../../src/ui/features/settings/SettingsView.tsx';
 import { useApp } from '../../../src/ui/store/app.ts';
 import { agent, fakeCore, patchSettings, resetStore } from './helpers.ts';
@@ -69,6 +70,30 @@ describe('Mente y subagentes', () => {
     expect(text).toMatch(/comandos/i);
     expect(text).toMatch(/sin preguntar/i);
     expect(text.replace(/^Bypass/, '')).not.toMatch(/^Como Auto/);
+  });
+
+  it('el modo inicial ofrece los cuatro modos y guarda «Chat»', async () => {
+    const calls = fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }), 'PATCH /settings': patchSettings });
+    render(<SettingsView section="mente" />);
+    await screen.findByRole('radiogroup', { name: 'Mente' });
+    const group = screen.getByRole('radiogroup', { name: 'Modo inicial' });
+    const radios = within(group).getAllByRole('radio');
+    expect(radios).toHaveLength(mindModeSchema.options.length);
+    mindModeSchema.options.forEach((m, i) => expect(radios[i]?.textContent).toBe(`${MODE_INFO[m].label}${MODE_INFO[m].description}`));
+    fireEvent.click(within(group).getByRole('radio', { name: /^Chat/ }));
+    await waitFor(() => expect(useApp.getState().settings.defaultMode).toBe('chat'));
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ defaultMode: 'chat' }]);
+  });
+
+  it('con defaultMode «chat» la opción Chat sale marcada', async () => {
+    fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }) });
+    useApp.setState({ settings: { ...DEFAULT_SETTINGS, defaultMode: 'chat' } });
+    render(<SettingsView section="mente" />);
+    await screen.findByRole('radiogroup', { name: 'Mente' });
+    const group = screen.getByRole('radiogroup', { name: 'Modo inicial' });
+    const chat = within(group).getByRole('radio', { name: /^Chat/ });
+    expect(chat.getAttribute('aria-checked')).toBe('true');
+    for (const r of within(group).getAllByRole('radio')) if (r !== chat) expect(r.getAttribute('aria-checked'), r.textContent ?? '').toBe('false');
   });
 
   it('los interruptores de subagentes arman workers (todos activos = [])', async () => {

@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/settings/MindSection.tsx:18-22`, `src/ui/features/settings/MindSection.tsx:159-186`, `src/shared/api.ts:29`, `src/shared/api.ts:32`, `src/shared/api.ts:56`, `src/shared/api.ts:88`, `src/ui/features/chat/format.ts:7-12`, `src/core/chat/service.ts:335`, `src/ui/features/chat/ChatView.tsx:90`, `tests/ui/settings/settings.test.tsx:52-61`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

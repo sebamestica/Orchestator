@@ -2,9 +2,10 @@ import { Chip, ListBox, ListBoxItem, Select, Spinner } from '@heroui/react';
 import { Check, Brain } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { effortSchema, mindCandidateSchema, type Effort, type MindCandidate, type MindMode } from '../../../shared/api.ts';
+import { effortSchema, mindCandidateSchema, mindModeSchema, type Effort, type MindCandidate } from '../../../shared/api.ts';
 import { api } from '../../api/client.ts';
 import { useApp } from '../../store/app.ts';
+import { MODE_INFO } from '../chat/format.ts';
 import { errorText, isMissingRoute, KIND_LABEL, Notice, Segmented, SettingsCard, SettingsRow, ToggleField, useSaveSettings } from './shared.tsx';
 
 const candidatesResponse = z.object({ candidates: z.array(mindCandidateSchema) });
@@ -14,12 +15,6 @@ const EFFORTS = effortSchema.options.map((value) => ({ value, label: EFFORT_LABE
 
 /** Clave del Select para «sin modelo fijo» (usa el del agente). */
 const AGENT_MODEL = '__agente__';
-
-export const MODES: readonly { value: MindMode; label: string; description: string }[] = [
-  { value: 'plan', label: 'Plan', description: 'La mente lee y propone tareas; nada se ejecuta hasta que apruebas.' },
-  { value: 'auto', label: 'Auto', description: 'La mente aprueba y delega sola; integra tras el gate. Pasar a main te lo pregunta.' },
-  { value: 'bypass', label: 'Bypass', description: 'La mente hace el trabajo ella misma, sin preguntar: en un proyecto edita archivos y ejecuta comandos en la carpeta, delega lo largo a la flota y pasa a main si el gate pasa. Además lee fuera de la carpeta.' },
-];
 
 const SUPPORT_LABEL = { full: 'Completa', experimental: 'Experimental', none: 'No disponible' } as const;
 
@@ -158,17 +153,18 @@ export function MindSection() {
 
       <SettingsCard title="Modo inicial de los chats" description="Shift+Tab lo cambia dentro del chat. Push, despliegue, pagos y borrar ramas siguen bloqueados en todos los modos.">
         <div role="radiogroup" aria-label="Modo inicial" className="flex flex-col gap-2 p-3">
-          {MODES.map((m) => {
-            const on = settings.defaultMode === m.value;
+          {mindModeSchema.options.map((mode) => {
+            const on = settings.defaultMode === mode;
+            const m = MODE_INFO[mode];
             return (
               <button
-                key={m.value}
+                key={mode}
                 type="button"
                 role="radio"
                 aria-checked={on}
                 disabled={saving}
                 onClick={() => {
-                  if (!on) void save({ defaultMode: m.value });
+                  if (!on) void save({ defaultMode: mode });
                 }}
                 className={`flex items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-quick focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground ${on ? 'bg-foreground/[0.08]' : 'hover:bg-foreground/[0.045]'}`}
               >

@@ -4,11 +4,32 @@ import type { MindMode } from '../../../shared/api.ts';
 /** Nombre visible de la app (pedido del usuario: «Berland»; los nombres internos no cambian). */
 export const APP_NAME = 'Berland';
 
-export const MODE_INFO: Record<MindMode, { label: string; hint: string; tone: string }> = {
-  plan: { label: 'Plan', hint: 'Propone tareas y espera tu aprobación.', tone: 'text-foreground' },
-  auto: { label: 'Auto', hint: 'Aprueba y delega sola; pasar a main lo apruebas tú.', tone: 'text-success' },
-  bypass: { label: 'Bypass', hint: 'Edita y ejecuta comandos sin preguntar; delega lo largo y pasa a main si el gate pasa.', tone: 'text-danger' },
-  chat: { label: 'Chat', hint: 'Como Claude Code: responde y hace los cambios en la carpeta, sin flota.', tone: 'text-accent' },
+/** Textos de cada modo: `hint` corto para la ficha del chat y `description` larga para Ajustes › Mente. */
+export const MODE_INFO: Record<MindMode, { label: string; hint: string; description: string; tone: string }> = {
+  plan: {
+    label: 'Plan',
+    hint: 'Propone tareas y espera tu aprobación.',
+    description: 'La mente lee y propone tareas; nada se ejecuta hasta que apruebas.',
+    tone: 'text-foreground',
+  },
+  auto: {
+    label: 'Auto',
+    hint: 'Aprueba y delega sola; pasar a main lo apruebas tú.',
+    description: 'La mente aprueba y delega sola; integra tras el gate. Pasar a main te lo pregunta.',
+    tone: 'text-success',
+  },
+  bypass: {
+    label: 'Bypass',
+    hint: 'Edita y ejecuta comandos sin preguntar; delega lo largo y pasa a main si el gate pasa.',
+    description: 'La mente hace el trabajo ella misma, sin preguntar: en un proyecto edita archivos y ejecuta comandos en la carpeta, delega lo largo a la flota y pasa a main si el gate pasa. Además lee fuera de la carpeta.',
+    tone: 'text-danger',
+  },
+  chat: {
+    label: 'Chat',
+    hint: 'Como Claude Code: responde y hace los cambios en la carpeta, sin flota.',
+    description: 'Como Claude Code: la mente responde y hace los cambios en la carpeta ella misma, sin crear tareas ni usar la flota.',
+    tone: 'text-accent',
+  },
 };
 
 export function formatCost(usd: number): string {
