@@ -77,9 +77,10 @@ describe('ChatService: reanudar una sesión del SDK que ya no existe', () => {
     await turn(b, chat.id, 'uno');
     for (let i = 0; i < 200 && b.q.closed === 0; i++) await tick(10);
     await b.service.send(chat.id, { text: 'dos' });
-    // La sesión que abrió el reintento se cierra y el turno termina.
-    for (let i = 0; i < 200 && b.q.closed < 2; i++) await tick(10);
-    expect(b.q.closed).toBe(2);
+    // La sesión que falló al reanudar se cierra al terminar su lectura (uso-real-05); la que abrió el reintento,
+    // al cerrarse el chat, y el turno termina.
+    for (let i = 0; i < 200 && b.q.closed < 3; i++) await tick(10);
+    expect(b.q.closed).toBe(3);
     expect(b.service.get(chat.id).state).toBe('closed');
 
     // El chat no quedó ocupado: el mensaje siguiente lo reabre y responde.
