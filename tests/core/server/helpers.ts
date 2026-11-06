@@ -128,6 +128,8 @@ export interface TestAppOptions {
   withServices?: boolean;
   allowedOrigins?: string[];
   maxBodyBytes?: number;
+  /** Ganchos de orquestación propios (por defecto, unos que solo anotan las llamadas en `hookCalls`). */
+  tasks?: TaskHooks;
 }
 
 /** App en proceso (`app.request`) con almacén en memoria y servicios falsos. */
@@ -149,7 +151,7 @@ export function makeTestApp(opts: TestAppOptions = {}) {
   const planner = fakePlanner();
   const memory = fakeMemory();
   const hookCalls: { approved: string[]; cancelled: string[] } = { approved: [], cancelled: [] };
-  const tasks: TaskHooks = {
+  const tasks: TaskHooks = opts.tasks ?? {
     onApproved: (t) => {
       hookCalls.approved.push(t.task.id);
     },

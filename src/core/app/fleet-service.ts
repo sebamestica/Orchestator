@@ -320,7 +320,8 @@ export class FleetService {
       onApproved: async (record) => {
         const task = record.agentId ? { ...record.task, suggestedAgent: record.agentId } : record.task;
         const result = await (await this.port()).delegate(task);
-        if (!result.accepted) throw new Error(result.reason);
+        // Un rechazo de la flota (dependencia sin aprobar, ya en la cola, flota deteniéndose) es un conflicto: 409.
+        if (!result.accepted) throw Object.assign(new Error(result.reason), { code: 'conflict' });
       },
       onCancel: async (record, reason) => {
         if (!this.#runtime) return true;

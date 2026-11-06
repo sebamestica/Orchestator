@@ -4,6 +4,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { routePath } from 'hono/route';
 import { redactSecrets, type MemoryStore, type TaskBrief, type TaskState } from '../../shared/index.ts';
+import { topologicalOrder } from '../orchestrator/graph.ts';
 import type { AgentRegistry, QuotaRefreshResult } from '../registry/index.ts';
 import type { QuotaRecord, SqliteStore, TaskRecord, UsageGroup } from '../store/index.ts';
 import { ApiError, errorBody, toApiError } from './errors.ts';
@@ -255,13 +256,34 @@ export function createApp(deps: AppDeps): CoreApp {
     if (!plan) throw new ApiError(404, 'not_found', `No existe el plan ${id}`);
     return { plan, tasks: store.listTasks({ planId: id }) };
   };
+  /**
+   * Aprueba: `ready` y a la orquestación. Si la orquestación no la acepta, vuelve a `pending` con su agente de antes
+   * (sigue aprobable). Responde y difunde lo que dejó la cola dentro del gancho (`ready`, `pending` o `running`).
+   */
   const approve = async (task: TaskRecord, agentId?: string): Promise<TaskRecord> => {
-    if (task.state !== 'pending') throw new ApiError(409, 'conflict', `La tarea ${task.task.id} está en estado ${task.state}`);
+    const id = task.task.id;
+    if (task.state !== 'pending') throw new ApiError(409, 'conflict', `La tarea ${id} está en estado ${task.state}`);
     if (agentId) registry.require(agentId);
-    const saved = store.setTaskState(task.task.id, 'ready', agentId);
-    await callService('orquestación', async () => deps.tasks?.onApproved?.(saved));
-    hub.publishTask(saved);
-    return saved;
+    const saved = store.setTaskState(id, 'ready', agentId);
+    try {
+      await callService('orquestación', async () => deps.tasks?.onApproved?.(saved));
+    } catch (err) {
+      // Solo si sigue `ready`: una cancelación que llegó mientras tanto manda.
+      if (store.getTask(id)?.state === 'ready') hub.publishTask(store.setTaskState(id, 'pending', agentId ? task.agentId : undefined));
+      throw err;
+    }
+    const fresh = requireTask(id);
+    hub.publishTask(fresh);
+    return fresh;
+  };
+  /** Aprueba las pendientes en orden de dependencias (la flota no acepta una tarea antes que sus dependencias). */
+  const approveInOrder = async (tasks: readonly TaskRecord[]): Promise<void> => {
+    const byId = new Map(tasks.map((t) => [t.task.id, t]));
+    const { order, blocked } = topologicalOrder(tasks.map((t) => t.task));
+    for (const id of [...order, ...blocked]) {
+      const t = byId.get(id);
+      if (t?.state === 'pending') await approve(t);
+    }
   };
 
   // ------------------------------------------------------------- sistema
@@ -501,8 +523,7 @@ export function createApp(deps: AppDeps): CoreApp {
       errors: [404],
     },
     async ({ params }) => {
-      const { tasks } = planWithTasks(params.id ?? '');
-      for (const t of tasks) if (t.state === 'pending') await approve(t);
+      await approveInOrder(planWithTasks(params.id ?? '').tasks);
       return planWithTasks(params.id ?? '');
     },
   );
