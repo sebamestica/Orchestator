@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** alta
 - **Archivos:** `src/core/plugins/chrome-gate.ts:146`, `src/core/plugins/chrome-gate.ts:148`, `src/core/plugins/chrome-gate.ts:155`, `src/core/plugins/chrome-gate.ts:164`, `src/core/plugins/chrome-gate.ts:193`, `src/core/plugins/chrome-gate.ts:252`, `src/core/plugins/chrome-gate.ts:254`, `src/core/plugins/chrome.ts:40`, `src/core/chat/service.ts:501`, `src/core/chat/service.ts:885`, `C:\dev\agent-hub\tools\browser\node_modules\chrome-devtools-mcp\build\src\third_party\index.js:36704`, `…\third_party\index.js:36886`, `…\third_party\index.js:36902`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

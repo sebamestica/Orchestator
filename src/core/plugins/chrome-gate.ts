@@ -14,7 +14,8 @@
  *   señal. Un agente que nunca navega no toma el candado.
  * - Si el dueño anterior fue una puerta (o la prueba de conexión) de esta máquina cuyo proceso ya no existe (lo
  *   terminaron a la fuerza), libera su candado y sigue (`isAbandonedChromeHolder`).
- * - `notifications/cancelled` de una llamada que aún espera la descarta (el servidor nunca la vio).
+ * - `notifications/cancelled` de una llamada que aún espera la descarta (el servidor nunca la vio). La de una llamada
+ *   que ya pasó se reenvía y la llamada deja de contar como en curso (el servidor aborta sin responder).
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -146,9 +147,16 @@ export class ChromeGate {
   onClientLine(line: string): void {
     const msg = parseRpc(line);
     if (msg?.method === 'notifications/cancelled' && msg.params?.requestId !== undefined) {
-      const waiting = this.#waiting.get(idKey(msg.params.requestId));
+      const key = idKey(msg.params.requestId);
+      const waiting = this.#waiting.get(key);
       if (waiting) {
         waiting.cancelled = true;
+        return;
+      }
+      // Ya la tiene el servidor: aborta y, según MCP, no responde nunca. Deja de contar como llamada en curso.
+      if (this.#inFlight.delete(key)) {
+        this.#deps.toServer(line);
+        this.#armIdle();
         return;
       }
     }

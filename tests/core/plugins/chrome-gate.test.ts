@@ -193,6 +193,25 @@ describe('puerta MCP del Chrome personal: candado perezoso', () => {
     expect(b.g.holding).toBe(false);
   });
 
+  it('una llamada cancelada que ya llegó al servidor deja de contar y el candado se suelta aunque el servidor no responda', async () => {
+    const root = await tempDir('orq-gate-');
+    const t = await gate(root, { idleMs: 30 });
+    t.call(7);
+    await until(() => t.toServer.length === 1);
+    expect(t.g.holding).toBe(true);
+    t.g.onClientLine(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 7 } }));
+    // El servidor tiene que enterarse para abortar.
+    expect(t.forwarded().at(-1)).toMatchObject({ method: 'notifications/cancelled' });
+    await until(() => !t.g.holding);
+    expect(await exists(join(root, CHROME_LOCK))).toBe(false);
+    // No quedó ningún id huérfano: una llamada nueva vuelve a soltarlo al quedar ociosa.
+    t.call(8);
+    await until(() => t.g.holding && t.toServer.length === 3);
+    t.reply(8);
+    await until(() => !t.g.holding);
+    expect(await exists(join(root, CHROME_LOCK))).toBe(false);
+  });
+
   it('close() suelta el candado', async () => {
     const root = await tempDir('orq-gate-');
     const t = await gate(root);
