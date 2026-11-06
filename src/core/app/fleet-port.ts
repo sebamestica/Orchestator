@@ -1,6 +1,6 @@
 import type { TaskBrief, TaskState } from '../../shared/index.ts';
 import { PLAN_FILES, redactSecrets } from '../../shared/index.ts';
-import type { DelegateResult, FleetPort, FleetTaskStatus } from '../conductor/index.ts';
+import type { DelegateResult, FleetPort, FleetTaskStatus, ProjectTaskStatus } from '../conductor/index.ts';
 import type { Fleet, QueueEntry, TaskQueue } from '../orchestrator/index.ts';
 
 /** Lo que la flota necesita de una tarea guardada (SQLite) para reintentarla o informarla tras un reinicio. */
@@ -23,6 +23,8 @@ export interface FleetRuntimeOptions {
    * tiene (después de reiniciar el núcleo) y `status` informa las tareas terminadas que la cola no conoce.
    */
   saved?: (taskId: string) => SavedTask | undefined;
+  /** Todas las tareas guardadas: con ellas, `list` también informa las que la cola no tiene (tras un reinicio). */
+  savedList?: () => readonly SavedTask[];
 }
 
 export const NO_WORKSPACES_REASON =
@@ -34,20 +36,22 @@ export const RETRY_DETAIL = 'reintento pedido';
 /** Estados en los que la base dice la verdad aunque la cola no tenga la tarea (terminadas o fallidas). */
 const SETTLED: ReadonlySet<TaskState> = new Set(['failed', 'integrated', 'cancelled']);
 
+/**
+ * Estados que el resumen toma de la base cuando la cola no tiene la tarea: las terminadas o fallidas y las que nadie
+ * delegó todavía (p. ej. del Tablero). Una en curso que la cola no tiene no se informa como si estuviera viva.
+ */
+const LISTED_FROM_BASE: ReadonlySet<TaskState> = new Set([...SETTLED, 'pending']);
+
 function toStatus(e: QueueEntry): FleetTaskStatus {
   return { taskId: e.task.id, state: e.state, updatedAt: e.updatedAt, ...(e.agentId ? { agentId: e.agentId } : {}) };
 }
 
-/**
- * Estado de una tarea para la mente: el de la cola (con el motivo del último cambio) o, si la cola no la tiene, el
- * guardado de una tarea terminada o fallida (p. ej. después de reiniciar el núcleo).
- */
-export function fleetTaskStatus(entry: QueueEntry | undefined, saved: SavedTask | undefined, liveDetail?: string): FleetTaskStatus | undefined {
-  if (entry) {
-    const detail = liveDetail ?? (saved?.state === entry.state ? saved.detail : null);
-    return { ...toStatus(entry), ...(detail ? { detail } : {}) };
-  }
-  if (!saved || !SETTLED.has(saved.state)) return undefined;
+function queueStatus(entry: QueueEntry, saved: SavedTask | undefined, liveDetail?: string): FleetTaskStatus {
+  const detail = liveDetail ?? (saved?.state === entry.state ? saved.detail : null);
+  return { ...toStatus(entry), ...(detail ? { detail } : {}) };
+}
+
+function savedStatus(saved: SavedTask): FleetTaskStatus {
   return {
     taskId: saved.task.id,
     state: saved.state,
@@ -55,6 +59,34 @@ export function fleetTaskStatus(entry: QueueEntry | undefined, saved: SavedTask 
     ...(saved.agentId ? { agentId: saved.agentId } : {}),
     ...(saved.detail ? { detail: saved.detail } : {}),
   };
+}
+
+/**
+ * Estado de una tarea para la mente: el de la cola (con el motivo del último cambio) o, si la cola no la tiene, el
+ * guardado de una tarea terminada o fallida (p. ej. después de reiniciar el núcleo).
+ */
+export function fleetTaskStatus(entry: QueueEntry | undefined, saved: SavedTask | undefined, liveDetail?: string): FleetTaskStatus | undefined {
+  if (entry) return queueStatus(entry, saved, liveDetail);
+  return saved && SETTLED.has(saved.state) ? savedStatus(saved) : undefined;
+}
+
+/**
+ * Todas las tareas para el resumen de la mente, cada una con su proyecto: las de la cola (su estado es el más fresco)
+ * y las guardadas que la cola no tiene (`LISTED_FROM_BASE`). La cola nace vacía en cada arranque: sin la base, tras un
+ * reinicio el resumen no vería las fallidas ni las integradas, ni las del Tablero.
+ */
+export function fleetTaskList(
+  entries: readonly QueueEntry[],
+  saved: readonly SavedTask[],
+  liveDetail: (taskId: string) => string | undefined = () => undefined,
+): ProjectTaskStatus[] {
+  const savedById = new Map(saved.map((s) => [s.task.id, s]));
+  const live = entries.map((e) => ({ ...queueStatus(e, savedById.get(e.task.id), liveDetail(e.task.id)), projectId: e.task.projectId }));
+  const inQueue = new Set(entries.map((e) => e.task.id));
+  const stored = saved
+    .filter((s) => !inQueue.has(s.task.id) && LISTED_FROM_BASE.has(s.state))
+    .map((s) => ({ ...savedStatus(s), projectId: s.task.projectId }));
+  return [...live, ...stored];
 }
 
 function oneLine(text: string, max = 600): string {
@@ -91,6 +123,7 @@ export class FleetRuntime implements FleetPort {
   readonly #fleet: Fleet | undefined;
   readonly #log: (line: string) => void;
   readonly #saved: (taskId: string) => SavedTask | undefined;
+  readonly #savedList: () => readonly SavedTask[];
   readonly #abort = new AbortController();
   /** Encargo original de cada tarea reintentada (las secciones «Continuación» no se acumulan). */
   readonly #originals = new Map<string, TaskBrief>();
@@ -103,6 +136,7 @@ export class FleetRuntime implements FleetPort {
     this.#fleet = opts.fleet;
     this.#log = opts.log ?? (() => undefined);
     this.#saved = opts.saved ?? (() => undefined);
+    this.#savedList = opts.savedList ?? (() => []);
     this.queue.on((change) => {
       if (change.detail) this.#details.set(change.taskId, redactSecrets(change.detail));
       else this.#details.delete(change.taskId);
@@ -178,8 +212,9 @@ export class FleetRuntime implements FleetPort {
     return fleetTaskStatus(entry, this.#saved(taskId), entry ? this.#details.get(taskId) : undefined);
   }
 
-  list(): FleetTaskStatus[] {
-    return this.queue.list().map(toStatus);
+  /** Las tareas de la cola y las guardadas que la cola no tiene (p. ej. tras reiniciar el núcleo). */
+  list(): ProjectTaskStatus[] {
+    return fleetTaskList(this.queue.list(), this.#savedList(), (taskId) => this.#details.get(taskId));
   }
 
   /**

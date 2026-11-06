@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/app/f5-chat.ts:42-52`, `src/core/app/fleet-service.ts:126`, `src/core/app/fleet-service.ts:211-214`, `src/core/app/fleet-service.ts:232-250`, `src/core/app/fleet-port.ts:34-35`, `src/core/app/fleet-port.ts:45-58`, `src/core/app/fleet-port.ts:181-183`, `src/core/app/conductor.ts:83-106`, `src/core/app/conductor.ts:174`, `src/core/conductor/tools.ts:156-165`, `src/core/conductor/tools.ts:168-171`, `src/core/conductor/tools.ts:297-330`, `src/core/conductor/tools.ts:499-524`, `src/core/conductor/prompt.ts:34`, `src/core/conductor/prompt.ts:62`, `tests/core/chat/retry-port.test.ts:5-18`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmación 4 («si una herramienta devuelve algo mal, lo repite sin poder comprobarlo»)
 - **Relacionadas:** `uso-real-04` (el núcleo muere sin dejar rastro), `uso-real-05` (chat cortado por reinicio), `flota-08` (el apagado cancela tareas en curso), `servidor-01` (un segundo núcleo corre `recoverOrphans` y marca tareas fallidas)
 

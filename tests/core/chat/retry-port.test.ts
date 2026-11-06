@@ -33,4 +33,22 @@ describe('chat de Berland: la mente puede reintentar tareas fallidas', () => {
     const result = await lazyFleetPort(comp).retry?.('x1');
     expect(result).toEqual({ accepted: false, reason: 'La tarea x1 está en estado integrated: solo se reintenta una tarea fallida' });
   });
+
+  it('list incluye las tareas de la base que la cola no tiene (tras reiniciar el núcleo), con su proyecto y su motivo', async () => {
+    const saved = (id: string, state: string, detail: string | null) => ({
+      task: { id, projectId: 'p' }, state, agentId: null, detail, attempts: 1, updatedAt: '2026-11-05T10:00:00.000Z',
+    });
+    const rows = [saved('api', 'integrated', null), saved('ui', 'failed', 'interrumpida al reiniciar el núcleo')];
+    const { comp } = fakeFleet(async () => undefined);
+    const store = { listTasks: () => rows, getTask: (id: string) => rows.find((r) => r.task.id === id) };
+    const port = lazyFleetPort({ ...comp, store } as unknown as Pick<Composition, 'fleet' | 'store'>);
+    const list = await port.list();
+    expect(list).toHaveLength(2);
+    expect(list).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ taskId: 'api', state: 'integrated', projectId: 'p' }),
+        expect.objectContaining({ taskId: 'ui', state: 'failed', detail: 'interrumpida al reiniciar el núcleo', projectId: 'p' }),
+      ]),
+    );
+  });
 });

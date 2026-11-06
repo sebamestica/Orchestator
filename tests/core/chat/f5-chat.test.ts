@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { compose, type Composition } from '../../../src/core/app/compose.ts';
 import { chatRouteModule, lazyFleetPort, type ChatWiring } from '../../../src/core/app/f5-chat.ts';
 import { ROUTE_MODULE_FACTORIES } from '../../../src/core/app/route-modules.ts';
+import { createConductorTools } from '../../../src/core/conductor/index.ts';
 import type { ChatService } from '../../../src/core/chat/index.ts';
 import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, PluginStateStore } from '../../../src/core/plugins/index.ts';
 import { AgentRegistry } from '../../../src/core/registry/index.ts';
@@ -13,6 +14,7 @@ import { MemoryVault } from '../../../src/core/vault/index.ts';
 import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
+import { brief, fakePorts, jsonOf } from '../conductor/fakes.ts';
 import { chatQuery, echoTurn, settleChat, tick } from './helpers.ts';
 
 const HOST = '127.0.0.1:47998';
@@ -34,8 +36,8 @@ async function teardown(): Promise<void> {
 }
 afterEach(teardown);
 
-async function setup(extra: { real?: boolean } = {}) {
-  const dir = await tempDir();
+/** Composición sobre `dir`: dos llamadas con el mismo `dir` son el mismo núcleo antes y después de reiniciar. */
+function composeAt(dir: string): Composition {
   const net = mockFetch(anthropicRoutes(planJson('demo')));
   const comp = compose({
     env: { ORQ_DATA_DIR: dir },
@@ -51,6 +53,12 @@ async function setup(extra: { real?: boolean } = {}) {
     routeModules: false,
   });
   comps.push(comp);
+  return comp;
+}
+
+async function setup(extra: { real?: boolean } = {}) {
+  const dir = await tempDir();
+  const comp = composeAt(dir);
   const key = fakeKey();
   await comp.registry.addAgentFromKey({ provider: 'anthropic', apiKey: key, baseUrl: USER_BASE_URL, displayName: 'Claude', id: 'claude', budgetUsd: 2 });
   comp.store.putProject({ id: 'demo', name: 'Demo', repoPath: dir });
@@ -192,5 +200,26 @@ describe('f5-chat: cableado con la composición', () => {
     await say(s, chat.id, 'y ahora');
     expect(s.q.calls).toHaveLength(3);
     expect(Object.keys(s.q.calls[2]?.options.mcpServers ?? {})).toContain('chrome-personal');
+  });
+
+  it('tras reiniciar, estado {} trae las tareas de la base: la integrada y la interrumpida con su motivo', async () => {
+    const dir = await tempDir();
+    const before = composeAt(dir);
+    before.store.putProject({ id: 'demo', name: 'Demo', repoPath: dir });
+    before.store.putTask(brief('api'), 'running');
+    before.store.putTask(brief('ui'), 'running');
+    before.store.setTaskState('api', 'integrated');
+    before.close();
+    comps.splice(comps.indexOf(before), 1);
+
+    const after = composeAt(dir);
+    after.fleet.recoverOrphans();
+    const tools = createConductorTools({ ...fakePorts(), fleet: lazyFleetPort(after) }, { defaultProjectId: 'demo' });
+    const body = jsonOf(await tools.call('estado', {}));
+    expect(body).toMatchObject({ proyecto: 'demo', total: 2, porEstado: { failed: 1, integrated: 1 }, siguientePaso: expect.stringMatching(/delegar/) });
+    expect(body.tareas).toEqual([
+      expect.objectContaining({ id: 'api', estado: 'integrated' }),
+      expect.objectContaining({ id: 'ui', estado: 'failed', detalle: expect.stringMatching(/interrumpida al reiniciar el núcleo/) }),
+    ]);
   });
 });

@@ -506,14 +506,23 @@ function summarizeTask(task: TaskBrief) {
   };
 }
 
+/** Largo máximo del motivo de una tarea fallida en el resumen (el completo lo da `estado` con su taskId). */
+const MAX_SUMMARY_DETAIL_CHARS = 200;
+
+interface SummaryRow {
+  id: string;
+  aprobacion: string | null;
+  estado: string | null;
+  agente: string | null;
+  detalle?: string;
+}
+
 function fleetSummary(entries: readonly ProposedTask[], statuses: readonly FleetTaskStatus[]) {
-  const byId = new Map<string, { id: string; aprobacion: string | null; estado: string | null; agente: string | null }>();
+  const byId = new Map<string, SummaryRow>();
   for (const e of entries) byId.set(e.task.id, { id: e.task.id, aprobacion: e.approval, estado: null, agente: null });
   for (const s of statuses) {
-    const row = byId.get(s.taskId) ?? { id: s.taskId, aprobacion: null, estado: null, agente: null };
-    row.estado = s.state;
-    row.agente = s.agentId ?? null;
-    byId.set(s.taskId, row);
+    const failedDetail = s.state === 'failed' && s.detail ? { detalle: truncate(oneLine(s.detail), MAX_SUMMARY_DETAIL_CHARS) } : {};
+    byId.set(s.taskId, { id: s.taskId, aprobacion: byId.get(s.taskId)?.aprobacion ?? null, estado: s.state, agente: s.agentId ?? null, ...failedDetail });
   }
   const rows = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   const count = (key: 'aprobacion' | 'estado') => {
@@ -530,6 +539,9 @@ function fleetSummary(entries: readonly ProposedTask[], statuses: readonly Fleet
     porEstado: count('estado'),
     tareas: rows.slice(0, MAX_LISTED_TASKS),
     ...(rows.length > MAX_LISTED_TASKS ? { omitidas: rows.length - MAX_LISTED_TASKS } : {}),
+    ...(rows.some((r) => r.estado === 'failed')
+      ? { siguientePaso: 'Hay tareas fallidas: el motivo está en detalle. Para reintentar una (sigue en su worktree) usa delegar con su taskId.' }
+      : {}),
   };
 }
 

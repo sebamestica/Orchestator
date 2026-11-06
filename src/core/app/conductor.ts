@@ -14,6 +14,7 @@ import {
   type ProjectTaskStatus,
   type SkillCatalogPort,
   type SkillInfo,
+  statusProject,
 } from '../conductor/index.ts';
 import { planToTasks } from '../orchestrator/index.ts';
 import { QuotaMonitor } from '../quota/monitor.ts';
@@ -90,7 +91,8 @@ export function taskProjectOf(comp: Pick<Composition, 'fleet'> & Partial<Pick<Co
  */
 export function withTaskProjects(port: FleetPort, projectOf: (taskId: string) => string | undefined): FleetPort {
   const tag = (status: FleetTaskStatus): ProjectTaskStatus => {
-    const projectId = projectOf(status.taskId);
+    // Si el puerto ya lo trae (`list` lo lee de la tarea), no hace falta buscarlo otra vez.
+    const projectId = statusProject(status) ?? projectOf(status.taskId);
     return projectId === undefined ? status : { ...status, projectId };
   };
   const retry = port.retry?.bind(port);

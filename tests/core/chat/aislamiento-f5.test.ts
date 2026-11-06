@@ -111,6 +111,7 @@ describe('f5-chat: la mente de un proyecto no ve los de otro', () => {
     expect((await port.list()).map((s) => [s.taskId, 'projectId' in s ? s.projectId : undefined])).toEqual([
       ['cola-demo', 'demo'],
       ['cola-otro', 'otro'],
+      ['vieja-otro', 'otro'],
     ]);
     expect(await port.status('vieja-otro')).toMatchObject({ taskId: 'vieja-otro', state: 'failed', projectId: 'otro' });
   });

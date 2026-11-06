@@ -13,13 +13,13 @@ import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes, type MindPlugins, type MindPort } from '../chat/index.ts';
-import type { ConductorQueryFn, FleetPort, FleetTaskStatus } from '../conductor/index.ts';
-import type { QueueEntry } from '../orchestrator/index.ts';
+import type { ConductorQueryFn, FleetPort } from '../conductor/index.ts';
 import { pluginsSection } from '../plugins/index.ts';
 import type { RouteModule } from '../server/index.ts';
 import type { Composition } from './compose.ts';
 import { mindDenyPaths, plannerPort, projectSkillsPort, taskProjectOf, withTaskProjects } from './conductor.ts';
 import { withoutHostCredentials } from './env.ts';
+import { fleetTaskList } from './fleet-port.ts';
 
 export interface ChatWiring {
   /** Ajustes vigentes (c14: `SettingsStore`); por defecto `DEFAULT_SETTINGS`. */
@@ -36,13 +36,9 @@ export interface ChatWiring {
   onReady?: (service: ChatService, attachments: AttachmentStore) => void;
 }
 
-function toStatus(e: QueueEntry): FleetTaskStatus {
-  return { taskId: e.task.id, state: e.state, updatedAt: e.updatedAt, ...(e.agentId ? { agentId: e.agentId } : {}) };
-}
-
 /**
- * Flota de la composición sin armarla antes de tiempo: `status`/`list` leen la cola; `delegate` arma la flota (carga
- * los adaptadores) la primera vez que se entrega una tarea. Cada estado lleva el proyecto de su tarea
+ * Flota de la composición sin armarla antes de tiempo: `status`/`list` leen la cola y la base; `delegate` arma la flota
+ * (carga los adaptadores) la primera vez que se entrega una tarea. Cada estado lleva el proyecto de su tarea
  * (`withTaskProjects`): la cola es de todos los proyectos y la mente de un chat solo ve las del suyo.
  */
 export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Composition, 'store'>>): FleetPort {
@@ -50,7 +46,8 @@ export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Co
     delegate: async (task) => (await comp.fleet.port()).delegate(task),
     // Desde la base además de la cola: trae el motivo de un fallo y sirve tras reiniciar el núcleo.
     status: (taskId) => comp.fleet.status(taskId),
-    list: () => comp.fleet.queue.list().map(toStatus),
+    // La cola nace vacía en cada arranque: la base trae las tareas que no tiene (fallidas, integradas, del Tablero).
+    list: () => fleetTaskList(comp.fleet.queue.list(), comp.store?.listTasks() ?? []),
     retry: async (taskId) => {
       try {
         const record = await comp.fleet.retry(taskId, 'reintento pedido por la mente');

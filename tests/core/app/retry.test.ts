@@ -149,6 +149,27 @@ describe('FleetRuntime.retry: después de un reinicio (cola nueva, misma base)',
   });
 });
 
+describe('FleetRuntime.list: después de un reinicio (cola nueva, misma base)', () => {
+  it('trae las tareas guardadas que la cola no tiene, con su proyecto; la cola gana y una en curso sin cola no se informa', () => {
+    const saved: SavedTask[] = [
+      { task: brief('api'), state: 'integrated', agentId: 'claude-1', detail: null, attempts: 1, updatedAt: '2026-11-04T18:00:00.000Z' },
+      { task: brief('ui'), state: 'failed', agentId: null, detail: 'interrumpida al reiniciar el núcleo', attempts: 1, updatedAt: '2026-11-04T18:00:00.000Z' },
+      { task: brief('nueva'), state: 'pending', agentId: null, detail: null, attempts: 0, updatedAt: '2026-11-04T18:00:00.000Z' },
+      { task: brief('tablero'), state: 'pending', agentId: null, detail: null, attempts: 0, updatedAt: '2026-11-04T18:00:00.000Z' },
+      { task: brief('viva'), state: 'running', agentId: 'claude-1', detail: null, attempts: 1, updatedAt: '2026-11-04T18:00:00.000Z' },
+    ];
+    const queue = new TaskQueue();
+    queue.add(brief('nueva'));
+    const runtime = new FleetRuntime({ queue, savedList: () => saved });
+    expect(runtime.list().map((s) => [s.taskId, s.state, s.projectId, s.detail])).toEqual([
+      ['nueva', 'ready', 'demo', undefined],
+      ['api', 'integrated', 'demo', undefined],
+      ['ui', 'failed', 'demo', 'interrumpida al reiniciar el núcleo'],
+      ['tablero', 'pending', 'demo', undefined],
+    ]);
+  });
+});
+
 describe('withContinuation', () => {
   it('agrega el motivo (tachado, en una línea) y los archivos para seguir', () => {
     const key = `sk-ant-api03-${'K'.repeat(40)}`;

@@ -262,6 +262,22 @@ describe('estado', () => {
     });
   });
 
+  it('el resumen trae el motivo de las fallidas y cómo reintentarlas', async () => {
+    const { tools, ports } = setup();
+    await tools.call('crear_tareas', { plan: 'plan' });
+    ports.proposals.approve(['api', 'ui']);
+    await tools.call('delegar', { taskId: 'api' });
+    await tools.call('delegar', { taskId: 'ui' });
+    ports.fleet.advance('api', 'integrated');
+    ports.fleet.advance('ui', 'failed', 'interrumpida al reiniciar el núcleo');
+    const body = jsonOf(await tools.call('estado', {}));
+    expect(body).toMatchObject({ porEstado: { failed: 1, integrated: 1 }, siguientePaso: expect.stringMatching(/delegar/) });
+    expect(body.tareas).toEqual([
+      { id: 'api', aprobacion: 'delegated', estado: 'integrated', agente: 'claude-worker' },
+      { id: 'ui', aprobacion: 'delegated', estado: 'failed', agente: 'codex', detalle: 'interrumpida al reiniciar el núcleo' },
+    ]);
+  });
+
   it('acota la lista de la flota', async () => {
     const { tools, ports } = setup();
     for (let i = 0; i < 45; i++) ports.fleet.statuses.set(`t-${String(i).padStart(2, '0')}`, { taskId: `t-${String(i).padStart(2, '0')}`, projectId: 'demo', state: 'running' });

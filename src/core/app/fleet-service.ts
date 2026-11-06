@@ -404,6 +404,6 @@ export class FleetService {
       ...(this.#tuning.verify ? { verify: this.#tuning.verify } : {}),
     });
     this.#built = { fleet };
-    return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log, saved: (id) => this.#savedTask(id) }) };
+    return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log, saved: (id) => this.#savedTask(id), savedList: () => this.#deps.store.listTasks() }) };
   }
 }
