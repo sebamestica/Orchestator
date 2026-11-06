@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes (proceso hijo común: `runJsonl`)
 - **Severidad:** media
 - **Archivos:** `src/core/process/run-jsonl.ts:39`, `src/core/process/run-jsonl.ts:40`, `src/core/process/run-jsonl.ts:49`, `src/core/process/run-jsonl.ts:50`, `src/core/process/run-jsonl.ts:68`, `src/core/process/run-jsonl.ts:70`, `src/core/process/run-jsonl.ts:80`, `src/core/process/run-jsonl.ts:88`, `src/core/adapters/codex-cli/index.ts:160`, `src/core/adapters/codex-cli/index.ts:190`, `src/core/adapters/codex-cli/index.ts:226`, `src/core/adapters/codex-cli/index.ts:237`, `src/core/adapters/agy-cli/index.ts:221`, `src/core/adapters/agy-cli/index.ts:300`, `src/core/orchestrator/supervisor.ts:305`, `src/core/orchestrator/supervisor.ts:336`, `src/core/orchestrator/supervisor.ts:340`, `src/core/orchestrator/supervisor.ts:380`, `src/core/orchestrator/supervisor.ts:253`, `src/core/workspace/commands.ts:190`, `src/core/workspace/integrate.ts:119`, `src/core/quota/agy.ts:118`, `src/core/registry/detectors.ts:65`, `src/core/skills/tar.ts:19`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

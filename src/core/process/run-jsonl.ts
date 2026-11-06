@@ -20,10 +20,13 @@ export type JsonlLine =
   | { kind: 'stderr'; line: string }
   | { kind: 'exit'; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean; aborted: boolean };
 
+/** Margen entre 'exit' y 'close' para leer lo que quedó en los pipes antes de cerrarlos a la fuerza. */
+const STDIO_DRAIN_MS = 2000;
+
 /**
  * Lanza un CLI y entrega su salida línea a línea: JSON parseado cuando la línea lo es, texto si no.
- * Siempre termina con un elemento `exit`. Sin `shell: true`: los argumentos se pasan tal cual
- * (en Windows, lanzar `.cmd` requiere resolver antes el `.js`/`.exe` real).
+ * Siempre termina con un elemento `exit`, aunque un descendiente retenga stdout/stderr. Sin `shell: true`: los
+ * argumentos se pasan tal cual (en Windows, lanzar `.cmd` requiere resolver antes el `.js`/`.exe` real).
  */
 export async function* runJsonl(opts: JsonlProcessOptions): AsyncGenerator<JsonlLine> {
   const child = spawn(opts.command, opts.args, {
@@ -33,23 +36,6 @@ export async function* runJsonl(opts: JsonlProcessOptions): AsyncGenerator<Jsonl
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-
-  let timedOut = false;
-  let aborted = false;
-  const kill = () => {
-    if (child.exitCode !== null) return;
-    if (process.platform === 'win32' && child.pid) {
-      // Mata el árbol completo (los CLI lanzan subprocesos).
-      // Ruta absoluta: con el cwd en un worktree, `taskkill` a secas podría ser un ejecutable del agente.
-      spawn(systemExe('taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-    } else {
-      child.kill('SIGTERM');
-    }
-  };
-  const timer = opts.timeoutMs ? setTimeout(() => { timedOut = true; kill(); }, opts.timeoutMs) : undefined;
-  const onAbort = () => { aborted = true; kill(); };
-  opts.signal?.addEventListener('abort', onAbort, { once: true });
-  if (opts.signal?.aborted) onAbort();
 
   const queue: JsonlLine[] = [];
   let wake: (() => void) | undefined;
@@ -65,14 +51,51 @@ export async function* runJsonl(opts: JsonlProcessOptions): AsyncGenerator<Jsonl
   });
   createInterface({ input: child.stderr }).on('line', (line) => { if (line.trim()) push({ kind: 'stderr', line }); });
 
-  let exited = false;
-  child.on('error', (err) => { push({ kind: 'stderr', line: `spawn error: ${err.message}` }); });
-  child.on('close', (code, signal) => {
-    exited = true;
-    if (timer) clearTimeout(timer);
+  let timedOut = false;
+  let aborted = false;
+  let finished = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  const finish = (code: number | null, signal: NodeJS.Signals | null) => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    clearTimeout(drainTimer);
     opts.signal?.removeEventListener('abort', onAbort);
     push({ kind: 'exit', code, signal, timedOut, aborted });
+  };
+  // El hijo ya salió, pero un descendiente que heredó stdout/stderr mantiene el pipe abierto y 'close' no llegaría nunca.
+  const releaseStdio = () => {
+    if (finished) return;
+    child.stdout.destroy();
+    child.stderr.destroy();
+    push({ kind: 'stderr', line: 'runJsonl: stdio retenido por un proceso descendiente; se cerró sin esperar su fin' });
+    finish(child.exitCode, child.signalCode);
+  };
+  const kill = () => {
+    if (child.exitCode !== null || child.signalCode !== null) { releaseStdio(); return; }
+    if (process.platform === 'win32' && child.pid) {
+      // Mata el árbol completo (los CLI lanzan subprocesos).
+      // Ruta absoluta: con el cwd en un worktree, `taskkill` a secas podría ser un ejecutable del agente.
+      spawn(systemExe('taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      child.kill('SIGTERM');
+    }
+  };
+  const onAbort = () => { aborted = true; kill(); };
+
+  child.on('error', (err) => { push({ kind: 'stderr', line: `spawn error: ${err.message}` }); });
+  child.on('exit', () => {
+    // El proceso terminó a tiempo: desde aquí solo queda drenar su salida.
+    clearTimeout(timer);
+    drainTimer = setTimeout(releaseStdio, STDIO_DRAIN_MS);
+    drainTimer.unref();
   });
+  child.on('close', finish);
+
+  if (opts.timeoutMs) timer = setTimeout(() => { timedOut = true; kill(); }, opts.timeoutMs);
+  opts.signal?.addEventListener('abort', onAbort, { once: true });
+  if (opts.signal?.aborted) onAbort();
 
   if (opts.stdin !== undefined) child.stdin.end(opts.stdin);
   else child.stdin.end();
@@ -84,7 +107,7 @@ export async function* runJsonl(opts: JsonlProcessOptions): AsyncGenerator<Jsonl
       if (item.kind === 'exit') return;
       continue;
     }
-    if (exited && queue.length === 0) return;
+    if (finished && queue.length === 0) return;
     await new Promise<void>((resolve) => { wake = resolve; });
     wake = undefined;
   }
