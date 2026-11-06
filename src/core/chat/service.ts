@@ -43,6 +43,7 @@ import {
   approveAndDeliver,
   effortNote,
   imageTooLarge,
+  modeActs,
   sdkSessionIdOf,
   usageDeltas,
 } from '../conductor/index.ts';
@@ -67,6 +68,7 @@ import { ChatProposals, toProposal } from './proposals.ts';
 import { conversationDir } from './conversations.ts';
 import { chainCapNotice, dayCapMessage, dayLeftUsd, exhausted, freshSpend, MIND_MAX_TURNS, sessionCapUsd, turnCapNotice, type MindSpend } from './limits.ts';
 import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
+import { TurnChanges, turnSession } from './turn-memory.ts';
 
 /** Sesión ociosa: se cierra y se reanuda con el próximo mensaje. */
 export const CHAT_IDLE_MS = 15 * 60 * 1000;
@@ -162,6 +164,8 @@ interface Turn {
   autonomous: boolean;
   /** Aviso que se agrega a la respuesta (p. ej. el turno se cortó por un tope de gasto). */
   notice?: string;
+  /** Archivos, comandos y consumo del turno (de la sesión principal y de sus subagentes) para la memoria. */
+  changes: TurnChanges;
   grace?: ReturnType<typeof setTimeout>;
   /** Lo enviado a la mente: se repite una vez en una sesión nueva si la reanudación falló (`#retryLostResume`). */
   input?: { text: string; images: ImageInput[]; effort: Effort | undefined };
@@ -574,7 +578,7 @@ export class ChatService {
       const patch: ChatUpdate = { state: 'running' };
       if (!stored.chat.title) patch.title = titleFrom(input.text, attachments);
       this.#update(chatId, patch);
-      live.turn = { session, texts: [], interrupted: false, autonomous: false, input: { text, images, effort: input.effort } };
+      live.turn = { session, texts: [], interrupted: false, autonomous: false, changes: new TurnChanges(), input: { text, images, effort: input.effort } };
       // Un mensaje del usuario abre otra cuenta: tope por mensaje y turnos autónomos desde cero.
       live.spend = { ...freshSpend(session.streamCostUsd), mark: live.spend.mark };
       this.#emit(chatId, live, { type: 'status', payload: { state: 'running', detail: 'pensando' } });
@@ -1078,6 +1082,7 @@ export class ChatService {
     const main = out.sessionId === stored.chat.sessionId && !out.parentSessionId;
     if (out.type === 'status' && out.parentSessionId === stored.chat.sessionId) this.#trackBackground(chatId, live, out.sessionId, out.payload.state);
     if (main && out.type === 'text' && out.payload.role === 'assistant') live.turn?.texts.push(out.payload.text);
+    live.turn?.changes.note(out);
     try {
       this.#deps.hub.append(out);
     } catch (err) {
@@ -1112,8 +1117,27 @@ export class ChatService {
       });
       this.#deps.hub.publish({ type: 'chat_message', message: reply });
     }
+    this.#recordTurn(stored.chat, turn, ok, final);
     if (stored.chat.state !== 'closed') this.#update(chatId, { state: ok || turn.interrupted ? 'idle' : 'error' });
     this.#scheduleIdle(chatId, live);
+  }
+
+  /** Lo que la mente cambió ella misma en el turno, a la memoria del proyecto. Sin esperar: un fallo solo va al log. */
+  #recordTurn(chat: Chat, turn: Turn, ok: boolean, final: string): void {
+    if (chat.projectId === null || !modeActs(chat.mode, false) || turn.changes.empty) return;
+    const session = turnSession(turn.changes, {
+      projectId: chat.projectId,
+      chatId: chat.id,
+      title: chat.title,
+      ok,
+      reply: turn.session.redact(final),
+      worktrees: Boolean(this.#deps.store.getProject(chat.projectId)?.workspace),
+      at: this.#iso(),
+    });
+    const memory = this.#deps.ports.memory;
+    void Promise.resolve()
+      .then(() => memory.recordSession(session))
+      .catch((err: unknown) => this.#log(`chat ${chat.id}: no se pudo guardar el turno en la memoria: ${oneLine(err)}`));
   }
 
   /** Turno que arranca la mente sin mensaje del usuario: ocupa el chat y su respuesta se guarda como cualquier otra. */
@@ -1129,7 +1153,7 @@ export class ChatService {
       this.#notify(chatId, chainCapNotice(max));
       return;
     }
-    live.turn = { session, texts: [], interrupted: false, autonomous: true };
+    live.turn = { session, texts: [], interrupted: false, autonomous: true, changes: new TurnChanges() };
     live.busy = true;
     if (live.idle) clearTimeout(live.idle);
     live.idle = undefined;

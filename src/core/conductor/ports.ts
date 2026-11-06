@@ -108,8 +108,11 @@ export interface DecisionNote {
   agentId?: string;
 }
 
-/** Memoria en Obsidian: `MemoryStore.buildContext` más las escrituras que usa el orquestador. */
-export interface ConductorMemoryPort extends Pick<MemoryStore, 'buildContext'> {
+/**
+ * Memoria en Obsidian: `MemoryStore.buildContext` más las escrituras que usa el orquestador. `recordSession` anota lo
+ * que la mente cambia ella misma en un turno (modo chat, o bypass con proyecto).
+ */
+export interface ConductorMemoryPort extends Pick<MemoryStore, 'buildContext' | 'recordSession'> {
   /** Nota en `Decisiones/`; devuelve su ruta dentro de la bóveda. */
   recordDecision(input: DecisionNote): Promise<string>;
   /** Reemplaza el resumen vivo del proyecto (`Contexto.md`). */

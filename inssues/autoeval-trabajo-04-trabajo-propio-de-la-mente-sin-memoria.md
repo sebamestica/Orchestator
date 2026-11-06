@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/chat/service.ts:134-139`, `src/core/chat/service.ts:814-836`, `src/core/chat/service.ts:838-862`, `src/core/orchestrator/fleet.ts:353`, `src/core/orchestrator/fleet.ts:698`, `src/core/orchestrator/fleet.ts:706-749`, `src/core/conductor/ports.ts:110-115`, `src/core/conductor/prompt.ts:54`, `src/core/conductor/prompt.ts:56-63`, `src/core/conductor/prompt.ts:144-152`, `src/core/conductor/prompt.ts:154-162`, `src/core/adapters/claude-sdk/translate.ts:122`, `src/core/adapters/claude-sdk/translate.ts:468-475`, `src/core/workspace/manager.ts:123-126`, `src/shared/contracts.ts:47-63`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmación 1 («entre sesiones solo recuerda lo guardado en la memoria del proyecto»)
 - **Relacionadas:** `autoeval-trabajo-01` (las decisiones guardadas tampoco se leen), `datos-03` y `datos-05` (`recordSession` y `buildContext`)
 

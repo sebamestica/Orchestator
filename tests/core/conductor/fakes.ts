@@ -20,7 +20,7 @@ import type {
   ConductorQueryFn,
 } from '../../../src/core/conductor/index.ts';
 import { TaskProposals } from '../../../src/core/conductor/index.ts';
-import type { QuotaSnapshot, TaskBrief } from '../../../src/shared/index.ts';
+import type { QuotaSnapshot, SessionSummary, TaskBrief } from '../../../src/shared/index.ts';
 import { taskBriefSchema } from '../../../src/shared/index.ts';
 
 /** Secretos de prueba (no son claves reales): ninguno debe salir en una respuesta. */
@@ -97,6 +97,9 @@ export class FakeMemory implements ConductorMemoryPort {
   readonly contexts: { projectId: string; task: TaskBrief; budget: number }[] = [];
   readonly decisions: DecisionNote[] = [];
   readonly summaries: { projectId: string; summary: string; at: string }[] = [];
+  readonly sessions: SessionSummary[] = [];
+  /** Si está, `recordSession` lanza este error. */
+  failRecord: Error | undefined;
   context = '';
   async buildContext(projectId: string, task: TaskBrief, budgetChars: number): Promise<string> {
     this.contexts.push({ projectId, task, budget: budgetChars });
@@ -108,6 +111,10 @@ export class FakeMemory implements ConductorMemoryPort {
   }
   async writeProjectSummary(projectId: string, summary: string, at: string): Promise<void> {
     this.summaries.push({ projectId, summary, at });
+  }
+  async recordSession(summary: SessionSummary): Promise<void> {
+    if (this.failRecord) throw this.failRecord;
+    this.sessions.push(summary);
   }
 }
 
