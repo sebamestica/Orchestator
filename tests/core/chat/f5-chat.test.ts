@@ -160,7 +160,7 @@ describe('f5-chat: cableado con la composición', () => {
     const { comp, call } = await setup({ turn: read });
     const { chat } = (await (await call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
     await call('POST', `/chats/${chat.id}/messages`, { text: 'lee' });
-    for (let i = 0; i < 200 && services[0]?.get(chat.id).state === 'running'; i++) await tick();
+    await settleChat(mind(), chat.id);
     const result = comp.store.eventsSince(chat.sessionId).find((e) => e.type === 'tool_result' && e.payload.callId === 'r1');
     expect(result?.type === 'tool_result' && result.payload.summary.length).toBe(5000);
   });

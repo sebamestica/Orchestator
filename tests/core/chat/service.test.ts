@@ -817,13 +817,14 @@ describe('ChatService: plugins para la mente', () => {
   it('pluginLive: la guardia de la sesión viva niega en el acto un plugin que se desconectó', async () => {
     let on = true;
     const fake = { type: 'stdio' as const, command: 'node', args: ['servidor-falso.mjs'] };
-    const b = await bench({ mcpServersFor: () => ({ chrome: fake }), pluginLive: (agentId, server) => agentId === 'claude' && server === 'chrome' && on });
+    // El Chrome personal: en plan solo pasan sus herramientas de lectura (plugin-policy), como list_pages.
+    const b = await bench({ mcpServersFor: () => ({ 'chrome-personal': fake }), pluginLive: (agentId, server) => agentId === 'claude' && server === 'chrome-personal' && on });
     const chat = b.service.create({ projectId: 'demo' });
     await turn(b, chat.id, 'navega');
     const guard = guardOf(optionsOf(b));
-    expect(await guard('mcp__chrome__list_pages', {})).toBe(true);
+    expect(await guard('mcp__chrome-personal__list_pages', {})).toBe(true);
     on = false;
-    expect(await guard('mcp__chrome__list_pages', {})).toBe(false);
+    expect(await guard('mcp__chrome-personal__list_pages', {})).toBe(false);
     expect(await guard('Read', { file_path: join(b.repo, 'a.txt') })).toBe(true);
   });
 });
