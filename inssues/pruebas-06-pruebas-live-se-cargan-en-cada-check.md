@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** baja
 - **Archivos:** `vitest.config.ts:2`, `vitest.config.ts:11`, `package.json:13-15`, `tests/live/f3-acceptance.live.test.ts:8`, `tests/live/f3-acceptance.live.test.ts:19`, `tests/live/f3-acceptance.live.test.ts:26`, `tests/live/e2e-claude.live.test.ts:7-9`, `tests/live/e2e-claude.live.test.ts:21`, `tests/live/conductor.live.test.ts:10-12`, `tests/live/conductor.live.test.ts:18`, `tests/live/chrome-personal.live.test.ts:48`, `AGENTS.md:16`, `tsconfig.json:24-29`, `docs/plan/issues/09-aislamiento-contexto.md:149`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 `AGENTS.md:16` fija la regla: las pruebas que llaman a CLIs o APIs reales van en `tests/live/` y «se saltan salvo

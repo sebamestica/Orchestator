@@ -13,7 +13,7 @@ Núcleo (backend) en TypeScript de un orquestador local que reparte tareas entre
 - **Dependencias:** solo las de `package.json`, fijadas sin `^`. Si necesitas otra, pídela en el informe; no ejecutes `npm install`.
 - **TypeScript estricto**, imports relativos con extensión `.ts`, sin `any`, sin `enum` ni `namespace` (Node ejecuta TS por borrado de tipos). Validar con Zod todo dato externo (salida de CLIs, HTTP, archivos).
 - **Seguridad:** ninguna clave en código, pruebas, registros, SQLite, Obsidian ni eventos; pasar texto por `redactSecrets` antes de persistirlo. El servidor local escucha solo en `127.0.0.1` y exige token. Nada de `shell: true` con texto del usuario.
-- **Pruebas:** cada módulo con pruebas Vitest en `tests/` que usen las salidas reales de `fixtures/`. Las pruebas que llaman a CLIs o APIs reales van en `tests/live/` y se saltan salvo `ORQ_LIVE=1` (gastan cupo).
+- **Pruebas:** cada módulo con pruebas Vitest en `tests/` que usen las salidas reales de `fixtures/`. Las pruebas que llaman a CLIs o APIs reales van en `tests/live/` (gastan cupo). Sin `ORQ_LIVE=1` ni se cargan: `vitest.config.ts` las excluye. Con `ORQ_LIVE=1` corren, y cada una sigue saltándose si le falta su clave o plataforma (`describe.skipIf`).
 - **Comandos:** desde WSL, siempre con el Node de Windows: `scripts/win.sh npm run -s check` (typecheck + lint + test). En PowerShell/cmd: `npm run check`.
 - **Git:** trabaja en tu rama del worktree; commits pequeños en español (`feat(core): …`, `test(core): …`). Nunca push, `reset --hard`, `rebase` ni borrar ramas.
 - **Documentación** en español. Decisiones en `docs/DECISIONES.md` (solo el orquestador) y problemas de coordinación en tu informe (el orquestador los pasa a `docs/BITACORA-FLOTA.md`).
