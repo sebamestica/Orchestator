@@ -151,7 +151,19 @@ interface Turn {
   texts: string[];
   interrupted: boolean;
   grace?: ReturnType<typeof setTimeout>;
+  /** Lo enviado a la mente: se repite una vez en una sesión nueva si la reanudación falló (`#retryLostResume`). */
+  input?: { text: string; images: ImageInput[]; effort: Effort | undefined };
+  retried?: boolean;
 }
+
+/** Sesión abierta con `resume`: el id pedido y si el CLI avisó por stderr que ya no tiene su transcripción. */
+interface Resume {
+  id: string;
+  lost: boolean;
+}
+
+/** El CLI no encontró la transcripción de la sesión que se le pidió reanudar (la limpió Claude Code o se borró). */
+const RESUME_LOST = /No conversation found with session ID/i;
 
 interface Live {
   proposals: ChatProposals;
@@ -529,7 +541,7 @@ export class ChatService {
       const patch: ChatUpdate = { state: 'running' };
       if (!stored.chat.title) patch.title = titleFrom(input.text, attachments);
       this.#update(chatId, patch);
-      live.turn = { session, texts: [], interrupted: false };
+      live.turn = { session, texts: [], interrupted: false, input: { text, images, effort: input.effort } };
       this.#emit(chatId, live, { type: 'status', payload: { state: 'running', detail: 'pensando' } });
       try {
         session.send(text, { images });
@@ -769,6 +781,7 @@ export class ChatService {
     }
     if (chat.mindAgentId !== mind.id) this.#update(chatId, { mindAgentId: mind.id });
     const port = this.#deps.mind;
+    const resume: Resume | undefined = sdkSessionId ? { id: sdkSessionId, lost: false } : undefined;
 
     const session = new ConductorSession({
       ports: { ...this.#deps.ports, planner: this.#planner, fleet: this.#fleet, proposals: live.proposals },
@@ -799,7 +812,10 @@ export class ChatService {
       ...(plugins.rules ? { pluginRules: plugins.rules } : {}),
       ...(port.pluginLive ? { pluginLive: (server: string) => port.pluginLive?.(mind.id, server) ?? true } : {}),
       ...(left !== undefined ? { maxBudgetUsd: left } : {}),
-      onStderr: (line) => this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`),
+      onStderr: (line) => {
+        if (resume && RESUME_LOST.test(line)) resume.lost = true;
+        this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`);
+      },
     });
     live.session = session;
     live.key = key;
@@ -808,7 +824,7 @@ export class ChatService {
     // Un proceso nuevo cuenta el uso desde cero. Uno reanudado trae los acumulados que restaura Claude Code (a veces de
     // una foto vieja): se miden contra el uso propio del proceso para no guardarlos otra vez.
     live.delta = usageDeltas(sdkSessionId ? { own: () => session.ownUsage() } : {});
-    void this.#read(chatId, live, session);
+    void this.#read(chatId, live, session, resume);
     return session;
   }
 
@@ -865,11 +881,14 @@ export class ChatService {
     return ids.length;
   }
 
-  async #read(chatId: string, live: Live, session: ConductorSession): Promise<void> {
+  async #read(chatId: string, live: Live, session: ConductorSession, resume?: Resume): Promise<void> {
     let known = this.#repo.get(chatId)?.sdkSessionId ?? undefined;
     let warned = false;
+    let seen = false;
+    let retry: Turn | undefined;
     try {
       for await (const update of session.stream()) {
+        seen = true;
         const sdkId = sdkSessionIdOf(update.message);
         if (sdkId && sdkId !== known) {
           known = sdkId;
@@ -886,7 +905,9 @@ export class ChatService {
         if (update.message.type === 'result' && live.turn?.session === session) this.#finishTurn(chatId, live, live.turn, update.message);
       }
     } catch (err) {
-      if (this.#repo.get(chatId) && live.turn?.session === session && !live.turn.interrupted) {
+      const lost = resume !== undefined && !seen && (resume.lost || RESUME_LOST.test(err instanceof Error ? err.message : String(err)));
+      if (lost) retry = this.#forgetLostResume(chatId, live, session, resume.id);
+      else if (this.#repo.get(chatId) && live.turn?.session === session && !live.turn.interrupted) {
         this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `La conversación con la mente se cortó: ${oneLine(err)}` } });
         warned = true;
       }
@@ -902,7 +923,51 @@ export class ChatService {
         }
       }
       const turn = live.turn;
-      if (turn?.session === session) this.#finishTurn(chatId, live, turn, undefined);
+      if (turn && turn === retry) void this.#retryLostResume(chatId, live, turn);
+      else if (turn?.session === session) this.#finishTurn(chatId, live, turn, undefined);
+    }
+  }
+
+  /**
+   * Reanudar falló porque el SDK ya no tiene la transcripción de `id`: el chat la olvida (si no, cada mensaje repetiría
+   * el fallo) y avisa. Devuelve el turno pendiente si se puede repetir una vez sin ese contexto.
+   */
+  #forgetLostResume(chatId: string, live: Live, session: ConductorSession, id: string): Turn | undefined {
+    const stored = this.#repo.get(chatId);
+    if (!stored) return undefined;
+    if (stored.sdkSessionId === id) this.#repo.update(chatId, { sdkSessionId: null });
+    this.#log(`chat ${chatId}: el SDK ya no tiene la sesión ${id}; sigue sin ese contexto`);
+    const turn = live.turn?.session === session && !live.turn.interrupted ? live.turn : undefined;
+    if (!turn) return undefined;
+    const notice = 'No se pudo reanudar la conversación anterior (el SDK ya no tiene su transcripción)';
+    if (turn.input && !turn.retried) {
+      this.#emit(chatId, live, { type: 'status', payload: { state: 'running', detail: `${notice}; sigo sin ese contexto` } });
+      return turn;
+    }
+    this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `${notice}; el próximo mensaje empieza sin ese contexto` } });
+    return undefined;
+  }
+
+  /** Repite una vez el turno en una sesión nueva (ya sin `resume`); si no se puede, el turno termina con error. */
+  async #retryLostResume(chatId: string, live: Live, turn: Turn): Promise<void> {
+    turn.retried = true;
+    try {
+      const input = turn.input;
+      if (!input) throw new Error('no hay mensaje que repetir');
+      // Cerrar, borrar o cortar el chat marca el turno como interrumpido. Sin sesión viva, nadie más lo termina.
+      const session = turn.interrupted ? undefined : await this.#ensureSession(chatId, live, input.effort);
+      if (live.turn !== turn) return this.#scheduleIdle(chatId, live);
+      if (!session || turn.interrupted) {
+        this.#dropSession(chatId, live);
+        return this.#finishTurn(chatId, live, turn, undefined);
+      }
+      turn.session = session;
+      session.send(input.text, { images: input.images });
+    } catch (err) {
+      if (live.turn !== turn) return;
+      if (this.#repo.get(chatId)) this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `La conversación con la mente se cortó: ${oneLine(err)}` } });
+      this.#log(`chat ${chatId}: repetir el turno sin reanudar falló: ${oneLine(err)}`);
+      this.#finishTurn(chatId, live, turn, undefined);
     }
   }
 
