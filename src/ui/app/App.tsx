@@ -11,6 +11,7 @@ import { Sidebar } from './Sidebar.tsx';
 import { TitleBar } from './TitleBar.tsx';
 import type { Route } from './routes.ts';
 import { useAgentsPanel } from './use-agents-panel.ts';
+import { useAppearance } from './use-appearance.ts';
 import { useRoute } from './use-route.ts';
 import { BootScreen } from '../components/BootScreen.tsx';
 
@@ -82,18 +83,6 @@ function useShortcuts() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleSidebar]);
-}
-
-function useAppearance() {
-  const appearance = useApp((s) => s.settings.appearance);
-  useEffect(() => {
-    const root = document.documentElement;
-    const dark = appearance.theme === 'dark' || (appearance.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    root.classList.toggle('dark', dark);
-    root.classList.toggle('light', !dark);
-    root.dataset.theme = dark ? 'dark' : 'light';
-    root.dataset.effects = appearance.reducedEffects ? 'reduced' : 'full';
-  }, [appearance]);
 }
 
 export function App() {

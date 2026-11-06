@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** baja
 - **Archivos:** `src/ui/app/App.tsx:85-95`, `src/ui/app/App.tsx:89`, `src/ui/features/settings/GeneralSection.tsx:38-39`, `src/ui/index.html:2`, `src/ui/index.html:6`, `src/ui/store/app.ts:65`, `src/ui/store/app.ts:95-96`, `src/shared/api.ts:75`, `apps/desktop/src/main.ts:14`, `apps/desktop/src/main.ts:77`, `apps/desktop/src/main.ts:97-99`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
