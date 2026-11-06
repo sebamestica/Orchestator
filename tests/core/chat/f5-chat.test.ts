@@ -13,7 +13,7 @@ import { MemoryVault } from '../../../src/core/vault/index.ts';
 import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
-import { chatQuery, echoTurn, settleChat } from './helpers.ts';
+import { chatQuery, echoTurn, settleChat, tick } from './helpers.ts';
 
 const HOST = '127.0.0.1:47998';
 const HOST_KEY = fakeKey('anfitrion');
@@ -101,7 +101,9 @@ function chromeConnected(comp: Composition): void {
 
 async function say(s: Setup, chatId: string, text: string): Promise<void> {
   expect((await s.call('POST', `/chats/${chatId}/messages`, { text })).status).toBe(201);
-  for (let i = 0; i < 200 && services[0]?.get(chatId).state === 'running'; i++) await tick();
+  const service = services[0];
+  if (!service) throw new Error('no se creó el servicio de chat');
+  await settleChat(service, chatId);
 }
 
 type Guard = (...a: unknown[]) => Promise<unknown>;
