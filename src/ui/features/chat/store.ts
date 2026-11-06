@@ -34,6 +34,19 @@ function upsertChat(list: readonly Chat[], chat: Chat): Chat[] {
   return [...list.filter((c) => c.id !== chat.id), chat].sort(byRecent);
 }
 
+/** La versión más nueva del chat: lo que ya llegó por /ws gana a una foto REST más vieja (con empate, la foto). */
+function fresher(current: Chat | null | undefined, incoming: Chat): Chat {
+  return current?.id === incoming.id && current.updatedAt > incoming.updatedAt ? current : incoming;
+}
+
+/** Foto REST de mensajes más los que llegaron por /ws mientras se pedía (los mensajes solo se agregan). */
+function withLiveMessages(snapshot: readonly ChatMessage[], live: readonly ChatMessage[], chatId: string): ChatMessage[] {
+  const known = new Set(snapshot.map((m) => m.id));
+  let merged = [...snapshot];
+  for (const m of live) if (m.chatId === chatId && !known.has(m.id)) merged = upsertMessage(merged, m);
+  return merged;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
@@ -243,14 +256,19 @@ export const useChat = create<ChatStore>((set, get) => {
       const [c, m] = await Promise.all([api.get<{ chat: Chat }>(base), api.get<{ messages: ChatMessage[] }>(`${base}/messages`)]);
       if (!alive()) return;
       const sameSession = get().chat?.sessionId === c.chat.sessionId;
-      set((s) => ({
-        status: 'ready',
-        error: null,
-        chat: c.chat,
-        chats: s.chats.some((x) => x.id === c.chat.id) ? s.chats.map((x) => (x.id === c.chat.id ? c.chat : x)) : upsertChat(s.chats, c.chat),
-        messages: m.messages,
-        ...(sameSession ? {} : { events: [], lastSeq: -1 }),
-      }));
+      // Lo que /ws aplicó mientras la carga estaba en vuelo puede ser más nuevo que la foto: se une, no se pisa.
+      set((s) => {
+        const chat = fresher(s.chat, c.chat);
+        const listed = s.chats.find((x) => x.id === chat.id);
+        return {
+          status: 'ready',
+          error: null,
+          chat,
+          chats: listed ? s.chats.map((x) => (x === listed ? fresher(listed, chat) : x)) : upsertChat(s.chats, chat),
+          messages: withLiveMessages(m.messages, s.messages, chatId),
+          ...(sameSession ? {} : { events: [], lastSeq: -1 }),
+        };
+      });
     } catch (err) {
       if (!alive()) return;
       if (isUnavailable(err)) set({ status: 'unavailable', error: null });
@@ -465,7 +483,10 @@ export const useChat = create<ChatStore>((set, get) => {
       const chat = get().chat;
       if (!chat) return;
       try {
-        await api.post<unknown>(`/chats/${enc(chat.id)}/interrupt`);
+        const r = await api.post<{ chat?: Chat }>(`/chats/${enc(chat.id)}/interrupt`);
+        // Sin turno que cortar, el núcleo no difunde nada: su respuesta es lo único que destraba la vista.
+        const fresh = r?.chat;
+        if (fresh) set((s) => (s.chat?.id === fresh.id && fresh.updatedAt >= s.chat.updatedAt ? { chat: fresh, chats: upsertChat(s.chats, fresh) } : {}));
       } catch (err) {
         set({ notice: `No se pudo detener: ${errorText(err)}` });
       }
