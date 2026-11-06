@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { api } from '../../api/client.ts';
 import { getLive } from '../../api/live.ts';
 import { useApp } from '../../store/app.ts';
-import { useChat } from '../chat/store.ts';
+import type { Chat } from '../../../shared/api.ts';
+import { upsertChat, useChat } from '../chat/store.ts';
 import { ActivityRowView } from './ActivityRowView.tsx';
-import { applyEvents, initialView, isActive, mindRow, selectChat, sessionResponseSchema, sessionsSchema, workerRow, type SessionView } from './model.ts';
+import { applyEvents, chatsSchema, initialView, isActive, mindRow, selectChat, sessionResponseSchema, sessionsSchema, workerRow, type SessionView } from './model.ts';
 
 export function AgentsPanel() {
   const core = useApp((s) => s.core);
@@ -12,7 +13,8 @@ export function AgentsPanel() {
   const agents = useApp((s) => s.agents);
   const tasks = useApp((s) => s.tasks);
   const quotas = useApp((s) => s.quotas);
-  const chats = useChat((s) => s.chats);
+  // Lista propia de todos los chats: la de `useChat` es de la vista abierta (filtrada por carpeta y vacía al salir).
+  const [chats, setChats] = useState<Chat[]>([]);
   const opened = useChat((s) => s.chat);
   const events = useChat((s) => s.events);
   const chat = selectChat(chats, opened);
@@ -31,11 +33,21 @@ export function AgentsPanel() {
     if (core !== 'ready') return;
     setViews({});
     return getLive()?.subscribe((message) => {
-      if (message.type === 'chat' || message.type === 'chat_deleted') useChat.getState().applyLive(message);
+      if (message.type === 'chat') setChats((current) => upsertChat(current, message.chat));
+      if (message.type === 'chat_deleted') setChats((current) => current.filter((item) => item.id !== message.chatId));
       if (message.type === 'event' || message.type === 'replay') {
         setViews((current) => applyEvents(current, message.type === 'event' ? [message.event] : message.events));
       }
     });
+  }, [core, connection]);
+
+  useEffect(() => {
+    if (core !== 'ready' || connection !== 'open') return;
+    let stopped = false;
+    void api.get<unknown>('/chats')
+      .then((data) => { if (!stopped) setChats(chatsSchema.parse(data).chats); })
+      .catch(() => { /* Sin la lista, la fila sigue al chat abierto. */ });
+    return () => { stopped = true; };
   }, [core, connection]);
 
   useEffect(() => {

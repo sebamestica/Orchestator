@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { agentEventSchema, sessionStateSchema } from '../../../shared/events.ts';
-import type { Chat } from '../../../shared/api.ts';
+import { chatSchema, type Chat } from '../../../shared/api.ts';
 import type { AgentEvent, SessionRecord, TaskRecord } from '../../api/types.ts';
 
 export const sessionSchema = z.object({
@@ -11,6 +11,8 @@ export const sessionSchema = z.object({
 });
 export const sessionsSchema = z.object({ sessions: z.array(sessionSchema) });
 export const sessionResponseSchema = z.object({ session: sessionSchema });
+/** `GET /chats` sin `projectId`: todos los chats, con su estado en vivo. */
+export const chatsSchema = z.object({ chats: z.array(chatSchema) });
 export interface SessionView {
   session: SessionRecord & { role?: 'author' | 'reviewer' };
   latest?: AgentEvent;
@@ -62,11 +64,16 @@ export interface ActivityRow {
   thinking?: boolean;
 }
 
+/**
+ * Chat de la fila «Mente»: el que piensa o trabaja en segundo plano, primero el abierto; si no hay ninguno, el abierto.
+ * `chats` es la lista global del panel; su copia del chat abierto manda porque recibe todos los cambios en vivo.
+ */
 export function selectChat(chats: readonly Chat[], opened: Chat | null): Chat | undefined {
-  const all = opened ? [opened, ...chats.filter((chat) => chat.id !== opened.id)] : [...chats];
+  const current = opened ? chats.find((chat) => chat.id === opened.id) ?? opened : undefined;
+  const all = current ? [current, ...chats.filter((chat) => chat.id !== current.id)] : [...chats];
   return all.find((chat) => chat.state === 'running')
     ?? all.find((chat) => (chat.backgroundTasks ?? 0) > 0 && chat.state !== 'closed')
-    ?? opened ?? all[0];
+    ?? current;
 }
 
 export function mindRow(chat: Chat | undefined, views: Record<string, SessionView>, events: readonly AgentEvent[]): ActivityRow {

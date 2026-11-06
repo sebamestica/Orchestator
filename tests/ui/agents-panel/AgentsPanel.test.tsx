@@ -19,12 +19,20 @@ const tool = (patch: Partial<AgentEvent> = {}): AgentEvent => ({ sessionId: 'wor
 const task = (patch: Partial<TaskRecord> = {}): TaskRecord => ({ task: { id: 'task-1', projectId: 'project', title: 'Rehacer panel', objective: 'Panel mínimo', ownedPaths: ['src/ui'], dependsOn: [], acceptance: ['Visible'], difficulty: 'low', contextRefs: [], skillRefs: [] }, state: 'running', planId: null, agentId: 'claude', detail: null, attempts: 1, createdAt: ts, updatedAt: ts, lastEventAt: ts, ...patch });
 const chat = (patch: Partial<Chat> = {}): Chat => ({ id: 'chat01', projectId: null, title: 'Chat', cwd: 'C:/dev', extraRoots: [], mode: 'plan', mindAgentId: 'claude', sessionId: 'chat-session', state: 'running', costUsd: 0, createdAt: ts, updatedAt: ts, ...patch });
 let sessions: SessionRecord[];
+let chats: Chat[];
 let fetchMock: ReturnType<typeof vi.fn>;
 function send(message: LiveMessage) {
   act(() => { for (const listener of live.listeners) listener(message); });
 }
+const paths = () => fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname + new URL(String(url)).search);
+/** Espera a que el panel reciba la lista de `/chats`. */
+async function chatsLoaded() {
+  await waitFor(() => expect(paths()).toContain('/chats'));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+}
 beforeEach(() => {
   sessions = [session()];
+  chats = [];
   live.listeners.clear();
   live.replay.mockReset();
   live.subscribe.mockReset().mockImplementation((listener: (message: LiveMessage) => void) => {
@@ -34,17 +42,18 @@ beforeEach(() => {
   setCoreEndpoint({ url: 'http://127.0.0.1:47811', wsUrl: 'ws://127.0.0.1:47811/ws', token: 'test-token' });
   useApp.setState({ core: 'ready', live: 'open', agents: [{ config: { id: 'claude', kind: 'claude-sdk', provider: 'anthropic', displayName: 'Mi Claude', model: 'modelo-prueba', quotaFloor: 0.2, enabled: true }, quotaMethod: null, lastProbe: null, createdAt: ts, updatedAt: ts }], quotas: {}, tasks: {} });
   useChat.getState().reset();
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ sessions }), { status: 200 }));
+  fetchMock = vi.fn(async (url: unknown) => new Response(JSON.stringify(new URL(String(url)).pathname === '/chats' ? { chats } : { sessions }), { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('Panel mínimo', () => {
-  it('mantiene mente y agentes libres sin consultar historial ni usage', () => {
+  it('mantiene mente y agentes libres sin consultar historial ni usage', async () => {
     render(<AgentsPanel />);
     expect(screen.getAllByRole('article').map((row) => row.getAttribute('aria-label'))).toEqual(['Mente', 'Mi Claude']);
     expect(screen.getAllByText('Libre')).toHaveLength(2);
-    expect(fetchMock).not.toHaveBeenCalled();
+    await chatsLoaded();
+    expect(paths()).toEqual(['/chats']);
     expect(screen.queryByText('modelo-prueba')).toBeNull();
     expect(screen.queryByText(/Recientes|Hoy|Entrada/)).toBeNull();
     expect(live.replay).not.toHaveBeenCalled();
@@ -54,8 +63,8 @@ describe('Panel mínimo', () => {
     sessions.push(session({ id: 'finished', state: 'done' }));
     render(<AgentsPanel />);
     await waitFor(() => expect(live.replay).toHaveBeenCalledWith('worker-session', 7, 1));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    const urls = paths().filter((url) => url !== '/chats');
+    expect(urls).toHaveLength(2);
     expect(urls.every((url) => url.includes('/sessions?taskId=') && url.endsWith('&limit=10'))).toBe(true);
     expect(live.replay.mock.calls.some(([id]) => id === 'finished')).toBe(false);
     send({ type: 'event', event: tool({ ts: new Date().toISOString() }) });
@@ -73,6 +82,43 @@ describe('Panel mínimo', () => {
     expect(mente.getByText('Trabajando en segundo plano')).toBeTruthy();
     send({ type: 'chat', chat: chat({ state: 'idle', backgroundTasks: 0 }) });
     expect(mente.getByText('Libre')).toBeTruthy();
+  });
+  it('en el Tablero ve el chat de un proyecto que piensa', async () => {
+    chats = [chat({ projectId: 'proj-a', state: 'running' })];
+    render(<AgentsPanel />);
+    const mente = within(screen.getByRole('article', { name: 'Mente' }));
+    await waitFor(() => expect(mente.getByText('Pensando')).toBeTruthy());
+    send({ type: 'chat', chat: chat({ projectId: 'proj-a', state: 'idle' }) });
+    expect(mente.getByText('Libre')).toBeTruthy();
+  });
+  it('al desmontar el chat no se pierde el estado', async () => {
+    useChat.setState({ projectId: 'proj-a', activeId: 'chat01', chat: chat({ projectId: 'proj-a' }), chats: [chat({ projectId: 'proj-a' })] });
+    chats = [chat({ projectId: 'proj-a' })];
+    render(<AgentsPanel />);
+    await chatsLoaded();
+    act(() => useChat.getState().reset());
+    expect(within(screen.getByRole('article', { name: 'Mente' })).getByText('Pensando')).toBeTruthy();
+  });
+  it('ve una Conversación en segundo plano desde un chat de proyecto', async () => {
+    const idle = chat({ projectId: 'proj-a', state: 'idle' });
+    useChat.setState({ projectId: 'proj-a', activeId: 'chat01', chat: idle, chats: [idle] });
+    chats = [idle];
+    render(<AgentsPanel />);
+    await chatsLoaded();
+    send({ type: 'chat', chat: chat({ id: 'conv01', projectId: null, sessionId: 'conv-session', state: 'idle', backgroundTasks: 1 }) });
+    expect(within(screen.getByRole('article', { name: 'Mente' })).getByText('Trabajando en segundo plano')).toBeTruthy();
+  });
+  it('con varios chats pensando usa el abierto y deja de verlos al borrarlos', async () => {
+    chats = [chat({ id: 'other1', projectId: 'proj-b', sessionId: 'other-session' }), chat()];
+    useChat.setState({ activeId: 'chat01', chat: chat() });
+    render(<AgentsPanel />);
+    await waitFor(() => expect(paths()).toContain('/sessions/chat-session'));
+    expect(paths()).not.toContain('/sessions/other-session');
+    act(() => useChat.getState().reset());
+    send({ type: 'chat_deleted', chatId: 'chat01' });
+    await waitFor(() => expect(paths()).toContain('/sessions/other-session'));
+    send({ type: 'chat_deleted', chatId: 'other1' });
+    expect(within(screen.getByRole('article', { name: 'Mente' })).getByText('Libre')).toBeTruthy();
   });
   it('oculta agentes deshabilitados y conserva las filas accesibles', () => {
     const agent = useApp.getState().agents[0];
@@ -131,6 +177,10 @@ describe('Modelo de actividad', () => {
     const other = chat({ id: 'other1' });
     expect(selectChat([other, chat()], chat())?.id).toBe('chat01');
     expect(selectChat([other], chat({ state: 'idle' }))?.id).toBe('other1');
+    expect(selectChat([chat({ state: 'idle', backgroundTasks: 1 })], chat())?.state).toBe('idle');
+  });
+  it('sin chat abierto ni activo no elige un chat viejo con error', () => {
+    expect(selectChat([chat({ state: 'error' }), chat({ id: 'old', state: 'idle' })], null)).toBeUndefined();
   });
   it('muestra error de la mente y no revive chats cerrados por backgroundTasks', () => {
     expect(mindRow(chat({ state: 'error' }), {}, []).status).toBe('Error');

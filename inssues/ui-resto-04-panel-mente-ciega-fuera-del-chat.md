@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** media
 - **Archivos:** `src/ui/features/agents-panel/AgentsPanel.tsx:15`, `src/ui/features/agents-panel/AgentsPanel.tsx:18`, `src/ui/features/agents-panel/AgentsPanel.tsx:34`, `src/ui/features/agents-panel/AgentsPanel.tsx:69`, `src/ui/features/agents-panel/AgentsPanel.tsx:83`, `src/ui/features/agents-panel/model.ts:65`, `src/ui/features/agents-panel/model.ts:79`, `src/ui/features/chat/ChatView.tsx:92`, `src/ui/features/chat/store.ts:255`, `src/ui/features/chat/store.ts:274`, `src/ui/features/chat/store.ts:481`, `src/ui/app/App.tsx:105`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

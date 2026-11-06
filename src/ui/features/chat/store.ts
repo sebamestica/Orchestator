@@ -30,7 +30,7 @@ export function errorText(err: unknown): string {
 
 const byRecent = (a: Chat, b: Chat) => b.updatedAt.localeCompare(a.updatedAt);
 
-function upsertChat(list: readonly Chat[], chat: Chat): Chat[] {
+export function upsertChat(list: readonly Chat[], chat: Chat): Chat[] {
   return [...list.filter((c) => c.id !== chat.id), chat].sort(byRecent);
 }
 
