@@ -23,6 +23,9 @@
  * - Subagentes: con `subagentTypes`, solo esos tipos y con `subagent_type` explícito (el SDK suma sus integrados, como
  *   `general-purpose`, que es el tipo por omisión). No pueden pedir un modo de permisos más amplio ni ejecutarse en
  *   remoto (ni en un worktree propio).
+ * - Chrome personal (`mcp__chrome-personal__*`): solo navega a http(s) y `about:blank` (nunca `file:`, `view-source:`,
+ *   `data:`…); los archivos que sube pasan por las mismas reglas de lectura, y los que guarda (capturas, volcados,
+ *   trazas) quedan dentro de `writeRoots`. Así lo que Read tiene negado no se lee por el navegador.
  */
 import path from 'node:path';
 import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
@@ -30,6 +33,7 @@ import { parseShell, type ShellKind } from '../adapters/claude-sdk/shell-parse.t
 import { sessionShellProblem } from '../adapters/claude-sdk/shell-downloads.ts';
 import { leadingCdTarget, lexicallyInside, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
 import { realOrNearest } from '../memory/safe-fs.ts';
+import { chromeToolOf, chromeToolWrites, isPathArg, isUrlArg, isWebScheme, urlScheme } from './plugin-policy.ts';
 
 export type GuardDecision = { allow: true } | { allow: false; reason: string };
 
@@ -168,6 +172,7 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
       return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
     });
   const inside = (target: string) => within(roots(), target);
+  const insideWrite = (target: string) => within(listOf(opts.writeRoots).map((r) => p.resolve(cwd, r)), target);
   const isAllowed = (name: string) => allowed.has(name) || prefixes.some((prefix) => name.startsWith(prefix) && name.length > prefix.length);
 
   const checkPath = (raw: unknown, tool: string): GuardDecision => {
@@ -205,7 +210,29 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     return { allow: true };
   };
 
-  /** Parte síncrona común: herramienta permitida, bloqueo dinámico, lectura y subagentes. */
+  /** Argumentos del Chrome personal: URL web, archivos que sube (lectura) y archivos que guarda (escritura). */
+  const chromeDecision = (tool: string, toolName: string, args: Record<string, unknown>): GuardDecision => {
+    for (const [key, value] of Object.entries(args)) {
+      if (isUrlArg(key)) {
+        if (typeof value !== 'string' || !isWebScheme(urlScheme(value))) {
+          return { allow: false, reason: `${toolName}: solo navegas a direcciones http(s) o about:blank; los archivos locales se leen con Read, dentro del proyecto.` };
+        }
+      } else if (isPathArg(key)) {
+        const files: unknown = key.endsWith('Paths') ? value : [value];
+        if (!Array.isArray(files)) return { allow: false, reason: `${toolName}: ${key} debe ser una lista de rutas.` };
+        for (const file of files) {
+          const read = checkPath(file, toolName);
+          if (!read.allow) return read;
+          if (chromeToolWrites(tool) && typeof file === 'string' && file !== '' && !insideWrite(p.resolve(cwd, file))) {
+            return { allow: false, reason: `${toolName}: solo guardas archivos dentro del proyecto y de las carpetas extra del chat (modos bypass y chat); sin ${key}, el resultado vuelve en la respuesta.` };
+          }
+        }
+      }
+    }
+    return { allow: true };
+  };
+
+  /** Parte síncrona común: herramienta permitida, bloqueo dinámico, lectura, subagentes y Chrome. */
   const precheck = (toolName: string, input: unknown): GuardDecision => {
     if (!isAllowed(toolName)) return { allow: false, reason: `${toolName} no está permitido. ${DENY_DEFAULT}` };
     const blocked = opts.deny?.(toolName, input);
@@ -219,6 +246,8 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
       return pathCheck;
     }
     if (SUBAGENT_TOOLS.has(toolName)) return checkSubagent(args);
+    const chromeTool = chromeToolOf(toolName);
+    if (chromeTool) return chromeDecision(chromeTool, toolName, args);
     return { allow: true };
   };
 

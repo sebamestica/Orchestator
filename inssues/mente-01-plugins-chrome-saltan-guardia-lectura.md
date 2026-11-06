@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** alta
 - **Archivos:** `src/core/conductor/guard.ts:10`, `src/core/conductor/guard.ts:117`, `src/core/conductor/guard.ts:135`, `src/core/conductor/guard.ts:163`, `src/core/conductor/guard.ts:184`, `src/core/conductor/session.ts:298`, `src/core/conductor/session.ts:314`, `src/core/conductor/session.ts:358`, `src/core/app/f5-chat.ts:77`, `src/core/chat/service.ts:706`, `src/core/chat/service.ts:732`, `src/core/plugins/service.ts:55`, `src/core/plugins/service.ts:325`, `src/core/plugins/chrome.ts:55`, `src/core/plugins/chrome-gate.ts:155`, `src/core/plugins/chrome-gate.ts:194`, `C:\dev\agent-hub\tools\browser\chrome-personal.cmd:3` (fuera del repo)
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

@@ -58,10 +58,12 @@ export function chromeLauncherPath(toolsDir = DEFAULT_BROWSER_TOOLS_DIR): string
 
 /**
  * Opciones de `chrome-devtools-mcp` que Berland agrega al lanzador del hub (su `.cmd` las reenvía con `%*`).
- * `--redact-network-headers`: `get_network_request` devuelve la cabecera `cookie` real (con las HttpOnly),
- * `set-cookie` y `authorization` de las sesiones del usuario; con esto vuelven como `<redacted>`.
+ * - `--redact-network-headers`: `get_network_request` devuelve la cabecera `cookie` real (con las HttpOnly),
+ *   `set-cookie` y `authorization` de las sesiones del usuario; con esto vuelven como `<redacted>`.
+ * - `--no-file-navigations`: ningún agente abre `file:` en tu Chrome; la mente además lo tiene negado en la guardia
+ *   (`plugin-policy.ts`).
  */
-const LAUNCHER_FLAGS = ['--redact-network-headers'];
+const LAUNCHER_FLAGS = ['--redact-network-headers', '--no-file-navigations'];
 
 /** `cmd.exe /c <lanzador>` con la ruta absoluta de `cmd.exe` (un `cmd.exe` del worktree no se ejecuta en su lugar). */
 export function defaultChromeLauncher(toolsDir = DEFAULT_BROWSER_TOOLS_DIR): ChromeLauncher {

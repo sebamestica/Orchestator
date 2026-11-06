@@ -142,6 +142,51 @@ describe('guardia dinámica (modos, raíces, plugins y rutas vetadas)', () => {
   });
 });
 
+describe('herramientas del Chrome personal', () => {
+  const base = { allowedTools: ['mcp__chrome-personal__*'], cwd: 'C:\\p', denyPaths: ['C:\\dev\\orquestador-memoria'], pathApi: path.win32 };
+  const guard = createToolGuard(base);
+  const chrome = (tool: string) => `mcp__chrome-personal__${tool}`;
+
+  it('navegar: solo http(s) y about:blank; file:, view-source:, data:, javascript: y chrome: se niegan', () => {
+    for (const url of ['file:///C:/dev/orquestador-memoria/', 'FILE:///C:/x', 'view-source:file:///C:/x', ' file:///C:/x', 'data:text/html,x', 'javascript:alert(1)', 'chrome://settings', 'blob:https://a.test/1', 'no es una url']) {
+      expect(guard.check(chrome('navigate_page'), { type: 'url', url }).allow, url).toBe(false);
+    }
+    expect(guard.check(chrome('new_page'), { url: 'file:///C:/dev/otro/.env' }).allow).toBe(false);
+    expect(guard.check(chrome('new_page'), { url: 7 }).allow).toBe(false);
+    expect(guard.check(chrome('navigate_page'), { url: 'https://example.com' }).allow).toBe(true);
+    expect(guard.check(chrome('new_page'), { url: 'about:blank' }).allow).toBe(true);
+    expect(guard.check(chrome('new_page'), { url: 'HTTP://localhost:5173/' }).allow).toBe(true);
+    expect(guard.check(chrome('navigate_page'), { type: 'back' }).allow).toBe(true);
+  });
+
+  it('upload_file: cada archivo pasa por las raíces de lectura, las credenciales y denyPaths', () => {
+    expect(guard.check(chrome('upload_file'), { uid: '1', filePaths: ['C:\\p\\informe.pdf'] }).allow).toBe(true);
+    for (const file of ['C:\\dev\\otro\\.env', 'C:\\p\\id_ed25519', 'C:\\dev\\orquestador-memoria\\x.md']) {
+      expect(guard.check(chrome('upload_file'), { uid: '1', filePaths: ['C:\\p\\informe.pdf', file] }).allow, file).toBe(false);
+    }
+    expect(guard.check(chrome('upload_file'), { uid: '1', filePaths: 'C:\\p\\a.pdf' }).allow).toBe(false);
+  });
+
+  it('archivos de salida (capturas, volcados, trazas): solo dentro de writeRoots', () => {
+    expect(guard.check(chrome('take_screenshot'), { filePath: 'C:\\dev\\otro\\a.png' }).allow).toBe(false);
+    expect(guard.check(chrome('take_screenshot'), { filePath: 'C:\\p\\a.png' }).allow).toBe(false);
+    expect(guard.check(chrome('take_screenshot'), {}).allow).toBe(true);
+    const writer = createToolGuard({ ...base, writeRoots: ['C:\\p'] });
+    expect(writer.check(chrome('take_screenshot'), { filePath: 'C:\\p\\a.png' }).allow).toBe(true);
+    expect(writer.check(chrome('take_heapsnapshot'), { filePath: 'C:\\dev\\otro\\a.heapsnapshot' }).allow).toBe(false);
+    expect(writer.check(chrome('get_network_request'), { reqid: 1, responseFilePath: 'C:\\dev\\otro\\r.json' }).allow).toBe(false);
+    expect(writer.check(chrome('lighthouse_audit'), { outputDirPath: 'C:\\dev\\orquestador-memoria' }).allow).toBe(false);
+    // performance_start_trace escribe la traza en filePath (con autoStop) igual que performance_stop_trace.
+    expect(guard.check(chrome('performance_start_trace'), { filePath: 'C:\\dev\\otro\\t.json' }).allow).toBe(false);
+    expect(writer.check(chrome('performance_start_trace'), { filePath: 'C:\\dev\\otro\\t.json' }).allow).toBe(false);
+  });
+
+  it('otros servidores no pasan por estas reglas', () => {
+    const other = createToolGuard({ ...base, allowedTools: ['mcp__canva__*'] });
+    expect(other.check('mcp__canva__upload-asset-from-url', { url: 'https://a.test/x.png' }).allow).toBe(true);
+  });
+});
+
 describe('guardia de bypass: escritura y shell (disco real)', () => {
   const tools = ['Read', 'Grep', 'Glob', 'Agent', 'Edit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'];
   let base = '';

@@ -203,8 +203,8 @@ describe('plugin Chrome: Probar conexión (MCP falso por stdio)', () => {
 });
 
 describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
-  it('el lanzador pide al MCP tachar los encabezados sensibles (cookies, authorization) de la red', () => {
-    expect(defaultChromeLauncher('C:\\x').args).toEqual(['/c', 'C:\\x\\chrome-personal.cmd', '--redact-network-headers']);
+  it('el lanzador pide al MCP tachar los encabezados de la red y apaga la navegación a file:', () => {
+    expect(defaultChromeLauncher('C:\\x').args).toEqual(['/c', 'C:\\x\\chrome-personal.cmd', '--redact-network-headers', '--no-file-navigations']);
   });
 
   it('servidor `chrome-personal` = la puerta delante de `cmd.exe /c <lanzador>`, con la nota de usar solo este navegador', async () => {
@@ -218,7 +218,7 @@ describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
     expect(spec).toMatchObject({ type: 'stdio', command: process.execPath, toolTimeoutSec: DEFAULT_GATE_WAIT_MS / 1000 + 120 });
     expect(spec.args).toEqual([
       CHROME_GATE_SCRIPT, '--lock', 'chrome-personal', '--agent', 'claude-main', '--task', 'sesion', '--locks-root', h.locksRoot,
-      '--wait-ms', String(DEFAULT_GATE_WAIT_MS), '--idle-ms', String(DEFAULT_GATE_IDLE_MS), '--', systemExe('cmd.exe'), '/c', join(dir, 'chrome-personal.cmd'), '--redact-network-headers',
+      '--wait-ms', String(DEFAULT_GATE_WAIT_MS), '--idle-ms', String(DEFAULT_GATE_IDLE_MS), '--', systemExe('cmd.exe'), '/c', join(dir, 'chrome-personal.cmd'), '--redact-network-headers', '--no-file-navigations',
     ]);
     expect(spec.instructions).toContain(CHROME_ONLY_NOTE);
     expect(spec.instructions).toContain(CHROME_TAB_NOTE);
@@ -251,7 +251,7 @@ describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
       const spec = grant.servers['chrome-personal'] as McpStdioSpec;
       // Lo que se ejecuta: la puerta y el lanzador `--autoConnect`, nunca un perfil propio.
       expect([spec.command, ...spec.args].join(' ')).not.toMatch(/chrome-agente|userDataDir|chrome-profile|--isolated/);
-      expect(spec.args.at(-1)).toMatch(/chrome-personal\.cmd$|fake-mcp\.ts$|^ok$/);
+      expect(spec.args.at(-1)).toMatch(/^--no-file-navigations$|fake-mcp\.ts$|^ok$/);
       await grant.release();
     }
   });
