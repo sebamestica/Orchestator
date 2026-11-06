@@ -107,6 +107,12 @@ function parseRpc(line: string): RpcLike | undefined {
 
 const idKey = (id: RpcId) => `${typeof id}:${String(id)}`;
 
+/** Reintentos de soltar el candado tras un error pasajero (Defender, un lector con `owner` abierto). */
+const RELEASE_RETRY_MS = 500;
+const RELEASE_RETRY_MAX_MS = 30_000;
+/** Al cerrar no hay después: unos pocos intentos cortos; si fallan, el candado queda abandonado al salir. */
+const CLOSE_RELEASE_ATTEMPTS = 3;
+
 export interface ChromeGateDeps {
   /** Línea hacia el servidor MCP real (sin salto de línea). */
   toServer(line: string): void;
@@ -131,6 +137,7 @@ export class ChromeGate {
   #held: LockHandle | undefined;
   #acquiring: Promise<{ ok: true } | { ok: false; text: string }> | undefined;
   #idle: NodeJS.Timeout | undefined;
+  #releaseFailures = 0;
   #closed = false;
 
   constructor(opts: Omit<GateOptions, 'command' | 'args'>, deps: ChromeGateDeps) {
@@ -221,6 +228,8 @@ export class ChromeGate {
     const ended = { ok: false, text: 'La sesión terminó mientras esperaba el Chrome personal.' } as const;
     for (;;) {
       if (this.#closed) return ended;
+      // Un soltar fallido devolvió el handle mientras esta llamada esperaba: el candado sigue siendo nuestro.
+      if (this.#held) return { ok: true };
       // Si el cliente canceló todas las llamadas que esperaban, no hace falta el candado.
       if ([...this.#waiting.values()].every((w) => w.cancelled)) return { ok: false, text: 'Llamada cancelada.' };
       try {
@@ -263,24 +272,48 @@ export class ChromeGate {
     }
   }
 
-  #armIdle(): void {
+  #armIdle(delayMs = this.#opts.idleMs): void {
     if (this.#idle) clearTimeout(this.#idle);
     if (this.#closed || !this.#held || this.#inFlight.size > 0 || this.#waiting.size > 0) return;
     this.#idle = setTimeout(() => {
       if (this.#inFlight.size === 0 && this.#waiting.size === 0) void this.#release('inactividad');
-    }, this.#opts.idleMs);
+    }, delayMs);
     this.#idle.unref();
   }
 
+  /**
+   * Suelta el candado. Si falla por algo que no sea `not_held`, sigue siendo nuestro y el handle es lo único que tiene
+   * el token: abierta, la puerta lo conserva y reintenta con espera creciente; al cerrar, reintenta un poco y se rinde.
+   */
   async #release(why: string): Promise<void> {
     const held = this.#held;
     this.#held = undefined;
     if (!held) return;
-    try {
-      await held.release();
-      this.#deps.log?.(`candado ${held.name} soltado (${why})`);
-    } catch (err) {
-      if (!(err instanceof LockError && err.code === 'not_held')) this.#deps.log?.(`no se pudo soltar ${held.name}: ${err instanceof Error ? err.message : String(err)}`);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await held.release();
+        this.#releaseFailures = 0;
+        this.#deps.log?.(`candado ${held.name} soltado (${why})`);
+        return;
+      } catch (err) {
+        if (err instanceof LockError && err.code === 'not_held') {
+          this.#releaseFailures = 0;
+          return;
+        }
+        const reason = err instanceof Error ? err.message : String(err);
+        if (!this.#closed) {
+          this.#held ??= held;
+          const retryMs = Math.min(RELEASE_RETRY_MAX_MS, RELEASE_RETRY_MS * 2 ** this.#releaseFailures++);
+          this.#deps.log?.(`no se pudo soltar ${held.name} (${reason}): se reintenta en ${retryMs} ms`);
+          this.#armIdle(retryMs);
+          return;
+        }
+        if (attempt >= CLOSE_RELEASE_ATTEMPTS) {
+          this.#deps.log?.(`no se pudo soltar ${held.name} al cerrar (${reason}): quedará abandonado al salir`);
+          return;
+        }
+        await sleep(250 * attempt);
+      }
     }
   }
 }

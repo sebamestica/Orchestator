@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** baja
 - **Archivos:** `src/core/plugins/chrome-gate.ts:254`, `src/core/plugins/chrome-gate.ts:259`, `src/core/plugins/chrome-gate.ts:261`, `src/core/plugins/chrome-gate.ts:264`, `src/core/plugins/chrome-gate.ts:267`, `src/core/plugins/chrome-gate.ts:198`, `src/core/plugins/chrome-gate.ts:216`, `src/core/plugins/chrome-gate.ts:225`, `src/core/plugins/chrome-gate.ts:227`, `src/core/plugins/chrome-gate.ts:237`, `src/core/plugins/chrome.ts:227`, `src/core/plugins/chrome.ts:233`, `src/core/locks/manager.ts:316`, `src/core/locks/manager.ts:341`, `src/core/locks/manager.ts:348`, `src/core/locks/manager.ts:349`, `src/core/locks/manager.ts:426`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

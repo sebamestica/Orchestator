@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
@@ -23,13 +23,13 @@ async function until(check: () => boolean | Promise<boolean>, ms = 3000): Promis
 const exists = (p: string) => stat(p).then(() => true, () => false);
 
 /** Puerta en proceso con un servidor que guarda lo que recibe y un cliente que guarda lo que le llega. */
-async function gate(root: string, over: Partial<GateOptions> = {}) {
+async function gate(root: string, over: Partial<GateOptions> = {}, locks?: Pick<LockManager, 'acquire' | 'releaseAbandoned'>) {
   const toServer: string[] = [];
   const toClient: string[] = [];
   const logs: string[] = [];
   const g = new ChromeGate(
     { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20, ...over },
-    { toServer: (l) => toServer.push(l), toClient: (l) => toClient.push(l), log: (l) => logs.push(l) },
+    { toServer: (l) => toServer.push(l), toClient: (l) => toClient.push(l), log: (l) => logs.push(l), ...(locks ? { locks } : {}) },
   );
   cleanups.push(() => g.close());
   const call = (id: number, name = 'new_page') => g.onClientLine(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } }));
@@ -282,6 +282,58 @@ describe('puerta MCP del Chrome personal: cierre durante la toma', () => {
     await wait(200);
     expect(await exists(join(root, CHROME_LOCK))).toBe(false);
     expect(t.toServer).toEqual([]);
+  });
+});
+
+/** Gestor real cuyo rename al soltar falla con EPERM (Defender o un lector con `owner` abierto) las primeras `failures` veces. */
+function flakyRelease(root: string, failures: number) {
+  let left = failures;
+  return new LockManager({
+    root,
+    fs: {
+      rename: async (from, to) => {
+        if (to.includes('.releasing.') && left > 0) {
+          left--;
+          throw Object.assign(new Error('EPERM: simulado, rename'), { code: 'EPERM', syscall: 'rename' });
+        }
+        return rename(from, to);
+      },
+    },
+  });
+}
+
+describe('puerta MCP del Chrome personal: soltar que falla', () => {
+  it('si soltar falla por un error pasajero conserva el candado: la siguiente llamada pasa y después lo suelta', async () => {
+    const root = await tempDir('orq-gate-');
+    // 6 fallos = una liberación entera de LockManager (1 intento + 5 reintentos).
+    const t = await gate(root, { idleMs: 50, waitMs: 300, retryMs: 20 }, flakyRelease(root, 6));
+    t.call(1);
+    await until(() => t.toServer.length === 1);
+    t.reply(1);
+    await until(() => t.logs.join('\n').includes('no se pudo soltar'));
+    expect(await exists(join(root, CHROME_LOCK))).toBe(true);
+    expect(t.g.holding).toBe(true);
+    t.call(2);
+    await until(() => t.forwarded().some((m) => m.id === 2));
+    expect(t.answers().some((a) => a.result?.isError)).toBe(false);
+    t.reply(2);
+    await until(() => t.logs.join('\n').includes('soltado (inactividad)'));
+    expect(await exists(join(root, CHROME_LOCK))).toBe(false);
+  });
+
+  it('sin más llamadas reintenta soltar, y otra puerta que esperaba entra', async () => {
+    const root = await tempDir('orq-gate-');
+    const a = await gate(root, { agent: 'claude-main', task: 't-1', idleMs: 50 }, flakyRelease(root, 6));
+    const b = await gate(root, { agent: 'codex-main', task: 't-2', waitMs: 4000 });
+    a.call(1);
+    await until(() => a.toServer.length === 1);
+    b.call(7);
+    a.reply(1);
+    await until(() => a.logs.join('\n').includes('no se pudo soltar'));
+    await until(() => b.toServer.length === 1, 4000);
+    expect(b.forwarded()[0]).toMatchObject({ id: 7, method: 'tools/call' });
+    expect(a.logs.join('\n')).toContain('soltado (inactividad)');
+    expect(await readFile(join(root, CHROME_LOCK, 'owner'), 'utf8')).toContain('"task":"t-2"');
   });
 });
 
