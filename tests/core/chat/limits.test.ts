@@ -4,6 +4,7 @@ import { estimateCostUsd } from '../../../src/core/adapters/claude-sdk/pricing.t
 import { DEFAULT_SETTINGS, type MindLimits, type Settings } from '../../../src/shared/index.ts';
 import { usageEvent } from '../store/fixture-events.ts';
 import { bench, closeBenches, sdkInit, sdkResult, sdkText, type ChatBench, type TurnFn } from './helpers.ts';
+import { promptBlocks } from '../conductor/fakes.ts';
 
 afterEach(closeBenches);
 
@@ -183,7 +184,7 @@ describe('ChatService: topes de gasto de la mente', () => {
     const chat = b.service.create({ projectId: 'demo' });
     await b.service.send(chat.id, { text: 'hola' });
     await b.settle(chat.id);
-    const prompt = (optionsOf(b).systemPrompt as string[]).join('\n');
+    const prompt = promptBlocks(optionsOf(b)).join('\n');
     expect(prompt).not.toMatch(/sin tope de cupo/);
     expect(prompt).toMatch(/Tope por mensaje del usuario: 2 USD/);
     expect(prompt).toMatch(/Tope diario de la mente: sin tope/);
