@@ -1,33 +1,49 @@
 import { Button, Chip } from '@heroui/react';
-import { Bot, Check, ChevronRight, ListChecks, X } from 'lucide-react';
+import { Bot, Check, ChevronRight, ListChecks, RefreshCw, X } from 'lucide-react';
 import { useId, useState } from 'react';
 import type { Proposal } from '../../../../shared/api.ts';
 import { Panel } from '../../../components/Card.tsx';
-import type { Decision } from '../store.ts';
+import { awaitsDelivery, undeliveredReason, type Decision, type Undelivered } from '../store.ts';
 import { Markdown } from './Markdown.tsx';
 
-const APPROVAL: Record<Proposal['approval'], { label: string; color: 'default' | 'success' | 'danger' | 'accent' }> = {
+type ChipState = { label: string; color: 'default' | 'warning' | 'danger' | 'accent' };
+
+/** Una `approved` quieta no llegó a la flota: la entregada pasa enseguida a `delegated`. */
+const APPROVAL: Record<Proposal['approval'], ChipState> = {
   proposed: { label: 'Propuesta', color: 'default' },
-  approved: { label: 'Aprobada', color: 'success' },
+  approved: { label: 'Aprobada · sin entregar', color: 'warning' },
   rejected: { label: 'Rechazada', color: 'danger' },
   delegated: { label: 'Delegada', color: 'accent' },
 };
+/** Aprobada con la aprobación (o el reintento) en curso: aún no se sabe si la flota la recibió. */
+const DELIVERING: ChipState = { label: 'Entregando…', color: 'default' };
 
 interface ProposalsCardProps {
   proposals: readonly Proposal[];
-  /** Propuestas pendientes en todo el chat (lo que aprueba «Aprobar todo»). */
+  /** Propuestas sin decidir o sin entregar en todo el chat (lo que aprueba «Aprobar todo»). */
   pendingInChat: number;
+  /** Motivo conocido de cada aprobada que no llegó a la flota. */
+  undelivered: Undelivered;
   busy: Record<string, true>;
   agentName: (id: string) => string;
   onDecide: (taskId: string, decision: Decision) => void;
   onApproveAll: () => void;
 }
 
-function ProposalRow({ proposal, busy, agentName, onDecide }: { proposal: Proposal; busy: boolean; agentName: (id: string) => string; onDecide: ProposalsCardProps['onDecide'] }) {
+interface ProposalRowProps {
+  proposal: Proposal;
+  reason: string | null;
+  busy: boolean;
+  agentName: (id: string) => string;
+  onDecide: ProposalsCardProps['onDecide'];
+}
+
+function ProposalRow({ proposal, reason, busy, agentName, onDecide }: ProposalRowProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const { task, approval } = proposal;
-  const state = APPROVAL[approval];
+  const undelivered = approval === 'approved' && !busy;
+  const state = approval === 'approved' && busy ? DELIVERING : APPROVAL[approval];
   return (
     <li className="flex flex-col gap-2 px-4 py-3" data-testid={`proposal-${task.id}`}>
       <div className="flex items-start gap-2">
@@ -76,13 +92,21 @@ function ProposalRow({ proposal, busy, agentName, onDecide }: { proposal: Propos
               </div>
             ) : null}
           </dl>
+          {undelivered && reason ? <p className="selectable mt-1.5 text-[0.75rem] text-warning">No llegó a la flota: {reason}</p> : null}
         </div>
-        {approval === 'proposed' ? (
+        {awaitsDelivery(proposal) ? (
           <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" variant="primary" isDisabled={busy} onPress={() => onDecide(task.id, 'approve')} aria-label={`Aprobar ${task.id}`}>
-              <Check className="size-3.5" aria-hidden="true" />
-              Aprobar
-            </Button>
+            {approval === 'proposed' ? (
+              <Button size="sm" variant="primary" isDisabled={busy} onPress={() => onDecide(task.id, 'approve')} aria-label={`Aprobar ${task.id}`}>
+                <Check className="size-3.5" aria-hidden="true" />
+                Aprobar
+              </Button>
+            ) : (
+              <Button size="sm" variant="primary" isDisabled={busy} onPress={() => onDecide(task.id, 'approve')} aria-label={`Reintentar entrega de ${task.id}`}>
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+                Reintentar entrega
+              </Button>
+            )}
             <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => onDecide(task.id, 'reject')} aria-label={`Rechazar ${task.id}`}>
               <X className="size-3.5" aria-hidden="true" />
               Rechazar
@@ -112,9 +136,9 @@ function ProposalRow({ proposal, busy, agentName, onDecide }: { proposal: Propos
   );
 }
 
-/** Tarjeta de tareas que propone la mente, dentro del hilo: aprobar, rechazar o aprobar todo. */
-export function ProposalsCard({ proposals, pendingInChat, busy, agentName, onDecide, onApproveAll }: ProposalsCardProps) {
-  const pendingHere = proposals.some((p) => p.approval === 'proposed');
+/** Tarjeta de tareas que propone la mente, dentro del hilo: aprobar, rechazar, reintentar la entrega o aprobar todo. */
+export function ProposalsCard({ proposals, pendingInChat, undelivered, busy, agentName, onDecide, onApproveAll }: ProposalsCardProps) {
+  const pendingHere = proposals.some(awaitsDelivery);
   return (
     <Panel className="overflow-hidden" role="group" aria-label="Tareas propuestas">
       <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-4 py-3">
@@ -131,7 +155,14 @@ export function ProposalsCard({ proposals, pendingInChat, busy, agentName, onDec
       </div>
       <ul className="flex flex-col divide-y divide-foreground/[0.06]">
         {proposals.map((p) => (
-          <ProposalRow key={p.task.id} proposal={p} busy={Boolean(busy[p.task.id] ?? busy['*'])} agentName={agentName} onDecide={onDecide} />
+          <ProposalRow
+            key={p.task.id}
+            proposal={p}
+            reason={undeliveredReason(undelivered, p.task.id)}
+            busy={Boolean(busy[p.task.id] ?? busy['*'])}
+            agentName={agentName}
+            onDecide={onDecide}
+          />
         ))}
       </ul>
     </Panel>

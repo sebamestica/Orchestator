@@ -3,6 +3,7 @@
  * activo, mensajes, propuestas e historia de eventos de su sesión. Las acciones hablan con `/chats` (c15).
  * El estado global de la app (proyectos, agentes, ajustes) sigue en `src/ui/store/app.ts`.
  */
+import { z } from 'zod';
 import { create } from 'zustand';
 import type { AgentEvent, Attachment, Chat, ChatMessage, MindMode, Proposal } from '../../../shared/index.ts';
 import { effortSchema, opaqueIdSchema, type Effort, type SendMessageBody } from '../../../shared/api.ts';
@@ -47,6 +48,43 @@ export function proposalsFrom(res: unknown, current: readonly Proposal[]): Propo
     return current.map((c) => (c.task.id === p.task.id ? p : c));
   }
   return null;
+}
+
+/** Aprobadas que no llegaron a la flota: `failed` de la respuesta de aprobar (`approvalResponse` del núcleo). */
+const failedSchema = z.array(z.object({ taskId: z.string(), reason: z.string() }));
+export type DeliveryFailure = z.infer<typeof failedSchema>[number];
+/** Motivo por el que cada propuesta `approved` no llegó a la flota (id de tarea → motivo). */
+export type Undelivered = Readonly<Record<string, string>>;
+
+/** Lee `failed` de una respuesta de aprobar; si no viene o no tiene la forma esperada, vacío. */
+export function failedFrom(res: unknown): DeliveryFailure[] {
+  const r = failedSchema.safeParse(isRecord(res) ? res.failed : undefined);
+  return r.success ? r.data : [];
+}
+
+/** Aviso de las tareas que no se entregaron (una línea por tarea); `null` si se entregaron todas. */
+export function deliveryNotice(failed: readonly DeliveryFailure[]): string | null {
+  return failed.length ? failed.map((f) => `No se pudo entregar ${f.taskId} a la flota: ${f.reason}`).join('\n') : null;
+}
+
+/** Motivos que siguen valiendo tras `proposals` (con los nuevos de `failed`): solo de las que siguen `approved`. */
+export function undeliveredAfter(prev: Undelivered, proposals: readonly Proposal[], failed: readonly DeliveryFailure[] = []): Record<string, string> {
+  const approved = new Set(proposals.filter((p) => p.approval === 'approved').map((p) => p.task.id));
+  const entries = [...Object.entries(prev), ...failed.map((f) => [f.taskId, f.reason] as const)];
+  return Object.fromEntries(entries.filter(([id]) => approved.has(id)));
+}
+
+/** Motivo conocido de una tarea sin entregar (solo propiedades propias: un id no puede leer `Object.prototype`). */
+export function undeliveredReason(undelivered: Undelivered, taskId: string): string | null {
+  return Object.hasOwn(undelivered, taskId) ? (undelivered[taskId] ?? null) : null;
+}
+
+/**
+ * Aún no está en la flota: sin decidir, o aprobada sin entregar (una aprobada entregada pasa enseguida a
+ * `delegated`). Es lo que aprueba «Aprobar todo», igual que `ChatService.approveAll`.
+ */
+export function awaitsDelivery(p: Proposal): boolean {
+  return p.approval === 'proposed' || p.approval === 'approved';
 }
 
 /** Elige una carpeta: diálogo nativo de Electron o, en la web, el diálogo de Windows del núcleo. */
@@ -121,6 +159,8 @@ interface ChatData {
   chat: Chat | null;
   messages: ChatMessage[];
   proposals: Proposal[];
+  /** Por qué no llegaron a la flota las propuestas `approved` (de las respuestas de aprobar de esta vista). */
+  undelivered: Undelivered;
   /** Eventos de `chat.sessionId` (últimos 500, por `seq`). */
   events: AgentEvent[];
   /** Último `seq` visto de la sesión: desde ahí se pide `replay` al reconectar. */
@@ -181,6 +221,7 @@ const INITIAL: Omit<ChatData, 'efforts'> = {
   chat: null,
   messages: [],
   proposals: [],
+  undelivered: {},
   events: [],
   lastSeq: -1,
   draftMode: 'plan',
@@ -213,13 +254,13 @@ export const useChat = create<ChatStore>((set, get) => {
     } catch (err) {
       if (!alive()) return;
       if (isUnavailable(err)) set({ status: 'unavailable', error: null });
-      else if (err instanceof ApiError && err.status === 404) set({ status: 'missing', chat: null, messages: [], proposals: [] });
+      else if (err instanceof ApiError && err.status === 404) set({ status: 'missing', chat: null, messages: [], proposals: [], undelivered: {} });
       else set({ status: 'error', error: errorText(err) });
       return;
     }
     try {
       const p = await api.get<{ proposals: Proposal[] }>(`${base}/proposals`);
-      if (alive()) set({ proposals: p.proposals });
+      if (alive()) setProposals(p.proposals);
     } catch {
       // Sin propuestas (o la ruta aún no existe): el hilo sigue funcionando.
     }
@@ -228,10 +269,15 @@ export const useChat = create<ChatStore>((set, get) => {
   async function refetchProposals(chatId: string): Promise<void> {
     try {
       const p = await api.get<{ proposals: Proposal[] }>(`/chats/${enc(chatId)}/proposals`);
-      if (get().activeId === chatId) set({ proposals: p.proposals });
+      if (get().activeId === chatId) setProposals(p.proposals);
     } catch {
       // Se queda con lo que había; el mensaje `proposals` de /ws lo corrige.
     }
+  }
+
+  /** Pone las propuestas y deja los motivos de «sin entregar» al día (con los nuevos de `failed`). */
+  function setProposals(proposals: Proposal[], failed: readonly DeliveryFailure[] = []): void {
+    set((s) => ({ proposals, undelivered: undeliveredAfter(s.undelivered, proposals, failed) }));
   }
 
   /** Guarda (o, con `null`, olvida) el esfuerzo de un chat, en el store y en el respaldo. */
@@ -286,7 +332,7 @@ export const useChat = create<ChatStore>((set, get) => {
 
     async select(chatId) {
       if (get().activeId === chatId && get().status === 'ready') return;
-      set({ activeId: chatId, status: 'loading', chat: null, messages: [], proposals: [], events: [], lastSeq: -1, notice: null, busy: {} });
+      set({ activeId: chatId, status: 'loading', chat: null, messages: [], proposals: [], undelivered: {}, events: [], lastSeq: -1, notice: null, busy: {} });
       await load(chatId, generation);
     },
 
@@ -314,6 +360,7 @@ export const useChat = create<ChatStore>((set, get) => {
           chat: r.chat,
           messages: [],
           proposals: [],
+          undelivered: {},
           events: [],
           lastSeq: -1,
           pendingRoots: [],
@@ -352,7 +399,7 @@ export const useChat = create<ChatStore>((set, get) => {
       if (next) {
         await get().select(next.id);
       } else {
-        set({ activeId: null, chat: null, messages: [], proposals: [], events: [], lastSeq: -1, status: 'ready' });
+        set({ activeId: null, chat: null, messages: [], proposals: [], undelivered: {}, events: [], lastSeq: -1, status: 'ready' });
       }
     },
 
@@ -433,10 +480,15 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ proposals: before.map((p) => (p.task.id === taskId ? { ...p, approval } : p)) });
       try {
         const r = await api.post<unknown>(`/chats/${enc(chat.id)}/proposals/${enc(taskId)}/${decision}`);
+        // Otro chat abierto mientras tanto: la respuesta (lista, motivos, aviso) no es suya.
+        if (get().activeId !== chat.id) return;
+        const failed = decision === 'approve' ? failedFrom(r) : [];
         const next = proposalsFrom(r, get().proposals);
-        if (next) set({ proposals: next });
+        if (next) setProposals(next, failed);
         else await refetchProposals(chat.id);
+        if (decision === 'approve') set({ notice: deliveryNotice(failed) });
       } catch (err) {
+        if (get().activeId !== chat.id) return;
         set({ proposals: before, notice: `No se pudo ${decision === 'approve' ? 'aprobar' : 'rechazar'} ${taskId}: ${errorText(err)}` });
       } finally {
         setBusy(taskId, false);
@@ -451,10 +503,14 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ proposals: before.map((p) => (p.approval === 'proposed' ? { ...p, approval: 'approved' } : p)) });
       try {
         const r = await api.post<unknown>(`/chats/${enc(chat.id)}/proposals/approve-all`);
+        if (get().activeId !== chat.id) return;
+        const failed = failedFrom(r);
         const next = proposalsFrom(r, get().proposals);
-        if (next) set({ proposals: next });
+        if (next) setProposals(next, failed);
         else await refetchProposals(chat.id);
+        set({ notice: deliveryNotice(failed) });
       } catch (err) {
+        if (get().activeId !== chat.id) return;
         set({ proposals: before, notice: `No se pudo aprobar todo: ${errorText(err)}` });
       } finally {
         setBusy('*', false);
@@ -488,10 +544,10 @@ export const useChat = create<ChatStore>((set, get) => {
         case 'chat_deleted':
           rememberEffort(message.chatId, null);
           set((st) => ({ chats: st.chats.filter((c) => c.id !== message.chatId) }));
-          if (message.chatId === s.activeId) set({ status: 'missing', chat: null, messages: [], proposals: [], events: [], lastSeq: -1 });
+          if (message.chatId === s.activeId) set({ status: 'missing', chat: null, messages: [], proposals: [], undelivered: {}, events: [], lastSeq: -1 });
           return;
         case 'proposals':
-          if (message.chatId === s.activeId) set({ proposals: message.proposals });
+          if (message.chatId === s.activeId) setProposals(message.proposals);
           return;
         default:
           return;

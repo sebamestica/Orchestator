@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** alta
 - **Archivos:** `src/ui/features/chat/store.ts:40-50`, `src/ui/features/chat/store.ts:427-444`, `src/ui/features/chat/store.ts:446-462`, `src/ui/features/chat/components/ProposalsCard.tsx:9-14`, `src/ui/features/chat/components/ProposalsCard.tsx:80`, `src/ui/features/chat/components/ProposalsCard.tsx:117`, `src/ui/features/chat/components/ProposalsCard.tsx:125`, `src/ui/features/chat/ChatView.tsx:108`, `src/core/chat/routes.ts:38-44`, `src/core/chat/routes.ts:238-248`, `src/core/conductor/approve.ts:16-21`, `src/core/conductor/approve.ts:46-74`, `src/core/chat/service.ts:525-548`, `src/core/chat/proposals.ts:146-149`, `src/core/conductor/tools.ts:247-249`, `src/shared/api.ts:205-210`, `tests/ui/chat/helpers.ts:180-191`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 En modo Plan la mente propone tareas y el usuario las aprueba en la tarjeta «Tareas propuestas» del chat. Al aprobar,

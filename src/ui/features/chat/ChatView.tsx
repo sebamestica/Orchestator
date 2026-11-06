@@ -20,7 +20,7 @@ import { ProposalsCard } from './components/ProposalsCard.tsx';
 import { BackgroundLine } from './components/BackgroundLine.tsx';
 import { TargetLine } from './components/TargetLine.tsx';
 import { APP_NAME } from './format.ts';
-import { attachFile, chosenEffort, effortIn, errorText, pickFolder, useChat } from './store.ts';
+import { attachFile, awaitsDelivery, chosenEffort, effortIn, errorText, pickFolder, useChat } from './store.ts';
 import { anchorProposals, buildReply, PROPOSALS_AT_END, splitTurns } from './timeline.ts';
 import { useChatLive } from './use-chat-live.ts';
 
@@ -84,6 +84,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const pendingRoots = useChat((s) => s.pendingRoots);
   const notice = useChat((s) => s.notice);
   const busy = useChat((s) => s.busy);
+  const undelivered = useChat((s) => s.undelivered);
   const chosen = useChat(chosenEffort);
 
   useEffect(() => {
@@ -105,7 +106,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const turns = useMemo(() => splitTurns(events, messages), [events, messages]);
   const draft = useMemo(() => buildReply(turns.pending), [turns.pending]);
   const anchors = useMemo(() => anchorProposals(proposals, messages), [proposals, messages]);
-  const pendingInChat = proposals.filter((p) => p.approval === 'proposed').length;
+  const pendingInChat = proposals.filter(awaitsDelivery).length;
   // Sin turno en curso y con la respuesta ya guardada, lo que quede suelto no se muestra como borrador.
   const showDraft = running || (draft.items.length > 0 && messages.at(-1)?.role !== 'assistant');
 
@@ -218,6 +219,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
     <ProposalsCard
       proposals={list}
       pendingInChat={pendingInChat}
+      undelivered={undelivered}
       busy={busy}
       agentName={agentName}
       onDecide={(taskId, decision) => void useChat.getState().decide(taskId, decision)}
@@ -337,7 +339,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
         {notice ? (
           <div role="alert" className="flex items-start gap-2 rounded-xl bg-danger/10 px-3 py-2 text-[0.8125rem] text-danger">
             <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            <span className="selectable min-w-0 flex-1 break-words">{notice}</span>
+            <span className="selectable min-w-0 flex-1 whitespace-pre-line break-words">{notice}</span>
             <button
               type="button"
               aria-label="Cerrar aviso"

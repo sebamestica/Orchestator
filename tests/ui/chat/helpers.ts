@@ -122,7 +122,27 @@ export interface CoreState {
   proposals: Record<string, Proposal[]>;
 }
 
-/** Núcleo con `/chats` (como lo hará c15) en memoria. */
+/**
+ * Aprueba y entrega como `approveAndDeliver`: queda `delegated` si sus dependencias ya lo están; si no, sigue
+ * `approved` y va en `failed` con el mismo motivo que da el núcleo.
+ */
+function approveIn(state: CoreState, chatId: string, ids: readonly string[]) {
+  const delivered: string[] = [];
+  const failed: { taskId: string; reason: string }[] = [];
+  for (const taskId of ids) {
+    const list = state.proposals[chatId] ?? [];
+    const task = list.find((x) => x.task.id === taskId)?.task;
+    if (!task) continue;
+    const missing = task.dependsOn.filter((d) => list.find((x) => x.task.id === d)?.approval !== 'delegated');
+    const approval = missing.length ? 'approved' : 'delegated';
+    state.proposals[chatId] = list.map((x) => (x.task.id === taskId ? { ...x, approval } : x));
+    if (missing.length) failed.push({ taskId, reason: `depende de ${missing.join(', ')}, que aún no está en la flota: apruébala antes` });
+    else delivered.push(taskId);
+  }
+  return { proposals: state.proposals[chatId] ?? [], delivered, failed };
+}
+
+/** Núcleo con `/chats` (como lo hará c15) en memoria; aprobar responde `{ proposals, delivered, failed }`. */
 export function fakeCore(init: Partial<CoreState> = {}, extra?: Handler): { state: CoreState; calls: Call[] } {
   const state: CoreState = { chats: init.chats ?? [], messages: init.messages ?? {}, proposals: init.proposals ?? {} };
   let seq = 0;
@@ -179,14 +199,16 @@ export function fakeCore(init: Partial<CoreState> = {}, extra?: Handler): { stat
     if ((m = /^\/chats\/([^/]+)\/proposals$/.exec(p))) return { body: { proposals: state.proposals[decodeURIComponent(m[1] ?? '')] ?? [] } };
     if ((m = /^\/chats\/([^/]+)\/proposals\/approve-all$/.exec(p))) {
       const id = decodeURIComponent(m[1] ?? '');
-      state.proposals[id] = (state.proposals[id] ?? []).map((x) => (x.approval === 'proposed' ? { ...x, approval: 'approved' } : x));
-      return { body: { proposals: state.proposals[id] } };
+      const ids = (state.proposals[id] ?? []).filter((x) => x.approval === 'proposed' || x.approval === 'approved').map((x) => x.task.id);
+      return { body: approveIn(state, id, ids) };
     }
-    if ((m = /^\/chats\/([^/]+)\/proposals\/([^/]+)\/(approve|reject)$/.exec(p))) {
+    if ((m = /^\/chats\/([^/]+)\/proposals\/([^/]+)\/approve$/.exec(p))) {
+      return { body: approveIn(state, decodeURIComponent(m[1] ?? ''), [decodeURIComponent(m[2] ?? '')]) };
+    }
+    if ((m = /^\/chats\/([^/]+)\/proposals\/([^/]+)\/reject$/.exec(p))) {
       const id = decodeURIComponent(m[1] ?? '');
       const task = decodeURIComponent(m[2] ?? '');
-      const approval = m[3] === 'approve' ? 'approved' : 'rejected';
-      state.proposals[id] = (state.proposals[id] ?? []).map((x) => (x.task.id === task ? { ...x, approval } : x));
+      state.proposals[id] = (state.proposals[id] ?? []).map((x) => (x.task.id === task ? { ...x, approval: 'rejected' } : x));
       return { body: { proposals: state.proposals[id] } };
     }
     return undefined;

@@ -223,12 +223,19 @@ describe('modo de la mente', () => {
 });
 
 describe('propuestas', () => {
+  const row = (id: string) => screen.getByTestId(`proposal-${id}`);
+  /** La fila dice «sin entregar» y ofrece reintentar la entrega. */
+  const undelivered = (id: string) =>
+    within(row(id)).queryByText(/sin entregar/) !== null && within(row(id)).queryByRole('button', { name: /Reintentar entrega/ }) !== null;
+  const dependent = (id: string, dep: string) => {
+    const p = makeProposal(id);
+    return { ...p, task: { ...p.task, dependsOn: [dep] } };
+  };
+
   it('aprueba, rechaza y aprueba todo, con el estado como Chip', async () => {
-    const live = resetFakeLive();
     const chat = makeChat();
-    const t2 = makeProposal('f5-t2');
-    const proposals = [makeProposal('f5-t1'), { ...t2, task: { ...t2.task, dependsOn: ['f5-t1'] } }, makeProposal('f5-t3')];
-    const { calls, state } = fakeCore({
+    const proposals = [makeProposal('f5-t1'), dependent('f5-t2', 'f5-t1'), makeProposal('f5-t3')];
+    const { calls } = fakeCore({
       chats: [chat],
       messages: {
         [chat.id]: [makeMessage({ id: 'm1', role: 'user', text: 'Planea', at: at(1) }), makeMessage({ id: 'm2', role: 'assistant', text: 'Propongo tres tareas.', at: at(9) })],
@@ -250,11 +257,11 @@ describe('propuestas', () => {
     expect(within(card).getByText('Criterio de f5-t1')).toBeTruthy();
 
     fireEvent.click(within(card).getByRole('button', { name: 'Aprobar f5-t1' }));
-    await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t1')).getByText('Aprobada')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t1')).getByText('Delegada')).toBeTruthy());
     fireEvent.click(within(card).getByRole('button', { name: 'Rechazar f5-t2' }));
     await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t2')).getByText('Rechazada')).toBeTruthy());
     fireEvent.click(within(card).getByRole('button', { name: /Aprobar todo/ }));
-    await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t3')).getByText('Aprobada')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t3')).getByText('Delegada')).toBeTruthy());
 
     expect(posts(calls)).toEqual([
       '/chats/chat_abc123/proposals/f5-t1/approve',
@@ -262,11 +269,72 @@ describe('propuestas', () => {
       '/chats/chat_abc123/proposals/approve-all',
     ]);
     await waitFor(() => expect(within(card).queryByRole('button', { name: /Aprobar todo/ })).toBeNull());
+  });
 
-    // El núcleo avisa por /ws que la flota tomó la tarea.
-    const delegated = (state.proposals[chat.id] ?? []).map((p) => (p.task.id === 'f5-t1' ? { ...p, approval: 'delegated' as const } : p));
-    act(() => live.emit({ type: 'proposals', chatId: chat.id, proposals: delegated }));
-    await waitFor(() => expect(within(screen.getByTestId('proposal-f5-t1')).getByText('Delegada')).toBeTruthy());
+  it('si la entrega falla por una dependencia, avisa, marca «sin entregar» y deja reintentar', async () => {
+    const chat = makeChat();
+    const { calls } = fakeCore({ chats: [chat], proposals: { [chat.id]: [makeProposal('f5-t1'), dependent('f5-t2', 'f5-t1')] } });
+    render(<ChatView projectId="demo" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aprobar f5-t2' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('f5-t2');
+    expect(alert.textContent).toContain('depende de f5-t1');
+    await waitFor(() => expect(undelivered('f5-t2')).toBe(true));
+    expect(within(row('f5-t2')).getByText(/depende de f5-t1/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aprobar f5-t1' }));
+    await waitFor(() => expect(within(row('f5-t1')).getByText('Delegada')).toBeTruthy());
+    // Ya no queda ninguna `proposed`, pero f5-t2 sigue sin entregar: «Aprobar todo» no se va.
+    expect(within(screen.getByRole('group', { name: 'Tareas propuestas' })).getByRole('button', { name: /Aprobar todo/ })).toBeTruthy();
+
+    fireEvent.click(within(row('f5-t2')).getByRole('button', { name: /Reintentar entrega/ }));
+    await waitFor(() => expect(within(row('f5-t2')).getByText('Delegada')).toBeTruthy());
+    expect(within(row('f5-t2')).queryByRole('button', { name: /Reintentar entrega/ })).toBeNull();
+    expect(posts(calls)).toEqual([
+      '/chats/chat_abc123/proposals/f5-t2/approve',
+      '/chats/chat_abc123/proposals/f5-t1/approve',
+      '/chats/chat_abc123/proposals/f5-t2/approve',
+    ]);
+  });
+
+  it('si la flota rechaza la entrega, avisa y «Aprobar todo» la reintenta', async () => {
+    const chat = makeChat();
+    const t1 = makeProposal('f5-t1', { approval: 'delegated' });
+    let refused = false;
+    const core = fakeCore({ chats: [chat], proposals: { [chat.id]: [t1, makeProposal('f5-t2')] } }, (method, path) => {
+      if (refused || method !== 'POST' || !path.endsWith('/proposals/f5-t2/approve')) return undefined;
+      refused = true;
+      const list = [t1, makeProposal('f5-t2', { approval: 'approved' })];
+      core.state.proposals[chat.id] = list;
+      return { body: { proposals: list, delivered: [], failed: [{ taskId: 'f5-t2', reason: 'La flota se está deteniendo' }] } };
+    });
+    render(<ChatView projectId="demo" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aprobar f5-t2' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('f5-t2');
+    expect(alert.textContent).toContain('La flota se está deteniendo');
+    await waitFor(() => expect(undelivered('f5-t2')).toBe(true));
+
+    const card = screen.getByRole('group', { name: 'Tareas propuestas' });
+    fireEvent.click(within(card).getByRole('button', { name: /Aprobar todo/ }));
+    await waitFor(() => expect(within(row('f5-t2')).getByText('Delegada')).toBeTruthy());
+    expect(posts(core.calls).at(-1)).toBe('/chats/chat_abc123/proposals/approve-all');
+    expect(within(card).queryByRole('button', { name: /Aprobar todo/ })).toBeNull();
+  });
+
+  it('una aprobada sin entregar se ve así al recargar y deja de verse cuando /ws la trae delegada', async () => {
+    const live = resetFakeLive();
+    const chat = makeChat();
+    const t1 = makeProposal('f5-t1', { approval: 'approved' });
+    fakeCore({ chats: [chat], proposals: { [chat.id]: [t1] } });
+    render(<ChatView projectId="demo" />);
+
+    await waitFor(() => expect(undelivered('f5-t1')).toBe(true));
+    act(() => live.emit({ type: 'proposals', chatId: chat.id, proposals: [{ ...t1, approval: 'delegated' }] }));
+    await waitFor(() => expect(within(row('f5-t1')).getByText('Delegada')).toBeTruthy());
+    expect(within(row('f5-t1')).queryByRole('button', { name: /Reintentar entrega/ })).toBeNull();
   });
 
   it('si aprobar falla, vuelve al estado anterior y avisa', async () => {
