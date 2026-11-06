@@ -514,12 +514,13 @@ export class SqliteStore implements EventSink {
 
   /**
    * Cierra como `cancelled` las sesiones que quedaron abiertas (`starting`, `running` o `waiting`), p. ej. al
-   * arrancar el núcleo tras un cierre: sus procesos ya no existen. `exceptAgents`: agentes cuyas sesiones se
-   * retoman (la mente reutiliza la sesión de cada chat). No toca `updated_at`: sigue siendo la hora del último evento.
+   * arrancar el núcleo tras un cierre: sus procesos ya no existen. `exceptAgents`: agentes cuyas sesiones raíz se
+   * retoman (la mente reutiliza la sesión de cada chat); sus sesiones hijas (subagentes) no se retoman nunca y se
+   * cancelan igual. No toca `updated_at`: sigue siendo la hora del último evento.
    */
   cancelOpenSessions(opts: { exceptAgents?: readonly string[] } = {}): number {
     const except = [...new Set(opts.exceptAgents ?? [])];
-    const notIn = except.length ? ` AND agent_id NOT IN (${except.map(() => '?').join(', ')})` : '';
+    const notIn = except.length ? ` AND (agent_id NOT IN (${except.map(() => '?').join(', ')}) OR parent_session_id IS NOT NULL)` : '';
     const res = this.stmt(
       `UPDATE sessions SET state = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE state IN ('starting', 'running', 'waiting')${notIn}`,
     ).run(this.iso(), ...except);
@@ -559,10 +560,10 @@ export class SqliteStore implements EventSink {
          ON CONFLICT(id) DO UPDATE SET
            updated_at = excluded.updated_at,
            state = COALESCE(?, CASE WHEN sessions.state = 'starting' THEN 'running' ELSE sessions.state END),
-           ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
+           ended_at = CASE WHEN ? IN ('starting', 'running', 'waiting') THEN NULL ELSE COALESCE(excluded.ended_at, sessions.ended_at) END,
            last_seq = MAX(sessions.last_seq, excluded.last_seq),
            parent_session_id = COALESCE(sessions.parent_session_id, excluded.parent_session_id)`,
-      ).run(e.sessionId, e.agentId, e.parentSessionId ?? null, state ?? 'running', e.ts, e.ts, endedAt, e.seq, state);
+      ).run(e.sessionId, e.agentId, e.parentSessionId ?? null, state ?? 'running', e.ts, e.ts, endedAt, e.seq, state, state);
       if (e.type === 'usage') {
         const u = e.payload;
         this.stmt(

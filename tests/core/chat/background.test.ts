@@ -230,6 +230,26 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     expect(b.service.get(chat.id).backgroundTasks).toBeUndefined();
   });
 
+  it('cerrar el chat deja cancelados en la tienda sus subagentes; el aviso del proceso reanudado no abre sesiones task-*', async () => {
+    const restart = { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'stopped', reason: 'worker_restart', summary: 'no terminó', session_id: 'sdk-1', uuid: uuid() } as unknown as SDKMessage;
+    const q = injectableQuery((message, ctx) => (ctx.process === 2 && ctx.index === 0 ? [restart, ...launchScript(message, ctx)] : launchScript(message, ctx)));
+    const b = await bench({ query: q.fn });
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+    expect(b.store.getSession('tu1')?.state).toBe('running');
+
+    b.service.close(chat.id);
+    expect(b.store.getSession('tu1')?.state).toBe('cancelled');
+
+    await b.service.send(chat.id, { text: 'hola' });
+    await b.settle(chat.id);
+    expect(q.calls).toHaveLength(2);
+    expect(b.store.getSession('task-t1')).toBeUndefined();
+    const open = b.store.listSessions({ parentSessionId: chat.sessionId }).filter((x) => ['starting', 'running', 'waiting'].includes(x.state));
+    expect(open).toEqual([]);
+  });
+
   it('los plugins que se refrescan al abrir la sesión no hacen que el mensaje siguiente la recree', async () => {
     const fake = { type: 'stdio' as const, command: 'node', args: ['chrome-falso.mjs'] };
     const holder: { envCalls?: string[] } = {};

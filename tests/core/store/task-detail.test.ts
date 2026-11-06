@@ -96,6 +96,26 @@ describe('tareas: motivo, intentos y último evento', () => {
     expect(s.cancelOpenSessions()).toBe(1);
   });
 
+  it('al arrancar cancela las sesiones hijas de la mente (no se retoman) y respeta la sesión principal de cada chat', () => {
+    const s = open(':memory:', () => new Date('2026-11-05T08:00:00.000Z'));
+    s.append({ sessionId: 'chat-1', agentId: 'orquestador', seq: 0, ts: '2026-11-04T20:00:00.000Z', type: 'status', payload: { state: 'running' } });
+    s.append({ sessionId: 'toolu_x', agentId: 'orquestador', parentSessionId: 'chat-1', seq: 1, ts: '2026-11-04T20:01:00.000Z', type: 'status', payload: { state: 'running', detail: 'investigar' } });
+    s.append(textEvent('worker', 'codex', 0, '2026-11-04T20:02:00.000Z', 'trabajando'));
+
+    expect(s.cancelOpenSessions({ exceptAgents: ['orquestador'] })).toBe(2);
+    expect(s.getSession('toolu_x')).toMatchObject({ state: 'cancelled', endedAt: '2026-11-05T08:00:00.000Z' });
+    expect(s.getSession('worker')?.state).toBe('cancelled');
+    expect(s.getSession('chat-1')?.state).toBe('running');
+  });
+
+  it('una sesión que vuelve a un estado abierto tras su done queda sin hora de fin', () => {
+    const s = open();
+    s.append({ sessionId: 'chat-1', agentId: 'orquestador', seq: 0, ts: '2026-11-04T20:00:00.000Z', type: 'done', payload: { ok: true } });
+    expect(s.getSession('chat-1')).toMatchObject({ state: 'done', endedAt: '2026-11-04T20:00:00.000Z' });
+    s.append({ sessionId: 'chat-1', agentId: 'orquestador', seq: 1, ts: '2026-11-04T20:05:00.000Z', type: 'status', payload: { state: 'running' } });
+    expect(s.getSession('chat-1')).toMatchObject({ state: 'running', endedAt: null });
+  });
+
   it('migra una base v2: las tareas existentes quedan sin motivo y con cero intentos', () => {
     const path = join(dir, 'v2.db');
     const db = new DatabaseSync(path);

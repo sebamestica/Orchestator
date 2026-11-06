@@ -772,13 +772,23 @@ export class ChatService {
     return stopped;
   }
 
-  /** Da por terminados los subagentes de un proceso del SDK que ya no existe y lo difunde; devuelve cuántos eran. */
+  /**
+   * Da por terminados los subagentes de un proceso del SDK que ya no existe: los cancela en la tienda (su aviso ya no
+   * llegará) y difunde el chat. Devuelve cuántos eran.
+   */
   #stopBackground(chatId: string, live: Live): number {
-    const stopped = live.background.size;
-    if (!stopped) return 0;
+    const ids = [...live.background];
+    if (!ids.length) return 0;
     live.background.clear();
+    const parentSessionId = this.#repo.get(chatId)?.chat.sessionId;
+    if (parentSessionId) {
+      for (const sessionId of ids) {
+        const payload = { state: 'cancelled' as const, detail: 'la sesión de la mente se cerró' };
+        this.#emit(chatId, live, { sessionId, agentId: CONDUCTOR_AGENT_ID, parentSessionId, seq: 0, ts: this.#iso(), type: 'status', payload });
+      }
+    }
     this.#publishLive(chatId);
-    return stopped;
+    return ids.length;
   }
 
   async #read(chatId: string, live: Live, session: ConductorSession): Promise<void> {

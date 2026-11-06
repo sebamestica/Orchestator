@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real
 - **Severidad:** baja
 - **Archivos:** `src/core/app/fleet-service.ts:258`, `src/core/store/store.ts:520`, `src/core/store/store.ts:524`, `src/core/store/store.ts:561`, `src/core/store/store.ts:562`, `src/core/adapters/claude-sdk/translate.ts:168`, `src/core/adapters/claude-sdk/translate.ts:333`, `src/core/adapters/claude-sdk/translate.ts:512`, `src/core/adapters/claude-sdk/translate.ts:519`, `src/core/conductor/session.ts:382`, `src/core/chat/service.ts:738`, `src/core/chat/service.ts:762`, `src/ui/features/agents-panel/AgentsPanel.tsx:58`, `src/ui/features/agents-panel/AgentsPanel.tsx:73`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

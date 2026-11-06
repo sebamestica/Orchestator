@@ -281,6 +281,18 @@ describe('otros mensajes', () => {
     ]);
   });
 
+  it('el aviso terminal de una tarea de otro proceso (sin tool_use_id) no abre una sesión task-*', () => {
+    const notice = { type: 'system', subtype: 'task_notification', task_id: 'ae2bd0d', status: 'stopped', reason: 'worker_restart', summary: `Background agent "x" didn't finish before the previous session ended` };
+    const events = translateAll([notice]);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.sessionId === MAIN && e.type !== 'status')).toBe(true);
+    // Una tarea conocida de este proceso sí se cierra en su sesión.
+    const tr = translator();
+    translateAll([{ type: 'system', subtype: 'task_started', task_id: 't1', tool_use_id: 'toolu_1', description: 'buscar' }], tr);
+    const closed = translateAll([{ type: 'system', subtype: 'task_notification', task_id: 't1', status: 'stopped', summary: 'cortado' }], tr);
+    expect(closed.map((e) => [e.sessionId, e.type === 'status' && e.payload.state])).toEqual([['toolu_1', 'cancelled']]);
+  });
+
   it('el pensamiento visible sale como thinking-summary; el vacío se omite', () => {
     const events = translateAll([{ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'thinking', thinking: '' }, { type: 'thinking', thinking: 'Planeo leer el archivo.' }] } }]);
     expect(payload(events, 'text')).toEqual([{ text: 'Planeo leer el archivo.', role: 'thinking-summary' }]);

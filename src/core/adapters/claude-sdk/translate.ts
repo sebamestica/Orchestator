@@ -131,6 +131,8 @@ const TASK_STATUS: Readonly<Record<string, State>> = {
   stopped: 'cancelled',
 };
 
+const OPEN_STATES: ReadonlySet<State> = new Set<State>(['starting', 'running', 'waiting']);
+
 /** Pista de error vista durante la ejecución (se usa si el resultado final falla). */
 export interface ErrorHint {
   code: ErrorCode;
@@ -336,6 +338,11 @@ export class ClaudeSdkTranslator {
   }
 
   #subagentStatus(taskId: string, toolUseId: string | undefined, state: State, detail: string): AgentEvent {
+    // Fin de una tarea de otro proceso del SDK (p. ej. `worker_restart` al reanudar), sin `tool_use_id`: su sesión
+    // `toolu_…` ya la cerró el chat al soltar ese proceso; inventar `task-<id>` la duplicaría.
+    if (!toolUseId && !this.#taskSession.has(taskId) && !OPEN_STATES.has(state)) {
+      return this.#raw('claude-sdk:system/task_orphan', { task_id: taskId, state, detail });
+    }
     const { sessionId, parent } = this.#taskSessionFor(taskId, toolUseId);
     this.#announced.add(sessionId);
     return this.#event('status', { state, detail: truncate(this.redact(detail)) }, sessionId, parent);
