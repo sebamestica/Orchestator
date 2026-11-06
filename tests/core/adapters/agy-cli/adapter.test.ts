@@ -308,4 +308,11 @@ describe('AgyCliAdapter.run: cierre y avisos (revisión A0)', () => {
     expect(events.find((e) => e.type === 'raw')).toMatchObject({ payload: { source: 'agy-stderr' } });
     expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: true } });
   });
+
+  it('un aviso de diagnóstico en stderr con 401 dentro de un nombre no es error de sesión', async () => {
+    const line = 'WARNING: proceeding, even though we could not create PATH aliases at path "C:\\tmp\\arg0\\agy-arg0a4012b"';
+    const events = await runWith([{ kind: 'stderr', line }, { kind: 'json', value: success, line: JSON.stringify(success) }, exit(0)]);
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: true } });
+  });
 });

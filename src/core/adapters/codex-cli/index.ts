@@ -10,7 +10,7 @@ import { runJsonl } from '../../process/run-jsonl.ts';
 import { relativizeChange } from '../common/paths.ts';
 import { resolveCodexExecutable } from './executable.ts';
 import type { CodexExecutable } from './executable.ts';
-import { classifyCodexError, translateCodexEvent } from './translate.ts';
+import { classifyCodexError, isCodexErrorLine, translateCodexEvent } from './translate.ts';
 import type { EventBody } from './translate.ts';
 
 export interface CodexAdapterOptions {
@@ -208,7 +208,7 @@ export class CodexCliAdapter implements AgentAdapter {
               yield emit(event);
             }
           } else {
-            const code = classifyCodexError(line.line);
+            const code = isCodexErrorLine(line.line) ? classifyCodexError(line.line) : 'unknown';
             if (code !== 'unknown') { failed = true; yield emit({ type: 'error', payload: { code, message: line.line } }); }
             else yield emit({ type: 'raw', payload: { source: line.kind === 'stderr' ? 'codex-stderr' : 'codex-cli', line: line.line } });
           }

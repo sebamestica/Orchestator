@@ -78,7 +78,8 @@ export function classifyAgyError(message: string): ErrorCode {
   ) {
     return 'quota_exhausted';
   }
-  if (/unauthorized|authentication|not logged in|login required|401|api[ _-]?key/i.test(message)) {
+  // `\b401\b`: un 401 dentro de un nombre al azar de stderr (agy-arg0a4012b) no es falta de sesión.
+  if (/unauthorized|authentication|not logged in|login required|\b401\b|api[ _-]?key/i.test(message)) {
     return 'auth';
   }
   if (/timed?[ _-]?out|timeout/i.test(message)) {

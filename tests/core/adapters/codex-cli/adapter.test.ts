@@ -97,16 +97,43 @@ describe('Codex CLI', () => {
     expect(events.filter((e) => e.type === 'error').map((e) => e.payload.code)).toEqual(['quota_exhausted', 'quota_exhausted']);
     expect(events.at(-1)?.payload).toEqual({ ok: false });
   });
-  it('detecta mensaje de cupo en texto y stderr', async () => {
-    const message = "You've hit your usage limit";
-    expect(translateCodexEvent({ type: 'item.completed', item: { id: 'limit', type: 'agent_message', text: message } }, '')[0])
-      .toMatchObject({ type: 'error', payload: { code: 'quota_exhausted' } });
-    const events = await collect(new CodexCliAdapter(config, { runner: runner([{ kind: 'stderr', line: message }, exit]) }), await context());
-    expect(events.find((e) => e.type === 'error')).toMatchObject({ payload: { code: 'quota_exhausted' } });
-    expect(events.at(-1)?.payload).toEqual({ ok: false });
+  it('detecta cupo agotado en una línea de error de stderr', async () => {
+    for (const line of ["Error: You've hit your usage limit", '2026-11-05T12:00:00.000000Z ERROR codex_core::client: usage_limit_reached']) {
+      const events = await collect(new CodexCliAdapter(config, { runner: runner([{ kind: 'stderr', line }, exit]) }), await context());
+      expect(events.find((e) => e.type === 'error')).toMatchObject({ payload: { code: 'quota_exhausted' } });
+      expect(events.at(-1)?.payload).toEqual({ ok: false });
+    }
   });
-  it.each(['rate limit exceeded', 'Too many requests', 'insufficient_quota', 'usage_limit_reached'])('clasifica %s', (message) => {
+  // El cupo real llega por `error`/`turn.failed`; el texto libre del modelo nunca decide el resultado (adaptadores-02).
+  const mentionsQuota = 'Manejo `insufficient_quota` y usage_limit_reached en client.ts';
+  const confirmedTurn = (text: string): JsonlLine[] => [
+    { kind: 'json', line: '', value: { type: 'thread.started', thread_id: 'th' } },
+    { kind: 'json', line: '', value: { type: 'item.completed', item: { id: '1', type: 'agent_message', text } } },
+    { kind: 'json', line: '', value: { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } } },
+  ];
+  it('un agent_message que menciona errores de cupo es texto del asistente', () => {
+    expect(translateCodexEvent({ type: 'item.completed', item: { id: '1', type: 'agent_message', text: mentionsQuota } }, ''))
+      .toEqual([{ type: 'text', payload: { text: mentionsQuota, role: 'assistant' } }]);
+  });
+  it('un turno confirmado cuyo resumen menciona insufficient_quota termina bien', async () => {
+    const events = await collect(new CodexCliAdapter(config, { runner: runner([...confirmedTurn(mentionsQuota), exit]) }), await context());
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: true } });
+  });
+  it('un aviso WARNING de diagnóstico en stderr no hace fallar un turno confirmado', async () => {
+    const warning = 'WARNING: proceeding, even though we could not create PATH aliases: Acceso denegado. (os error 5) at path "<CODEX_HOME>\\tmp\\arg0-windows\\codex-arg0a4012b"';
+    for (const line of [warning, 'Reading prompt from stdin... mentions quota and rate-limit']) {
+      const events = await collect(new CodexCliAdapter(config, { runner: runner([{ kind: 'stderr', line }, ...confirmedTurn('Listo'), exit]) }), await context());
+      expect(events.some((e) => e.type === 'error')).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: true } });
+    }
+  });
+  it.each(['rate limit exceeded', 'Too many requests', 'insufficient_quota', 'usage_limit_reached', "You've hit your usage limit."])('clasifica %s', (message) => {
     expect(classifyCodexError(message)).toBe('quota_exhausted');
+  });
+  it('un 401 dentro de un nombre no es falta de sesión; uno suelto sí', () => {
+    expect(classifyCodexError('Error: path codex-arg0a4012b')).toBe('unknown');
+    expect(classifyCodexError('Error: unexpected status 401')).toBe('auth');
   });
   it.each([
     [{ type: 'turn.completed', usage: { input_tokens: -1 } }, 'invalid_output'],

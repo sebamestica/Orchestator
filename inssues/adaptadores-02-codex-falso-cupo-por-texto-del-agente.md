@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/codex-cli/translate.ts:49`, `src/core/adapters/codex-cli/translate.ts:16`, `src/core/adapters/codex-cli/index.ts:206`, `src/core/adapters/codex-cli/index.ts:211`, `src/core/adapters/codex-cli/index.ts:237`, `src/core/orchestrator/supervisor.ts:537`, `src/core/orchestrator/supervisor.ts:566`, `src/core/orchestrator/supervisor.ts:235`, `src/core/orchestrator/supervisor.ts:240`, `src/core/orchestrator/router.ts:138`, `src/core/adapters/agy-cli/index.ts:34`, `tests/core/adapters/codex-cli/adapter.test.ts:99`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

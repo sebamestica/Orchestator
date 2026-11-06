@@ -15,8 +15,17 @@ const failureSchema = z.object({ message: z.string().optional(), error: z.union(
 
 export function classifyCodexError(message: string): ErrorCode {
   if (/usage[_ -]?limit|rate[_ -]?limit|quota|limit[_ -]?(?:reached|exceeded)|too many requests|insufficient_quota/i.test(message)) return 'quota_exhausted';
-  if (/unauthorized|authentication|not logged in|login required|401/i.test(message)) return 'auth';
+  // `\b401\b`: un 401 dentro de un nombre al azar (codex-arg0a4012b) no es falta de sesión.
+  if (/unauthorized|authentication|not logged in|login required|\b401\b/i.test(message)) return 'auth';
   return 'unknown';
+}
+
+/**
+ * Línea suelta (stderr o stdout no JSON) que Codex marca como error: `Error: …` (salida del proceso) o `ERROR …`,
+ * solo o tras la marca de tiempo del log. Los avisos `WARNING:` y el resto del diagnóstico no deciden el resultado.
+ */
+export function isCodexErrorLine(line: string): boolean {
+  return /^\s*(?:\d{4}-\d\d-\d\dT\S+\s+)?(?:Error:|ERROR\b)/.test(line);
 }
 
 export interface CodexTranslateOptions {
@@ -46,9 +55,7 @@ export function translateCodexEvent(value: unknown, line: string, opts: CodexTra
         switch (item.type) {
           case 'agent_message':
           case 'reasoning':
-            if (item.type === 'agent_message' && item.text && /you(?:'ve| have) hit your usage limit|usage_limit_reached|insufficient_quota/i.test(item.text)) {
-              return [{ type: 'error', payload: { code: 'quota_exhausted', message: item.text } }];
-            }
+            // Texto libre del modelo: puede citar «insufficient_quota» sin que falte cupo. El cupo real llega por `error`/`turn.failed`.
             return item.text === undefined ? raw() : [{ type: 'text', payload: { text: item.text, role: item.type === 'reasoning' ? 'thinking-summary' : 'assistant' } }];
           case 'command_execution':
             return completed

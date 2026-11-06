@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TaskQueue, type TaskStateChange } from '../../../src/core/orchestrator/queue.ts';
+import { CodexCliAdapter } from '../../../src/core/adapters/codex-cli/index.ts';
+import type { JsonlLine, JsonlProcessOptions } from '../../../src/core/process/run-jsonl.ts';
 import { Router } from '../../../src/core/orchestrator/router.ts';
 import { Supervisor, summarizeAttempt, type AttemptResult } from '../../../src/core/orchestrator/supervisor.ts';
 import { agentEventSchema, handoffSchema, REDACTED, type AgentAdapter, type AgentEvent, type Handoff } from '../../../src/shared/index.ts';
@@ -287,6 +289,27 @@ describe('Supervisor: hallazgos de la revisión de Codex', () => {
     expect(result.outcome).toBe('failed');
     expect((await router.checkQuota('codex')).allowed).toBe(false);
     expect((await router.route(task('t2'))).agentId).toBe('claude-1');
+  });
+});
+
+describe('Supervisor con el adaptador real de Codex', () => {
+  it('un resumen que menciona insufficient_quota termina bien, sin traspaso ni bloqueo (adaptadores-02)', async () => {
+    const text = 'Agregué el manejo de `insufficient_quota` y usage_limit_reached en client.ts';
+    const lines: JsonlLine[] = [
+      { kind: 'json', line: '', value: { type: 'thread.started', thread_id: 'th' } },
+      { kind: 'json', line: '', value: { type: 'item.completed', item: { id: '1', type: 'agent_message', text } } },
+      { kind: 'json', line: '', value: { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 2 } } },
+      { kind: 'exit', code: 0, signal: null, timedOut: false, aborted: false },
+    ];
+    const codex = new CodexCliAdapter(agents.codex, { runner: async function* (options: JsonlProcessOptions) { void options; yield* lines; } });
+    const router = new Router({ agents: [agents.claude1, agents.codex] });
+    const handoffs: Handoff[] = [];
+    const supervisor = new Supervisor({ adapters: [codex], router, sink: new MemorySink(), onHandoff: (h) => { handoffs.push(h); } });
+    router.acquire('codex');
+    const result = await supervisor.execute(task('t1'), { agentId: 'codex', worktreePath: worktree });
+    expect(result).toMatchObject({ ok: true, outcome: 'ok', agentId: 'codex' });
+    expect(handoffs).toEqual([]);
+    expect((await router.checkQuota('codex')).allowed).toBe(true);
   });
 });
 
