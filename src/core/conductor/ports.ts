@@ -76,6 +76,8 @@ export interface FleetTaskStatus {
   agentId?: string;
   updatedAt?: string;
   detail?: string;
+  /** Falló porque la flota la detuvo por su tope de gasto: solo el usuario la reintenta (tiene el tope entero). */
+  budgetStop?: boolean;
 }
 
 export type DelegateResult =

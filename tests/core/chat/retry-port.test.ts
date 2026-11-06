@@ -4,12 +4,12 @@ import type { Composition } from '../../../src/core/app/compose.ts';
 
 /** Flota falsa con lo que usa `lazyFleetPort`: cola, estado desde la base y reintento. */
 function fakeFleet(retry: (taskId: string, reason?: string) => Promise<unknown>) {
-  const calls: { taskId: string; reason?: string }[] = [];
+  const calls: { taskId: string; reason?: string; origin?: string }[] = [];
   const fleet = {
     queue: { get: () => undefined, list: () => [] },
     status: (taskId: string) => ({ taskId, state: 'failed', detail: 'timeout: Plazo vencido' }),
-    retry: async (taskId: string, reason?: string) => {
-      calls.push({ taskId, ...(reason ? { reason } : {}) });
+    retry: async (taskId: string, reason?: string, origin?: string) => {
+      calls.push({ taskId, ...(reason ? { reason } : {}), ...(origin ? { origin } : {}) });
       return retry(taskId, reason);
     },
     port: async () => ({ delegate: async () => ({ accepted: true }) }),
@@ -23,7 +23,14 @@ describe('chat de Berland: la mente puede reintentar tareas fallidas', () => {
     const port = lazyFleetPort(comp);
     expect(await port.status('mercado-instagram-v2')).toMatchObject({ state: 'failed', detail: 'timeout: Plazo vencido' });
     expect(await port.retry?.('mercado-instagram-v2')).toEqual({ accepted: true, state: 'ready', agentId: 'claude' });
-    expect(calls).toEqual([{ taskId: 'mercado-instagram-v2', reason: 'reintento pedido por la mente' }]);
+    // Con origen «mind»: la flota le aplica sus límites (no el reintento del usuario, que trae el tope entero).
+    expect(calls).toEqual([{ taskId: 'mercado-instagram-v2', reason: 'reintento pedido por la mente', origin: 'mind' }]);
+  });
+
+  it('sin fila en la base (terminal), el estado del reintento sale de la cola', async () => {
+    const { comp } = fakeFleet(async () => undefined);
+    Object.assign(comp.fleet.queue, { get: () => ({ task: { id: 'x2' }, state: 'ready', agentId: 'claude' }) });
+    expect(await lazyFleetPort(comp).retry?.('x2')).toEqual({ accepted: true, state: 'ready', agentId: 'claude' });
   });
 
   it('si la flota rechaza el reintento, responde accepted: false con el motivo (tachado), sin lanzar', async () => {

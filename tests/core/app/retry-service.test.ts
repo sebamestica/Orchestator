@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { FleetService, INTERRUPTED_DETAIL, RetryError } from '../../../src/core/app/fleet-service.ts';
+import { FleetService, INTERRUPTED_DETAIL, MAX_MIND_RETRIES, RetryError } from '../../../src/core/app/fleet-service.ts';
+import type { FleetTaskStatus } from '../../../src/core/conductor/index.ts';
+import { BUDGET_STOP_DETAIL } from '../../../src/core/orchestrator/index.ts';
 import { SqliteStore, type TaskRecord } from '../../../src/core/store/index.ts';
 import { REDACTED, type AgentEvent, type TaskState } from '../../../src/shared/index.ts';
 import { task } from '../orchestrator/fakes.ts';
@@ -162,5 +164,74 @@ describe('FleetService: una tarea aprobada que espera a sus dependencias', () =>
     }
     expect(restarted.fleet.recoverOrphans().map((t) => t.task.id).sort()).toEqual(['ta', 'tb']);
     expect(restarted.store.getTask('tb')).toMatchObject({ state: 'failed', detail: INTERRUPTED_DETAIL });
+  });
+});
+
+describe('FleetService.retry: la mente no reintenta sin límite (cada reintento trae el tope de gasto entero)', () => {
+  /**
+   * Flota armada falsa: acepta el reintento y deja la tarea en `ready`, como la cola. Su `status` es el de la base salvo
+   * lo que diga `live` (el motivo en vivo que solo tiene la flota armada).
+   */
+  function withPort(s: ReturnType<typeof service>, live = new Map<string, FleetTaskStatus>()): string[] {
+    const retried: string[] = [];
+    Object.assign(s.fleet, {
+      port: async () => ({
+        status: (taskId: string) => live.get(taskId) ?? s.fleet.status(taskId),
+        retry: async (taskId: string) => {
+          retried.push(taskId);
+          s.store.setTaskState(taskId, 'ready');
+          return { accepted: true };
+        },
+      }),
+    });
+    return retried;
+  }
+  const fail = (s: ReturnType<typeof service>, taskId: string, detail: string) => s.store.setTaskState(taskId, 'failed', 'claude', { detail });
+  const BUDGET = `${BUDGET_STOP_DETAIL}: 8.10 de 8 USD (dificultad high); lo hecho queda en .orq/HANDOFF.md: reintenta para continuar desde ahí`;
+
+  it('una tarea detenida por el tope de gasto: la mente no puede reintentarla, el usuario sí', async () => {
+    const s = service();
+    const retried = withPort(s);
+    s.store.putTask(task('cara'), 'running');
+    fail(s, 'cara', BUDGET);
+    expect(s.fleet.status('cara')).toMatchObject({ state: 'failed', budgetStop: true });
+    const err = await s.fleet.retry('cara', 'x', 'mind').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RetryError);
+    expect(err).toMatchObject({ code: 'conflict', message: expect.stringMatching(/tope de gasto: solo el usuario puede reintentarla desde el tablero/) });
+    expect(retried).toEqual([]);
+    await s.fleet.retry('cara', 'reintento pedido por el usuario');
+    expect(retried).toEqual(['cara']);
+  });
+
+  it('una tarea que solo está en la cola (terminal) y se detuvo por el tope: la flota armada lo sabe y la mente no la reintenta', async () => {
+    const s = service();
+    const live = new Map<string, FleetTaskStatus>();
+    const retried = withPort(s, live);
+    s.fleet.queue.add(task('suelta'));
+    s.fleet.queue.next();
+    s.fleet.queue.assign('suelta', 'claude');
+    s.fleet.queue.transition('suelta', 'failed', { agentId: 'claude', detail: BUDGET });
+    // Sin fila en la base, el estado de FleetService no trae el motivo; el de la flota armada sí.
+    expect(s.fleet.status('suelta')?.budgetStop).toBeUndefined();
+    live.set('suelta', { taskId: 'suelta', state: 'failed', detail: BUDGET, budgetStop: true });
+    await expect(s.fleet.retry('suelta', 'x', 'mind')).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/solo el usuario/) });
+    expect(retried).toEqual([]);
+  });
+
+  it(`por otro motivo, la mente reintenta como mucho ${MAX_MIND_RETRIES} veces; un reintento del usuario le devuelve la cuenta`, async () => {
+    const s = service();
+    const retried = withPort(s);
+    s.store.putTask(task('lenta'), 'running');
+    expect(s.fleet.status('lenta')?.budgetStop).toBeUndefined();
+    for (let i = 0; i < MAX_MIND_RETRIES; i++) {
+      fail(s, 'lenta', 'timeout: plazo vencido');
+      await s.fleet.retry('lenta', 'x', 'mind');
+    }
+    fail(s, 'lenta', 'timeout: plazo vencido');
+    await expect(s.fleet.retry('lenta', 'x', 'mind')).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/ya reintentó lenta 2 veces: pídele al usuario/) });
+    await s.fleet.retry('lenta', 'reintento pedido por el usuario', 'user');
+    fail(s, 'lenta', 'timeout: plazo vencido');
+    await s.fleet.retry('lenta', 'x', 'mind');
+    expect(retried).toHaveLength(MAX_MIND_RETRIES + 2);
   });
 });

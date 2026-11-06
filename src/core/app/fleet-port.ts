@@ -1,7 +1,7 @@
 import type { TaskBrief, TaskState } from '../../shared/index.ts';
 import { PLAN_FILES, redactSecrets } from '../../shared/index.ts';
 import type { DelegateResult, FleetPort, FleetTaskStatus, ProjectTaskStatus } from '../conductor/index.ts';
-import type { Fleet, QueueEntry, TaskQueue } from '../orchestrator/index.ts';
+import { isBudgetStop, type Fleet, type QueueEntry, type TaskQueue } from '../orchestrator/index.ts';
 
 /** Lo que la flota necesita de una tarea guardada (SQLite) para reintentarla o informarla tras un reinicio. */
 export interface SavedTask {
@@ -48,17 +48,22 @@ function toStatus(e: QueueEntry): FleetTaskStatus {
 
 function queueStatus(entry: QueueEntry, saved: SavedTask | undefined, liveDetail?: string): FleetTaskStatus {
   const detail = liveDetail ?? (saved?.state === entry.state ? saved.detail : null);
-  return { ...toStatus(entry), ...(detail ? { detail } : {}) };
+  return withBudgetStop({ ...toStatus(entry), ...(detail ? { detail } : {}) });
 }
 
 function savedStatus(saved: SavedTask): FleetTaskStatus {
-  return {
+  return withBudgetStop({
     taskId: saved.task.id,
     state: saved.state,
     updatedAt: saved.updatedAt,
     ...(saved.agentId ? { agentId: saved.agentId } : {}),
     ...(saved.detail ? { detail: saved.detail } : {}),
-  };
+  });
+}
+
+/** Marca la tarea fallida por su tope de gasto (el motivo lo escribe la flota). */
+function withBudgetStop(status: FleetTaskStatus): FleetTaskStatus {
+  return status.state === 'failed' && isBudgetStop(status.detail) ? { ...status, budgetStop: true } : status;
 }
 
 /**

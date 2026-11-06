@@ -75,6 +75,17 @@ describe('delegar sobre una tarea ya delegada', () => {
     expect(textOf(result)).toMatch(/falló y la flota no pudo reintentarla: La tarea api depende de base/);
   });
 
+  it('si la flota niega el reintento a la mente (tope de gasto), delegar devuelve ese motivo y no reintenta', async () => {
+    const fleet = new RetryingFleet();
+    const { tools } = await delegated(fleet);
+    fleet.advance('api', 'failed', 'tope de gasto de la tarea superado: 8.10 de 8 USD (dificultad high)');
+    fleet.retry = async () => ({ accepted: false, reason: 'La tarea api se detuvo por su tope de gasto: solo el usuario puede reintentarla desde el tablero («Reintentar»).' });
+    const result = await tools.call('delegar', { taskId: 'api' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/no pudo reintentarla: La tarea api se detuvo por su tope de gasto: solo el usuario puede reintentarla/);
+    expect(fleet.retried).toEqual([]);
+  });
+
   it('una flota sin retry (puerto antiguo) sigue respondiendo «ya fue delegada»', async () => {
     const fleet = new FakeFleet();
     const { tools } = await delegated(fleet);
@@ -93,5 +104,16 @@ describe('estado devuelve el motivo', () => {
     fleet.advance('api', 'failed', 'interrumpida al reiniciar el núcleo');
     const body = jsonOf(await tools.call('estado', { taskId: 'api' }));
     expect(body).toMatchObject({ estado: 'failed', detalle: 'interrumpida al reiniciar el núcleo', siguientePaso: expect.stringMatching(/delegar/) });
+  });
+
+  it('con la tarea detenida por su tope de gasto: el siguiente paso es pedírselo al usuario, no delegar', async () => {
+    const fleet = new RetryingFleet();
+    const { tools } = await delegated(fleet);
+    fleet.advance('api', 'failed', 'tope de gasto de la tarea superado: 1.02 de 1 USD (dificultad low)');
+    const current = fleet.statuses.get('api');
+    if (current) fleet.statuses.set('api', { ...current, budgetStop: true });
+    const body = jsonOf(await tools.call('estado', { taskId: 'api' })) as { siguientePaso?: string };
+    expect(body.siguientePaso).toMatch(/pídele al usuario que la reintente desde el tablero/);
+    expect(body.siguientePaso).not.toMatch(/usa delegar/);
   });
 });

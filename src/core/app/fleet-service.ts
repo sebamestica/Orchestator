@@ -82,6 +82,33 @@ export interface TaskPublisher {
   publishTask(task: TaskRecord): void;
 }
 
+/** Quién pide un reintento: el usuario (tablero, `POST /tasks/:id/retry`) o la mente (`delegar`). */
+export type RetryOrigin = 'user' | 'mind';
+/** Reintentos que la mente puede hacer sola de una tarea desde el último del usuario. */
+export const MAX_MIND_RETRIES = 2;
+
+/** Motivo que queda en la tarea cuando la reintenta la mente. */
+const MIND_RETRY_DETAIL = 'reintento pedido por la mente';
+
+/** Reintento que pide la mente con `delegar` (chat o terminal), con sus límites. Nunca lanza: el motivo va a la mente. */
+export async function retryAsMind(fleet: Pick<FleetService, 'retry' | 'queue'>, taskId: string): Promise<DelegateResult> {
+  try {
+    const record = await fleet.retry(taskId, MIND_RETRY_DETAIL, 'mind');
+    // La terminal no guarda sus tareas en la base: el estado sale entonces de la cola.
+    const now = record ?? fleet.queue.get(taskId);
+    return { accepted: true, ...(now ? { state: now.state } : {}), ...(now?.agentId ? { agentId: now.agentId } : {}) };
+  } catch (err) {
+    return { accepted: false, reason: redactSecrets(err instanceof Error ? err.message : String(err)).slice(0, 300) };
+  }
+}
+
+function budgetStopError(taskId: string): RetryError {
+  return new RetryError(
+    'conflict',
+    `La tarea ${taskId} se detuvo por su tope de gasto: solo el usuario puede reintentarla desde el tablero («Reintentar»). No la reintentes ni crees otra tarea que repita el mismo trabajo; avísale.`,
+  );
+}
+
 /** Por qué no se pudo reintentar una tarea (el servidor lo traduce: `not_found` → 404, `conflict` → 409). */
 export class RetryError extends Error {
   override readonly name = 'RetryError';
@@ -117,6 +144,8 @@ export class FleetService {
   readonly #linked = new Map<string, string | null>();
   /** Última difusión del avance de cada tarea (ms). */
   readonly #activityAt = new Map<string, number>();
+  /** Reintentos de la mente por tarea desde el último del usuario (en memoria: un reinicio del núcleo los repone). */
+  readonly #mindRetries = new Map<string, number>();
 
   constructor(deps: FleetDeps, workspaces: CommittingWorkspaces, tuning: FleetTuning = {}, log: (line: string) => void = () => undefined) {
     this.#deps = deps;
@@ -223,17 +252,33 @@ export class FleetService {
   /**
    * Reintenta una tarea fallida (botón «Reintentar», `POST /tasks/:id/retry` y `delegar` de la mente): la cola la
    * vuelve a `ready`, o la reencola desde la base si el núcleo se reinició. Lanza `RetryError` si no existe o no está
-   * `failed`, o si la flota no la acepta.
+   * `failed`, o si la flota no la acepta. Cada reintento arranca con el tope de gasto entero: por eso la mente no
+   * reintenta una tarea detenida por su tope ni más de `MAX_MIND_RETRIES` veces seguidas (lo decide el usuario).
    */
-  async retry(taskId: string, reason: string = RETRY_DETAIL): Promise<TaskRecord | undefined> {
+  async retry(taskId: string, reason: string = RETRY_DETAIL, origin: RetryOrigin = 'user'): Promise<TaskRecord | undefined> {
     const record = this.#deps.store.getTask(taskId);
     const entry = this.queue.get(taskId);
     if (!record && !entry) throw new RetryError('not_found', `No existe la tarea ${taskId}`);
     const state = entry?.state ?? record?.state;
     if (state !== 'failed') throw new RetryError('conflict', `La tarea ${taskId} está en estado ${state ?? 'desconocido'}: solo se reintenta una tarea fallida`);
-    const result: DelegateResult = await (await this.port()).retry(taskId, reason);
+    if (origin === 'mind') this.#checkMindRetry(taskId);
+    const port = await this.port();
+    // El motivo en vivo lo tiene la flota armada (la terminal no guarda sus tareas en la base).
+    if (origin === 'mind' && port.status(taskId)?.budgetStop) throw budgetStopError(taskId);
+    const result: DelegateResult = await port.retry(taskId, reason);
     if (!result.accepted) throw new RetryError('conflict', result.reason);
+    // Un reintento del usuario devuelve a la mente sus reintentos.
+    if (origin === 'mind') this.#mindRetries.set(taskId, (this.#mindRetries.get(taskId) ?? 0) + 1);
+    else this.#mindRetries.delete(taskId);
     return this.#deps.store.getTask(taskId);
+  }
+
+  #checkMindRetry(taskId: string): void {
+    if (this.status(taskId)?.budgetStop) throw budgetStopError(taskId);
+    const used = this.#mindRetries.get(taskId) ?? 0;
+    if (used >= MAX_MIND_RETRIES) {
+      throw new RetryError('conflict', `La mente ya reintentó ${taskId} ${used} veces: pídele al usuario que revise el motivo y la reintente desde el tablero.`);
+    }
   }
 
   /**

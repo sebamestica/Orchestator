@@ -8,7 +8,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
-import { DEFAULT_SETTINGS, redactSecrets } from '../../shared/index.ts';
+import { DEFAULT_SETTINGS } from '../../shared/index.ts';
 import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
@@ -20,6 +20,7 @@ import type { Composition } from './compose.ts';
 import { mindDenyPaths, plannerPort, projectSkillsPort, taskProjectOf, withTaskProjects } from './conductor.ts';
 import { withoutHostCredentials } from './env.ts';
 import { fleetTaskList } from './fleet-port.ts';
+import { retryAsMind } from './fleet-service.ts';
 
 export interface ChatWiring {
   /** Ajustes vigentes (c14: `SettingsStore`); por defecto `DEFAULT_SETTINGS`. */
@@ -48,14 +49,7 @@ export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Co
     status: (taskId) => comp.fleet.status(taskId),
     // La cola nace vacía en cada arranque: la base trae las tareas que no tiene (fallidas, integradas, del Tablero).
     list: () => fleetTaskList(comp.fleet.queue.list(), comp.store?.listTasks() ?? []),
-    retry: async (taskId) => {
-      try {
-        const record = await comp.fleet.retry(taskId, 'reintento pedido por la mente');
-        return { accepted: true, ...(record ? { state: record.state } : {}), ...(record?.agentId ? { agentId: record.agentId } : {}) };
-      } catch (err) {
-        return { accepted: false, reason: redactSecrets(err instanceof Error ? err.message : String(err)).slice(0, 300) };
-      }
-    },
+    retry: (taskId) => retryAsMind(comp.fleet, taskId),
   };
   return withTaskProjects(port, taskProjectOf(comp));
 }

@@ -26,6 +26,13 @@ export const BRIEF_FILE = join('.orq', 'BRIEF.md');
 /** Plan general (solo lectura para el agente) y plan de la tarea (lo escribe el agente). */
 export const PLAN_FILE = join(...PLAN_FILES.plan.split('/'));
 export const TASK_PLAN_FILE = join(...PLAN_FILES.taskPlan.split('/'));
+/** Comienzo del motivo con que la flota deja `failed` una tarea que llegó a su tope de gasto. */
+export const BUDGET_STOP_DETAIL = 'tope de gasto de la tarea superado';
+
+/** La tarea falló porque la flota la detuvo por su tope de gasto (motivo de `#overBudget`). */
+export function isBudgetStop(detail: string | null | undefined): boolean {
+  return detail?.startsWith(BUDGET_STOP_DETAIL) ?? false;
+}
 export const DEFAULT_MEMORY_BUDGET_CHARS = 4_000;
 /** Rondas autor → revisión → integración por tarea. */
 export const DEFAULT_MAX_ROUNDS = 3;
@@ -638,7 +645,7 @@ export class Fleet {
   async #overBudget(run: TaskRun): Promise<'failed'> {
     const { task } = run;
     const cap = this.#taskCap(task) ?? 0;
-    const detail = `tope de gasto de la tarea superado: ${run.spentUsd.toFixed(2)} de ${cap} USD (dificultad ${task.difficulty}); lo hecho queda en ${PLAN_FILES.handoff}: reintenta para continuar desde ahí`;
+    const detail = `${BUDGET_STOP_DETAIL}: ${run.spentUsd.toFixed(2)} de ${cap} USD (dificultad ${task.difficulty}); lo hecho queda en ${PLAN_FILES.handoff}: reintenta para continuar desde ahí`;
     if (run.workspace) {
       const file = join(run.workspace.path, HANDOFF_FILE);
       try {

@@ -30,6 +30,9 @@ export const MAX_OUTPUT_CHARS = 8_000;
 export const MAX_SKILLS = 5;
 /** Tope de `crear_tareas.destino.remoto` (nombre o URL). */
 export const MAX_DESTINATION_CHARS = 2_000;
+/** `siguientePaso` de una tarea que la flota detuvo por su tope de gasto: la reintenta el usuario, no la mente. */
+export const BUDGET_STOP_NEXT_STEP =
+  'Se detuvo por su tope de gasto: pídele al usuario que la reintente desde el tablero. No la reintentes ni crees otra tarea que repita el mismo trabajo.';
 /** Rama de `destino`: sin espacios, sin «..» ni «//», sin empezar por «-». */
 const BRANCH_NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._/-]{1,200}$/;
 const MAX_LISTED_TASKS = 40;
@@ -331,7 +334,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
             agente: status?.agentId ?? null,
             actualizado: status?.updatedAt ?? entry?.delegatedAt ?? entry?.decidedAt ?? entry?.proposedAt ?? null,
             detalle: status?.detail ?? null,
-            ...(status?.state === 'failed' ? { siguientePaso: 'Falló: el motivo está en detalle. Para reintentarla (sigue en su worktree) usa delegar con su taskId.' } : {}),
+            ...(status?.state === 'failed' ? { siguientePaso: status.budgetStop ? BUDGET_STOP_NEXT_STEP : 'Falló: el motivo está en detalle. Para reintentarla (sigue en su worktree) usa delegar con su taskId.' } : {}),
           });
         }
         if (scope === undefined) return reply(fleetSummary(await ports.proposals.list(), await ports.fleet.list()));

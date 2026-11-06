@@ -24,6 +24,7 @@ import type { AgentRecord } from '../store/index.ts';
 import type { Composition } from './compose.ts';
 import { withoutHostCredentials } from './env.ts';
 import type { FleetRuntime } from './fleet-port.ts';
+import { retryAsMind } from './fleet-service.ts';
 
 export interface ConductorOptions {
   projectId: string;
@@ -174,7 +175,11 @@ export async function createConductor(comp: Composition, opts: ConductorOptions)
       planner: plannerPort(comp),
       proposals,
       // Con el proyecto de cada tarea: `estado` y el planificador solo ven las de este proyecto.
-      fleet: withTaskProjects(fleetPort, taskProjectOf(comp)),
+      // `delegar` reintenta como la mente, con sus límites (no como el botón del usuario).
+      fleet: withTaskProjects(
+        { delegate: (t) => fleetPort.delegate(t), status: (id) => fleetPort.status(id), list: () => fleetPort.list(), retry: (id) => retryAsMind(comp.fleet, id) },
+        taskProjectOf(comp),
+      ),
       quotas,
       memory: comp.memory,
       skills: projectSkillsPort(comp.skills, opts.cwd),

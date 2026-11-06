@@ -3,7 +3,7 @@
 - **Área:** Mente y chat · Flota (gasto)
 - **Severidad:** media
 - **Archivos:** `src/core/orchestrator/fleet.ts:42`, `src/core/orchestrator/fleet.ts:340`, `src/core/orchestrator/fleet.ts:599`, `src/core/orchestrator/fleet.ts:611`, `src/core/orchestrator/fleet.ts:614`, `src/core/conductor/tools.ts:223`, `src/core/conductor/tools.ts:259`, `src/core/conductor/tools.ts:275`, `src/core/conductor/tools.ts:324`, `src/core/conductor/session.ts:291`, `src/core/conductor/session.ts:316`, `src/core/conductor/prompt.ts:138`, `src/core/conductor/prompt.ts:149`, `src/core/chat/service.ts:259`, `src/core/app/f5-chat.ts:53`, `src/core/app/fleet-service.ts:154`, `src/core/app/fleet-service.ts:221`, `src/core/app/fleet-service.ts:333`, `src/core/app/fleet-port.ts:148`, `docs/plan/issues/06-razonamiento-modelos.md:131`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `autoeval-gasto-01` (la mente sin tope propio), `autoeval-gasto-02` (presupuesto no común), `mente-03` (en auto y bypass `crear_tareas` aprueba sola), `flota-04` y `flota-06` (reintentos y `.orq` en la flota)
 
