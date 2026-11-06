@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/store/store.ts:704`, `src/core/store/store.ts:705`, `src/core/store/store.ts:709`, `src/core/store/store.ts:763`, `src/core/store/store.ts:286`, `src/core/store/store.ts:297`, `src/core/store/schema.ts:5`, `src/core/store/schema.ts:91`, `src/core/store/schema.ts:95`, `src/core/config/config.ts:46`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

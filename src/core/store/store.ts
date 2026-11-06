@@ -292,7 +292,12 @@ export class SqliteStore implements EventSink {
     this.db = new DatabaseSync(opts.path);
     this.db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
     if (opts.path !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL;');
-    this.migrate();
+    try {
+      this.migrate();
+    } catch (err) {
+      this.db.close(); // si no, el archivo queda abierto (y bloqueado en Windows) sin nadie que lo cierre
+      throw err;
+    }
   }
 
   close(): void {
@@ -716,16 +721,19 @@ export class SqliteStore implements EventSink {
     return this.dayFormat.format(new Date(ts));
   }
 
+  /**
+   * Aplica las migraciones pendientes en una sola transacción. La versión se relee con el candado de escritura tomado:
+   * otro proceso sobre el mismo archivo pudo migrar entre la primera lectura y `BEGIN IMMEDIATE`.
+   */
   private migrate(): void {
-    const version = this.schemaVersion();
-    for (let v = version; v < MIGRATIONS.length; v++) {
-      const sql = MIGRATIONS[v];
-      if (!sql) continue;
-      this.tx(() => {
-        this.db.exec(sql);
-        this.db.exec(`PRAGMA user_version = ${v + 1}`);
-      });
-    }
+    const current = this.schemaVersion();
+    if (current >= MIGRATIONS.length) return assertKnownSchema(current);
+    this.tx(() => {
+      const version = this.schemaVersion();
+      assertKnownSchema(version);
+      for (const sql of MIGRATIONS.slice(version)) this.db.exec(sql);
+      this.db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
+    });
   }
 
   private writeAgent(input: AgentInput, exclusive: boolean): AgentRecord {
@@ -790,6 +798,15 @@ export class SqliteStore implements EventSink {
   private iso(): string {
     return this.now().toISOString();
   }
+}
+
+/** Una base migrada por un código más nuevo tiene tablas o columnas que este no conoce: mejor no abrirla. */
+function assertKnownSchema(version: number): void {
+  if (version <= MIGRATIONS.length) return;
+  throw new StoreError(
+    'conflict',
+    `La base (esquema v${version}) es de una versión más nueva de Berland que este código (v${MIGRATIONS.length}); actualízalo o usa otra ORQ_DATA_DIR`,
+  );
 }
 
 function clampPage(limit: number): number {
