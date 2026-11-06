@@ -55,14 +55,13 @@ export default function PluginsView() {
       const result = z.object({ plugin: pluginSchema, authUrl: z.url().optional() }).parse(await api.post<unknown>(`/plugins/${plugin.id}/${disconnect ? 'disconnect' : 'connect'}`, {}));
       setPlugins((current) => merge(current, result.plugin));
       const authUrl = result.authUrl ?? result.plugin.authUrl;
-      if (!disconnect && authUrl) {
-        const url = new URL(authUrl);
-        if (!['https:', 'http:'].includes(url.protocol)) throw new Error('El enlace de conexión no es válido.');
-        if (window.orq) await window.orq.openExternal(url.href);
-        else window.open(url.href, '_blank', 'noopener,noreferrer');
-      }
+      if (!disconnect && authUrl) await openAuthUrl(authUrl);
     } catch (e) { setError(pluginError(e)); }
     finally { setBusy((b) => ({ ...b, [plugin.id]: false })); }
+  }
+  async function reopen(authUrl: string) {
+    setError('');
+    try { await openAuthUrl(authUrl); } catch (e) { setError(pluginError(e)); }
   }
   return <PageBody><PageHeader title="Plugins" description="Conecta tus cuentas para que los agentes trabajen con ellas" />
     {error && <p role="alert" className="mb-4 text-sm text-muted">{error}</p>}{loading && <Spinner aria-label="Cargando plugins" />}
@@ -70,6 +69,10 @@ export default function PluginsView() {
       const chrome = plugin.id === 'chrome';
       const Icon = chrome ? Globe : Palette;
       const active = plugin.status === 'connected' || plugin.status === 'connecting';
+      // Mientras el intento de OAuth sigue vivo, el núcleo manda el enlace: se puede reabrir si la pestaña no se abrió.
+      const authUrl = plugin.status === 'connecting' ? safeAuthUrl(plugin.authUrl) : undefined;
+      const verb = plugin.status === 'connecting' ? 'Cancelar' : active ? 'Desconectar' : 'Conectar';
+      const verbLabel = plugin.status === 'connecting' ? `Cancelar conexión de ${plugin.name}` : `${verb} ${plugin.name}`;
       return <Panel key={plugin.id} className="space-y-4 p-5">
         <div className="flex items-center gap-3"><Icon aria-hidden="true" size={24} /><h2 className="flex-1 font-medium">{plugin.name}</h2><Chip>{statuses[plugin.status]}</Chip></div>
         <p className="text-sm text-muted">{plugin.description}</p>
@@ -83,11 +86,29 @@ export default function PluginsView() {
             <Button className="bg-foreground text-canvas" isDisabled={!!busy.chrome} onPress={() => { void change(plugin, false); }} aria-label="Probar conexión de Chrome">Probar conexión</Button>
             {active && <Button variant="secondary" isDisabled={!!busy.chrome} onPress={() => { void change(plugin, true); }} aria-label="Desconectar Chrome">Desconectar</Button>}
           </>
-          : <Button className="bg-foreground text-canvas" isDisabled={!!busy[plugin.id]} onPress={() => { void change(plugin, active); }} aria-label={`${active ? 'Desconectar' : 'Conectar'} ${plugin.name}`}>{active ? 'Desconectar' : 'Conectar'}</Button>}
+          : <>
+            {authUrl && <Button className="bg-foreground text-canvas" isDisabled={!!busy[plugin.id]} onPress={() => { void reopen(authUrl); }} aria-label={`Abrir la página de ${plugin.name}`}>Abrir la página de {plugin.name}</Button>}
+            <Button className={authUrl ? undefined : 'bg-foreground text-canvas'} variant={authUrl ? 'secondary' : undefined} isDisabled={!!busy[plugin.id]} onPress={() => { void change(plugin, active); }} aria-label={verbLabel}>{verb}</Button>
+          </>}
         </div>
       </Panel>;
     })}<Panel className="p-5 text-sm text-muted">Más plugins pronto</Panel></div>
   </PageBody>;
+}
+/** El enlace de autorización si es http(s); cualquier otro esquema no se abre. */
+function safeAuthUrl(href: string | undefined): string | undefined {
+  if (!href) return undefined;
+  try {
+    const url = new URL(href);
+    return ['https:', 'http:'].includes(url.protocol) ? url.href : undefined;
+  } catch { return undefined; }
+}
+/** Abre la autorización en el navegador del sistema (escritorio) o en una pestaña nueva (web). */
+async function openAuthUrl(href: string): Promise<void> {
+  const url = safeAuthUrl(href);
+  if (!url) throw new Error('El enlace de conexión no es válido.');
+  if (window.orq) await window.orq.openExternal(url);
+  else window.open(url, '_blank', 'noopener,noreferrer');
 }
 /** «Tu Chrome personal · 32 herramientas · …» → una línea por dato (las dos primeras juntas). */
 export function chromeLines(detail: string): string[] {

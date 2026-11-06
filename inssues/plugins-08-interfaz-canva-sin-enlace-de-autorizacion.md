@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/plugins/PluginsView.tsx:57`, `src/ui/features/plugins/PluginsView.tsx:72`, `src/ui/features/plugins/PluginsView.tsx:80`, `src/ui/features/plugins/PluginsView.tsx:86`, `src/core/plugins/service.ts:71`, `src/core/plugins/service.ts:211`, `src/core/plugins/service.ts:424`, `src/shared/api.ts:473`, `tests/ui/plugins/PluginsView.test.tsx:36`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Conectar Canva es un OAuth en dos tiempos. `POST /plugins/canva/connect` descubre el servidor, registra el cliente

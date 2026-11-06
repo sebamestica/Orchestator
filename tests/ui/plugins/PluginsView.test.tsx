@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { DesktopBridge } from '../../../src/shared/api.ts';
 import type { LiveMessage } from '../../../src/ui/api/live.ts';
 import { setCoreEndpoint } from '../../../src/ui/api/client.ts';
 import PluginsView, { chromeLines, LIVE_REFRESH_MS } from '../../../src/ui/features/plugins/PluginsView.tsx';
@@ -39,6 +40,38 @@ describe('Plugins', () => {
     render(<PluginsView />);
     fireEvent.click(await screen.findByRole('button', { name: 'Conectar Canva' }));
     await waitFor(() => expect(open).toHaveBeenCalledWith('https://www.canva.com/oauth', '_blank', 'noopener,noreferrer'));
+  });
+  it('con un intento de Canva vivo deja reabrir la autorización y ofrece Cancelar', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const authUrl = 'https://www.canva.com/oauth?x=1';
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [chrome, { ...canva, status: 'connecting', steps: ['Si no se abrió, abre el enlace de autorización'], authUrl }] }));
+    render(<PluginsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir la página de Canva' }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith(authUrl, '_blank', 'noopener,noreferrer'));
+    expect(screen.getByRole('button', { name: 'Cancelar conexión de Canva' }).textContent).toBe('Cancelar');
+    expect(screen.queryByRole('button', { name: 'Desconectar Canva' })).toBeNull();
+  });
+  it('en el escritorio reabre la autorización con el navegador del sistema', async () => {
+    const openExternal = vi.fn().mockResolvedValue(undefined);
+    window.orq = { openExternal } as unknown as DesktopBridge;
+    const authUrl = 'https://www.canva.com/oauth?x=1';
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [{ ...canva, status: 'connecting', authUrl }] }));
+    render(<PluginsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir la página de Canva' }));
+    await waitFor(() => expect(openExternal).toHaveBeenCalledWith(authUrl));
+  });
+  it('sin enlace vivo (caducado) o con un esquema que no es http(s) no ofrece abrir nada', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [{ ...canva, status: 'connecting' }] }));
+    const view = render(<PluginsView />);
+    expect(await screen.findByRole('button', { name: 'Cancelar conexión de Canva' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Abrir la página de Canva' })).toBeNull();
+    view.unmount();
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ plugins: [{ ...canva, status: 'connecting', authUrl: 'javascript:alert(1)' }] }));
+    render(<PluginsView />);
+    expect(await screen.findByRole('button', { name: 'Cancelar conexión de Canva' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Abrir la página de Canva' })).toBeNull();
+    expect(open).not.toHaveBeenCalled();
   });
   it('no ofrece el perfil aislado de los agentes', async () => {
     render(<PluginsView />);
