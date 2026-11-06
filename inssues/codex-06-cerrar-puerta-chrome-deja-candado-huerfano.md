@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex)
 - **Severidad:** baja
 - **Archivos:** `src/core/plugins/chrome-gate.ts:169-175`, `src/core/plugins/chrome-gate.ts:184`, `src/core/plugins/chrome-gate.ts:199`, `src/core/plugins/chrome-gate.ts:216`, `src/core/plugins/chrome-gate.ts:252`, `src/core/plugins/chrome-gate.ts:304-310`, `src/core/plugins/chrome-gate.ts:314-323`, `src/core/locks/manager.ts:403`, `src/core/locks/manager.ts:407`, `src/core/locks/manager.ts:420-421`, `src/core/locks/manager.ts:289`, `src/core/plugins/chrome.ts:227-234`, `src/core/plugins/service.ts:200-202`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

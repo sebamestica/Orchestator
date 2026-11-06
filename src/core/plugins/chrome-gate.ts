@@ -179,6 +179,8 @@ export class ChromeGate {
     this.#closed = true;
     this.#stop.abort();
     if (this.#idle) clearTimeout(this.#idle);
+    // Una toma a medias (mkdir + owner) se espera: si no, el proceso sale y deja la carpeta sin owner.
+    await this.#acquiring?.catch(() => undefined);
     await this.#release('cierre');
   }
 
@@ -216,12 +218,18 @@ export class ChromeGate {
     const started = performance.now();
     let holder: LockHolder | undefined;
     let announced = false;
+    const ended = { ok: false, text: 'La sesión terminó mientras esperaba el Chrome personal.' } as const;
     for (;;) {
-      if (this.#closed) return { ok: false, text: 'La sesión terminó mientras esperaba el Chrome personal.' };
+      if (this.#closed) return ended;
       // Si el cliente canceló todas las llamadas que esperaban, no hace falta el candado.
       if ([...this.#waiting.values()].every((w) => w.cancelled)) return { ok: false, text: 'Llamada cancelada.' };
       try {
-        this.#held = await this.#locks.acquire(this.#opts.lock, { agent: this.#opts.agent, task: this.#opts.task, note: `${BERLAND_CHROME_NOTE} · puerta MCP` }, { timeoutMs: 0 });
+        const handle = await this.#locks.acquire(this.#opts.lock, { agent: this.#opts.agent, task: this.#opts.task, note: `${BERLAND_CHROME_NOTE} · puerta MCP` }, { timeoutMs: 0 });
+        if (this.#closed) {
+          await handle.release().catch(() => undefined);
+          return ended;
+        }
+        this.#held = handle;
         this.#deps.log?.(`candado ${this.#opts.lock} tomado`);
         return { ok: true };
       } catch (err) {
@@ -250,7 +258,7 @@ export class ChromeGate {
       try {
         await sleep(Math.max(1, Math.min(this.#opts.retryMs * (0.75 + Math.random() * 0.5), this.#opts.waitMs - elapsed)), undefined, { signal: this.#stop.signal });
       } catch {
-        return { ok: false, text: 'La sesión terminó mientras esperaba el Chrome personal.' };
+        return ended;
       }
     }
   }

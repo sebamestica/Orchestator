@@ -2,8 +2,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { LockManager } from '../../../src/core/locks/index.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LockManager, type LockHandle } from '../../../src/core/locks/index.ts';
 import { encodeOwner } from '../../../src/core/locks/owner.ts';
 import { busyText, ChromeGate, parseGateArgs, type GateOptions } from '../../../src/core/plugins/chrome-gate.ts';
 import { BERLAND_CHROME_NOTE, CHROME_GATE_SCRIPT, CHROME_LOCK, chromeGateArgs, isAbandonedChromeHolder } from '../../../src/core/plugins/chrome.ts';
@@ -219,6 +219,69 @@ describe('puerta MCP del Chrome personal: candado perezoso', () => {
     await until(() => t.toServer.length === 1);
     await t.g.close();
     expect(await exists(join(root, CHROME_LOCK))).toBe(false);
+  });
+});
+
+/** Puerta en proceso con el gestor de candados que dé la prueba. */
+function gateWith(root: string, locks: Pick<LockManager, 'acquire' | 'releaseAbandoned'>) {
+  const toServer: string[] = [];
+  const g = new ChromeGate(
+    { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20 },
+    { toServer: (l) => toServer.push(l), toClient: () => undefined, locks },
+  );
+  cleanups.push(() => g.close());
+  g.onClientLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'new_page', arguments: {} } }));
+  return { g, toServer };
+}
+
+function deferred<T>() {
+  let resolve: (v: T) => void = () => undefined;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+describe('puerta MCP del Chrome personal: cierre durante la toma', () => {
+  it('close() espera la toma en curso y suelta el candado una sola vez', async () => {
+    const root = await tempDir('orq-gate-');
+    const pending = deferred<LockHandle>();
+    const acquire = vi.fn(() => pending.promise);
+    const t = gateWith(root, { acquire, releaseAbandoned: vi.fn(async () => undefined) });
+    await until(() => acquire.mock.calls.length === 1);
+    let closed = false;
+    const closing = t.g.close().then(() => { closed = true; });
+    await wait(30);
+    expect(closed).toBe(false);
+    const release = vi.fn(async () => undefined);
+    pending.resolve({ name: CHROME_LOCK, path: join(root, CHROME_LOCK), owner: { agent: 'claude-main', task: 'tarea-a', pid: process.pid, host: hostname(), at: new Date().toISOString() }, token: 'a'.repeat(32), release });
+    await closing;
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(t.g.holding).toBe(false);
+    expect(t.toServer).toEqual([]);
+  });
+
+  it('con el gestor real, cerrar en pleno mkdir del candado no deja la carpeta ni un owner', async () => {
+    const root = await tempDir('orq-gate-');
+    const brake = deferred<void>();
+    let braked = false;
+    const locks = new LockManager({
+      root,
+      fs: {
+        mkdir: (p, o) => {
+          if (!p.endsWith(CHROME_LOCK)) return mkdir(p, o);
+          braked = true;
+          return brake.promise.then(() => mkdir(p, o));
+        },
+      },
+    });
+    const t = gateWith(root, locks);
+    await until(() => braked);
+    const closing = t.g.close();
+    brake.resolve();
+    await closing;
+    // Deja terminar la toma que estaba frenada: no debe quedar nada después.
+    await wait(200);
+    expect(await exists(join(root, CHROME_LOCK))).toBe(false);
+    expect(t.toServer).toEqual([]);
   });
 });
 
