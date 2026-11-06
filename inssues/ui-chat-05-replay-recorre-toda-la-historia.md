@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** media
 - **Archivos:** `src/ui/features/chat/use-chat-live.ts:45-49`, `src/ui/features/chat/use-chat-live.ts:59`, `src/ui/features/chat/store.ts:211`, `src/ui/features/chat/store.ts:271`, `src/ui/features/chat/store.ts:289`, `src/ui/features/chat/ChatView.tsx:92`, `src/ui/features/chat/ChatView.tsx:94`, `src/ui/features/chat/ChatView.tsx:215`, `src/ui/features/chat/timeline.ts:73`, `src/ui/features/agents-panel/AgentsPanel.tsx:35-37`, `src/core/server/ws.ts:71`, `src/core/store/store.ts:599-604`, `src/core/store/store.ts:608`, `src/core/chat/service.ts:337`, `src/core/chat/service.ts:631`, `tests/ui/chat/chat-view.test.tsx:106`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

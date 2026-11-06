@@ -153,6 +153,8 @@ describe('respuesta en vivo', () => {
     const { calls } = fakeCore({ chats: [chat], messages: { [chat.id]: [makeMessage({ id: 'm1', role: 'user', text: 'Revisa', at: at(1) })] } });
     render(<ChatView projectId="demo" />);
     await screen.findByText('Revisa');
+    // Sin sesión en el núcleo falso (404): la primera página se pide desde -1.
+    await waitFor(() => expect(live.replay).toHaveBeenCalledWith('sess_chat_1', -1));
     act(() => live.emit({ type: 'replay', sessionId: 'sess_chat_1', events: [ev.text(0, 2, 'a'), ev.text(1, 2, 'b')], lastSeq: 1, hasMore: true }));
     // Hay más páginas: pide la siguiente.
     expect(live.replay).toHaveBeenLastCalledWith('sess_chat_1', 1);
