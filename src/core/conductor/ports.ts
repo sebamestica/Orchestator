@@ -143,6 +143,8 @@ export interface SdkMessageTranslator {
   translate(message: SDKMessage): readonly AgentEvent[];
   /** Uso propio de este proceso por modelo, sin lo que restaure una sesión reanudada (c1: `ClaudeSdkTranslator.ownUsage`). */
   ownUsage?(): Readonly<Record<string, OwnModelUsage>>;
+  /** Gasto acumulado del proceso del SDK en USD, conocido hasta el último mensaje (también a mitad de turno). */
+  readonly spentUsd?: number;
 }
 
 /** Datos con los que se construye el traductor de una sesión (encaja con `TranslatorOptions` de c1). */

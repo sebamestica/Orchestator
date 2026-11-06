@@ -411,6 +411,11 @@ export class ConductorSession {
     return this.#closed;
   }
 
+  /** Gasto del proceso del SDK hasta ahora (USD), si el traductor lo sabe: crece a mitad de turno. */
+  get spentUsd(): number | undefined {
+    return this.#translator?.spentUsd;
+  }
+
   /** Esfuerzo vigente: el de las opciones o el último aplicado con `setEffort`. */
   get effort(): EffortLevel {
     return this.#effort;

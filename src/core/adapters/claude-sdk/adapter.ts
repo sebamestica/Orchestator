@@ -13,6 +13,7 @@ import { briefHints, effortFor, runHints, taskRole, type TaskRole } from '../../
 import { renderBrief } from '../../brief/render-brief.ts';
 import { assertRealInside } from '../../memory/safe-fs.ts';
 import { mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
+import type { LiveSpendEntry } from '../../quota/live-spend.ts';
 import { readSpentUsd, type SpentUsdFn } from '../../quota/manual-budget.ts';
 import { classifyClaudeError } from './errors.ts';
 import { createPolicyHook, createToolPolicy, type ToolPolicyOptions } from './permissions.ts';
@@ -73,6 +74,11 @@ export interface ClaudeSdkAdapterOptions {
   fetch?: typeof globalThis.fetch;
   /** Gasto ya registrado del agente en USD (p. ej. suma en SQLite), para el tope `config.budgetUsd`. */
   spentUsd?: SpentUsdFn;
+  /**
+   * Cuenta en curso de cada ejecución en el saldo común de la clave (`LiveSpend`): con ella, `spentUsd` incluye lo que
+   * gastan a la vez la mente y otras tareas, y la ejecución se corta si entre todos superan `config.budgetUsd`.
+   */
+  liveSpend?: () => LiveSpendEntry;
   /** Por defecto `[]`: no se carga configuración ejecutable del proyecto ni del usuario. */
   settingSources?: readonly SettingSource[];
   /** `canUseTool` de respaldo; por defecto `createToolPolicy` con la misma política del hook. */
@@ -294,14 +300,27 @@ export class ClaudeSdkAdapter implements AgentAdapter {
 
   async *run(task: TaskBrief, ctx: RunContext): AsyncGenerator<AgentEvent> {
     const grant = await safeGrant(this.#opts.plugins, { agentId: this.config.id, kind: 'claude-sdk', taskId: task.id, signal: ctx.signal });
+    const live = this.#opts.liveSpend?.();
     try {
-      yield* this.#run(task, ctx, grant);
+      yield* this.#run(task, ctx, grant, live);
     } finally {
+      live?.close();
       await grant.release();
     }
   }
 
-  async *#run(task: TaskBrief, ctx: RunContext, grant: McpGrant): AsyncGenerator<AgentEvent> {
+  /** Con la cuenta en curso abierta: ¿el gasto común de la clave (registrado + en curso de todos) supera el presupuesto? */
+  async #commonBudgetExceeded(live: LiveSpendEntry | undefined): Promise<boolean> {
+    const budget = this.config.budgetUsd;
+    if (!live || budget === undefined || !this.#opts.spentUsd) return false;
+    try {
+      return (await readSpentUsd(this.#opts.spentUsd)) > budget;
+    } catch {
+      return false;
+    }
+  }
+
+  async *#run(task: TaskBrief, ctx: RunContext, grant: McpGrant, live: LiveSpendEntry | undefined): AsyncGenerator<AgentEvent> {
     const plugins = claudeMcpOptions(grant.servers);
     const env = { ...this.buildEnv(ctx.env), ...plugins.env };
     const secrets = [...secretsOf(env), ...mcpSecrets(grant.servers)];
@@ -356,7 +375,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     }
 
     const controller = new AbortController();
-    let stopReason: 'cancelled' | 'timeout' | 'budget' | 'fatal' | undefined;
+    let stopReason: 'cancelled' | 'timeout' | 'budget' | 'common-budget' | 'fatal' | undefined;
     const stop = (reason: NonNullable<typeof stopReason>) => {
       stopReason ??= reason;
       controller.abort();
@@ -407,6 +426,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
 
     let q: (AsyncIterable<unknown> & { close?: () => void }) | undefined;
     let thrown: unknown;
+    let liveUsd = 0;
     try {
       const queryFn = this.#opts.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
       // Las reglas del repo ya van en el prompt de sistema: el encargo no pide volver a leerlas.
@@ -416,6 +436,12 @@ export class ClaudeSdkAdapter implements AgentAdapter {
         for (const event of tr.translate(message)) yield event;
         if (tr.finished) break;
         if (cap !== undefined && tr.spentUsd > cap) stop('budget');
+        // Solo cuando el gasto cambió: la mente y otras tareas gastan con la misma clave mientras esta corre.
+        if (live && tr.spentUsd !== liveUsd) {
+          liveUsd = tr.spentUsd;
+          live.set(liveUsd);
+          if (await this.#commonBudgetExceeded(live)) stop('common-budget');
+        }
         if (tr.fatal && !this.#opts.retryPermanentErrors) stop('fatal');
         if (stopReason) break;
       }
@@ -439,6 +465,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     } else if (stopReason === 'budget') {
       const what = taskBound ? 'el tope de gasto de la tarea' : 'el presupuesto en curso';
       yield tr.error('quota_exhausted', `Se superó ${what}: ~${tr.spentUsd.toFixed(4)} USD de ${cap?.toFixed(4)} USD disponibles.`);
+    } else if (stopReason === 'common-budget') {
+      yield tr.error('quota_exhausted', `Presupuesto agotado: la clave de ${this.config.id} superó ${this.config.budgetUsd} USD entre la mente y las tareas en curso (esta llevaba ~${tr.spentUsd.toFixed(4)} USD).`);
     } else if (stopReason === 'timeout') {
       yield tr.error('timeout', `Se agotó el tiempo de la tarea (${Math.round(ctx.timeoutMs / 1000)} s).`);
     } else if (stopReason === 'cancelled') {

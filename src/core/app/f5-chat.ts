@@ -13,7 +13,7 @@ import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes, type MindPlugins, type MindPort } from '../chat/index.ts';
-import { CONDUCTOR_AGENT_ID, type ConductorQueryFn, type FleetPort, type FleetTaskStatus } from '../conductor/index.ts';
+import type { ConductorQueryFn, FleetPort, FleetTaskStatus } from '../conductor/index.ts';
 import type { QueueEntry } from '../orchestrator/index.ts';
 import { pluginsSection } from '../plugins/index.ts';
 import type { RouteModule } from '../server/index.ts';
@@ -101,8 +101,9 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
         baseEnv: () => withoutHostCredentials(comp.hostEnv()),
         budgetLeftUsd: (agentId) => {
           const budget = comp.registry.get(agentId)?.config.budgetUsd;
-          return budget === undefined ? undefined : budget - comp.spentUsd(agentId) - comp.spentUsd(CONDUCTOR_AGENT_ID);
+          return budget === undefined ? undefined : budget - comp.billedSpentUsd(agentId);
         },
+        liveSpend: (agentId) => comp.liveSpend.open(agentId),
       },
       ports: {
         planner: plannerPort(comp),

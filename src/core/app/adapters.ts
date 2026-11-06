@@ -3,6 +3,7 @@ import { AgyCliAdapter } from '../adapters/agy-cli/index.ts';
 import { ClaudeSdkAdapter, type ClaudeSdkAdapterOptions } from '../adapters/claude-sdk/index.ts';
 import { CodexCliAdapter, type CodexAdapterOptions } from '../adapters/codex-cli/index.ts';
 import type { McpServerSource } from '../plugins/mcp.ts';
+import type { LiveSpendEntry } from '../quota/live-spend.ts';
 import type { SpentUsdFn } from '../quota/manual-budget.ts';
 import type { AdapterFactory, AgentSecrets } from '../registry/index.ts';
 import { agentEnv, withoutHostCredentials } from './env.ts';
@@ -30,8 +31,10 @@ export const DEFAULT_CONSTRUCTORS: AdapterConstructors = {
 };
 
 export interface AdapterFactoryOptions {
-  /** Gasto registrado del agente (suma en SQLite). La misma función alimenta el tope del adaptador y el cupo manual. */
+  /** Gasto cobrado a la clave del agente (`billedSpentUsd`). La misma función alimenta el tope del adaptador y el cupo manual. */
   spentUsd: (agentId: string) => SpentUsdFn;
+  /** Abre la cuenta en curso de una ejecución Claude en el saldo común de su clave (`LiveSpend.open`). */
+  liveSpend?: (agentId: string) => LiveSpendEntry;
   /** Entorno anfitrión (por defecto `process.env`); se le quitan las credenciales de Anthropic. */
   hostEnv?: () => Readonly<Record<string, string | undefined>>;
   /** `fetch` del `probe` de Claude (pruebas o proxy). */
@@ -55,6 +58,7 @@ export class AdapterFactoryError extends Error {
 export function createAdapterFactory(opts: AdapterFactoryOptions): AdapterFactory {
   const make = { ...DEFAULT_CONSTRUCTORS, ...opts.constructors };
   const hostEnv = opts.hostEnv ?? (() => process.env);
+  const liveSpend = opts.liveSpend;
   return (config, secrets) => {
     switch (config.kind) {
       case 'claude-sdk': {
@@ -65,6 +69,7 @@ export function createAdapterFactory(opts: AdapterFactoryOptions): AdapterFactor
           baseEnv: { ...withoutHostCredentials(hostEnv()), ...keyEnv },
           probeEnv: () => keyEnv,
           spentUsd: opts.spentUsd(config.id),
+          ...(liveSpend ? { liveSpend: () => liveSpend(config.id) } : {}),
           ...(opts.fetch ? { fetch: opts.fetch } : {}),
           ...(opts.plugins ? { plugins: opts.plugins } : {}),
         });

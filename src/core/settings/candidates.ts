@@ -1,4 +1,4 @@
-import type { MindCandidate } from '../../shared/index.ts';
+import type { AgentConfig, MindCandidate, Settings } from '../../shared/index.ts';
 import type { AgentRecord } from '../store/index.ts';
 
 /** Codex y agy como mente necesitan las herramientas del orquestador por MCP sobre HTTP (fase F5.2). */
@@ -42,4 +42,12 @@ export function mindCandidates(agents: readonly AgentRecord[]): MindCandidate[] 
   });
   // `sort` es estable: dentro de cada nivel se conserva el orden del registro.
   return out.sort((a, b) => ORDER[a.support] - ORDER[b.support]);
+}
+
+/**
+ * Agente cuya clave paga la mente (su gasto se guarda como `orquestador`): el elegido en Ajustes o, sin elección, el
+ * primer Claude (`claude-sdk`) habilitado, como en `resolveMind`, pero sin validarlo ni lanzar.
+ */
+export function mindAgentId(settings: Settings, agents: readonly AgentConfig[]): string | undefined {
+  return settings.mind.agentId ?? agents.find((a) => a.kind === 'claude-sdk' && a.enabled)?.id;
 }

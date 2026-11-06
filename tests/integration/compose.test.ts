@@ -82,6 +82,32 @@ describe('compose: fábrica de adaptadores', () => {
     expect(await comp.adapterFactory(api, { apiKey: fakeKey() })).toBeInstanceOf(ApiChatAdapter);
   });
 
+  it('el presupuesto de la clave es común: el adaptador y el cupo manual descuentan lo que gasta la mente', async () => {
+    const seen = new Map<string, ClaudeSdkAdapterOptions>();
+    const { comp } = await setup({ constructors: { claudeSdk: (o) => (seen.set(o.config.id, o), leakyAdapter(o.config, [])) } });
+    const claude = comp.store.putAgent({ config: cfg({ id: 'claude', kind: 'claude-sdk', provider: 'anthropic', secretRef: 'claude-key', budgetUsd: 20 }) });
+    const other = comp.store.putAgent({ config: cfg({ id: 'claude-b', kind: 'claude-sdk', provider: 'anthropic', secretRef: 'b-key', budgetUsd: 20 }) });
+    const usage = (agentId: string, costUsd: number, seq: number) =>
+      comp.store.appendEvent({ sessionId: `s-${agentId}`, agentId, seq, ts: '2026-11-05T18:00:00.000Z', type: 'usage', payload: { inputTokens: 1, outputTokens: 1, costUsd } });
+    usage('claude', 10, 0);
+    usage('orquestador', 5, 0);
+    await comp.adapterFactory(claude.config, { apiKey: fakeKey() });
+    await comp.adapterFactory(other.config, { apiKey: fakeKey() });
+
+    // `claude` es la mente (primer Claude habilitado): su clave paga también lo de `orquestador`.
+    expect(await seen.get('claude')?.spentUsd?.()).toBe(15);
+    expect(await seen.get('claude-b')?.spentUsd?.()).toBe(0);
+    const snap = await comp.quotaProviderFactory({ ...claude, quotaMethod: 'manual-budget' }, {})?.read();
+    expect(snap?.buckets[0]).toMatchObject({ remainingUnits: { amount: 5, unit: 'usd' }, remainingFraction: 0.25 });
+
+    // Lo que lleva en curso un proceso vivo (otra tarea o un chat) también se descuenta, hasta que termina.
+    const live = comp.liveSpend.open('claude');
+    live.set(2);
+    expect(comp.billedSpentUsd('claude')).toBe(17);
+    live.close();
+    expect(comp.billedSpentUsd('claude')).toBe(15);
+  });
+
   it('el adaptador de API se puede reemplazar con `api`', async () => {
     const seen: string[] = [];
     const { comp } = await setup({ api: (c, s) => (seen.push(`${c.id}:${s.apiKey ? 'con-clave' : 'sin-clave'}`), leakyAdapter(c, [])) });

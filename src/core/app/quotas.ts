@@ -14,7 +14,7 @@ export function defaultQuotaMethod(config: AgentConfig): QuotaMethod {
 }
 
 export interface QuotaFactoryOptions {
-  /** La misma función de gasto que usa el adaptador para su tope (suma en SQLite). */
+  /** La misma función de gasto que usa el adaptador para su tope (`billedSpentUsd`: incluye a la mente). */
   spentUsd: (agentId: string) => SpentUsdFn;
   fetch?: typeof globalThis.fetch;
 }

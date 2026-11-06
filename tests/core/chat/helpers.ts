@@ -40,6 +40,12 @@ export function sdkText(text: string, sessionId: string, parentToolUseId: string
   } as unknown as SDKMessage;
 }
 
+/** Mensaje del asistente a mitad de turno con el gasto acumulado del proceso (`usage_report`, como el SDK). */
+export function sdkSpent(text: string, sessionId: string, totalCostUsd: number): SDKMessage {
+  const m = sdkText(text, sessionId) as unknown as Record<string, unknown>;
+  return { ...m, usage_report: { session: { total_cost_usd: totalCostUsd } } } as unknown as SDKMessage;
+}
+
 /** Resultado de un turno con costo acumulado (como el SDK en una conversación larga). */
 export function sdkResult(text: string | undefined, sessionId: string, costUsd: number, subtype = 'success'): SDKMessage {
   return {
@@ -69,7 +75,8 @@ export interface TurnContext {
   stopped: Promise<void>;
 }
 
-export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<SDKMessage[]> | SDKMessage[];
+/** Guion de un turno: los mensajes de una vez, o un iterable asíncrono que puede esperar a mitad de turno. */
+export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<SDKMessage[]> | SDKMessage[] | AsyncIterable<SDKMessage>;
 
 export interface ChatQuery {
   fn: ConductorQueryFn;
@@ -97,7 +104,7 @@ export function chatQuery(turn: TurnFn, opts: { flags?: boolean } = {}): ChatQue
       for await (const message of prompt) {
         state.received.push(message);
         const out = await turn(message, { index: index++, process, options, stopped });
-        for (const m of out) yield m;
+        for await (const m of out) yield m;
         stopped = new Promise<void>((r) => { stop = r; });
       }
     })();
@@ -201,6 +208,7 @@ export interface BenchOptions extends Partial<Omit<ChatServiceDeps, 'db' | 'stor
   /** Plugins vivos de la mente (`MindPort.plugins` y `pluginLive`). */
   plugins?: MindPort['plugins'];
   pluginLive?: MindPort['pluginLive'];
+  liveSpend?: MindPort['liveSpend'];
 }
 
 const benches: ChatBench[] = [];
@@ -220,7 +228,7 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
   const settings = { value: opts.settings ?? DEFAULT_SETTINGS };
   const agents = opts.agents ?? [claudeAgent];
   const envCalls: string[] = [];
-  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, flags: _f, plugins, pluginLive, ...rest } = opts;
+  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, liveSpend, flags: _f, plugins, pluginLive, ...rest } = opts;
   const service = new ChatService({
     db: store.database,
     store,
@@ -236,6 +244,7 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
       ...(budgetLeftUsd ? { budgetLeftUsd } : {}),
       ...(plugins ? { plugins } : {}),
       ...(pluginLive ? { pluginLive } : {}),
+      ...(liveSpend ? { liveSpend } : {}),
     },
     ports: { planner: ports.planner, fleet: ports.fleet, quotas: ports.quotas, memory: ports.memory, skills: ports.skills },
     translator: (init) => new ClaudeSdkTranslator(init),

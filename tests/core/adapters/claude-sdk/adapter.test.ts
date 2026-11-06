@@ -6,6 +6,7 @@ import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeSdkAdapter, DEFAULT_CLAUDE_MODEL, installedSdkVersion } from '../../../../src/core/adapters/claude-sdk/index.ts';
 import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import { renderBrief } from '../../../../src/core/brief/render-brief.ts';
+import { LiveSpend } from '../../../../src/core/quota/live-spend.ts';
 import { agentConfigSchema, type RunContext } from '../../../../src/shared/index.ts';
 import { FAKE_KEY, WORKTREE, collect, config, ctx, fakeQuery, loadJsonl, payload, task } from './helpers.ts';
 
@@ -208,6 +209,26 @@ describe('ClaudeSdkAdapter.run: presupuesto (config.budgetUsd)', () => {
     expect(payload(events, 'usage')[0]).toMatchObject({ costUsd: 0.22136 });
     expect(events.at(-1)?.payload).toEqual({ ok: false });
     expect(fake.closed).toBe(true);
+  });
+
+  it('corta en curso si entre todos los que pagan con la clave se supera el presupuesto, y cierra su cuenta en curso', async () => {
+    const fake = fakeQuery(subagentRun);
+    const ledger = new LiveSpend();
+    const chat = ledger.open(config.id);
+    let reads = 0;
+    // Al arrancar nadie gastó; a mitad de la ejecución un chat de la mente lleva 0,9 USD sin guardar.
+    const spentUsd = () => {
+      if (reads++ > 0) chat.set(0.9);
+      return ledger.inFlightUsd(config.id);
+    };
+    const adapter = new ClaudeSdkAdapter({ config: budget(1), query: fake.query, spentUsd, liveSpend: () => ledger.open(config.id) });
+    const events = await collect(adapter.run(task, ctx()));
+    expect(fake.calls[0]?.options.maxBudgetUsd).toBe(1);
+    expect(payload(events, 'error')).toEqual([{ code: 'quota_exhausted', message: expect.stringMatching(/^Presupuesto agotado: la clave de .+ superó 1 USD/) }]);
+    expect(fake.closed).toBe(true);
+    expect(ledger.inFlightUsd(config.id)).toBe(0.9);
+    chat.close();
+    expect(ledger.inFlightUsd(config.id)).toBe(0);
   });
 
   it('el tope del propio SDK (fixture real error_max_budget_usd) también da quota_exhausted', async () => {

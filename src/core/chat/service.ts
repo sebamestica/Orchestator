@@ -59,6 +59,7 @@ import type {
   TranslatorInit,
 } from '../conductor/index.ts';
 import type { EventHub } from '../server/index.ts';
+import type { LiveSpendEntry } from '../quota/live-spend.ts';
 import type { SqliteStore } from '../store/index.ts';
 import { AttachmentError, sniffImage, type AttachmentStore } from './attachments.ts';
 import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
@@ -108,8 +109,14 @@ export interface MindPort {
   pluginLive?(agentId: string, server: string): boolean;
   /** Entorno base del proceso del SDK, sin credenciales del anfitrión. */
   baseEnv?(): Readonly<Record<string, string | undefined>>;
-  /** Lo que queda del presupuesto del agente (USD); `undefined` sin tope. */
+  /**
+   * Lo que queda del presupuesto del agente (USD); `undefined` sin tope. Es el saldo común de su clave: descuenta a la
+   * flota, a la mente y lo que llevan en curso los procesos vivos (`liveSpend`). Se mira en cada envío y en cada
+   * mensaje de un turno.
+   */
   budgetLeftUsd?(agentId: string): number | undefined;
+  /** Abre la cuenta en curso de una sesión de la mente en el saldo común de la clave (`LiveSpend.open`). */
+  liveSpend?(agentId: string): LiveSpendEntry;
 }
 
 export interface ChatServiceDeps {
@@ -269,6 +276,10 @@ function cutTurnNotice(lastEventAt: string | undefined, lostSubagents: number): 
         ? ' 1 subagente en segundo plano se perdió al reiniciar.'
         : ` ${lostSubagents} subagentes en segundo plano se perdieron al reiniciar.`;
   return `La respuesta se cortó porque el núcleo se cerró${when}. Vuelve a enviar tu mensaje.${lost}`;
+}
+
+function budgetSpent(agentId: string): string {
+  return `Presupuesto de ${agentId} agotado (entre la mente y la flota): súbelo en Ajustes → Agentes`;
 }
 
 function oneLine(err: unknown): string {
@@ -557,6 +568,8 @@ export class ChatService {
         live.busy = false;
         // Un envío fallido no deja abierta la lectura de las carpetas de sus adjuntos.
         for (const root of addedRoots) live.roots.delete(root);
+        // Ni la sesión viva sin su plazo de inactividad (p. ej. rechazada por falta de saldo).
+        this.#scheduleIdle(chatId, live);
       }
       if (err instanceof AttachmentError) throw new ChatError(err.code, err.message);
       throw err;
@@ -753,6 +766,9 @@ export class ChatService {
       pluginsHash: pluginsFingerprint(plugins),
       quotaFloor: settings.quotaFloor,
     });
+    // En cada envío, también con la sesión viva: otro chat o la flota pudieron gastar el saldo común.
+    const left = this.#deps.mind.budgetLeftUsd?.(mind.id);
+    if (left !== undefined && left <= 0) throw new ChatError('conflict', budgetSpent(mind.id));
     const alive = live.session && !live.session.closed ? live.session : undefined;
     if (alive) {
       const sameShape = live.key === key;
@@ -771,8 +787,6 @@ export class ChatService {
     }
     if (live.session) this.#dropSession(chatId, live);
 
-    const left = this.#deps.mind.budgetLeftUsd?.(mind.id);
-    if (left !== undefined && left <= 0) throw new ChatError('conflict', `Presupuesto de ${mind.id} agotado: súbelo en Ajustes → Agentes`);
     let env: Readonly<Record<string, string>>;
     try {
       env = { ...plugins.env, ...(await this.#deps.mind.env(mind.id)) };
@@ -824,7 +838,7 @@ export class ChatService {
     // Un proceso nuevo cuenta el uso desde cero. Uno reanudado trae los acumulados que restaura Claude Code (a veces de
     // una foto vieja): se miden contra el uso propio del proceso para no guardarlos otra vez.
     live.delta = usageDeltas(sdkSessionId ? { own: () => session.ownUsage() } : {});
-    void this.#read(chatId, live, session, resume);
+    void this.#read(chatId, live, session, mind.id, resume);
     return session;
   }
 
@@ -881,11 +895,15 @@ export class ChatService {
     return ids.length;
   }
 
-  async #read(chatId: string, live: Live, session: ConductorSession, resume?: Resume): Promise<void> {
+  async #read(chatId: string, live: Live, session: ConductorSession, billTo: string, resume?: Resume): Promise<void> {
     let known = this.#repo.get(chatId)?.sdkSessionId ?? undefined;
     let warned = false;
     let seen = false;
     let retry: Turn | undefined;
+    const spend = this.#deps.mind.liveSpend?.(billTo);
+    // Lo que el proceso ya tenía gastado en su último `result` (lo que sigue no está guardado en SQLite).
+    let settled = 0;
+    let lastSpent = 0;
     try {
       for await (const update of session.stream()) {
         seen = true;
@@ -903,6 +921,12 @@ export class ChatService {
         if (!live.turn && live.session === session && startsMainTurn(update.message)) this.#beginAutonomousTurn(chatId, live, session);
         for (const event of update.events) this.#emit(chatId, live, event);
         if (update.message.type === 'result' && live.turn?.session === session) this.#finishTurn(chatId, live, live.turn, update.message);
+        const spent = session.spentUsd ?? 0;
+        if (update.message.type === 'result') settled = spent;
+        spend?.set(spent - settled);
+        // Solo cuando el gasto cambió: cada mirada al saldo suma en SQLite.
+        if (spent > settled && spent !== lastSpent) this.#stopIfBudgetSpent(chatId, live, session, billTo);
+        lastSpent = spent;
       }
     } catch (err) {
       const lost = resume !== undefined && !seen && (resume.lost || RESUME_LOST.test(err instanceof Error ? err.message : String(err)));
@@ -913,6 +937,7 @@ export class ChatService {
       }
       this.#log(`chat ${chatId}: la sesión terminó con error: ${oneLine(err)}`);
     } finally {
+      spend?.close();
       // El proceso del SDK terminó solo (caída, error fatal, tope de gasto): sus subagentes murieron con él y ya no
       // llegará su aviso. Los cierres de `#dropSession` y la sesión que reemplazó `#ensureSession` no pasan por aquí.
       if (live.session === session) {
@@ -969,6 +994,16 @@ export class ChatService {
       this.#log(`chat ${chatId}: repetir el turno sin reanudar falló: ${oneLine(err)}`);
       this.#finishTurn(chatId, live, turn, undefined);
     }
+  }
+
+  /** A mitad de turno, si entre todos los que pagan con la clave se acabó el presupuesto: avisa y corta el turno. */
+  #stopIfBudgetSpent(chatId: string, live: Live, session: ConductorSession, billTo: string): void {
+    const turn = live.turn;
+    if (turn?.session !== session || turn.interrupted) return;
+    const left = this.#deps.mind.budgetLeftUsd?.(billTo);
+    if (left === undefined || left > 0) return;
+    this.#emit(chatId, live, { type: 'error', payload: { code: 'quota_exhausted', message: budgetSpent(billTo) } });
+    void this.interrupt(chatId);
   }
 
   /** Evento al hub: diferencias de uso, `seq` continuo, costo del chat y texto del turno. */

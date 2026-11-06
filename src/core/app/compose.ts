@@ -2,12 +2,15 @@ import { z } from 'zod';
 import type { AgentAdapter, WorkspaceManager } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
 import { loadCoreConfig, type CoreConfig } from '../config/index.ts';
+import { CONDUCTOR_AGENT_ID } from '../conductor/index.ts';
 import { defaultVault, type CoreDeps } from '../main.ts';
 import { ObsidianMemory } from '../memory/index.ts';
 import { PluginService } from '../plugins/index.ts';
 import { PlanRegistry, type PlannerLlm } from '../orchestrator/index.ts';
+import { LiveSpend } from '../quota/live-spend.ts';
 import { AgentRegistry, defaultCliDetectors, type AdapterFactory, type CliDetector, type QuotaProviderFactory } from '../registry/index.ts';
 import type { Planner, RouteModule, TaskHooks } from '../server/index.ts';
+import { mindAgentId, settingsStoreFor } from '../settings/index.ts';
 import { SkillHub } from '../skills/index.ts';
 import { SqliteStore } from '../store/index.ts';
 import type { SecretVault } from '../vault/index.ts';
@@ -98,8 +101,16 @@ export interface Composition {
   plans: PlanRegistry;
   /** Para `startCore(deps)`. */
   deps: CoreDeps;
-  /** Gasto registrado en SQLite (USD): tope del adaptador y cupo manual usan esta misma suma. */
+  /** Gasto registrado en SQLite (USD) con el `agent_id` dado, sin más. */
   spentUsd(agentId: string): number;
+  /**
+   * Gasto cobrado a la clave del agente (USD): el suyo, el de la mente (`orquestador`) si ese agente es la mente, y lo
+   * que llevan sin guardar sus procesos vivos. El tope del adaptador, el cupo manual y el de la mente usan esta suma.
+   * `paysMind` lo fija quien sabe con qué agente corre la mente (p. ej. `conversar --agente`).
+   */
+  billedSpentUsd(agentId: string, paysMind?: boolean): number;
+  /** Gasto en curso de los procesos vivos (sesiones de la mente y ejecuciones Claude), por agente que paga. */
+  liveSpend: LiveSpend;
   /** Adaptadores listos para `Supervisor`, con su clave ya cargada para `envFor`. */
   loadAdapters(agentIds?: readonly string[]): Promise<AgentAdapter[]>;
   /** Cierra el almacén (sin esperar a la flota). */
@@ -122,7 +133,12 @@ export function compose(opts: ComposeOptions = {}): Composition {
   try {
     const vault = opts.vault ?? defaultVault(config, log);
     const spentUsd = (agentId: string) => store.spentUsd(agentId);
-    const spentFn = (agentId: string) => () => spentUsd(agentId);
+    const liveSpend = new LiveSpend();
+    // `registry` se declara más abajo: solo se llama después, al leer un gasto.
+    const isMind = (agentId: string) => mindAgentId(settingsStoreFor(store.database).get(), registry.list().map((a) => a.config)) === agentId;
+    const billedSpentUsd = (agentId: string, paysMind = isMind(agentId)) =>
+      spentUsd(agentId) + (paysMind ? spentUsd(CONDUCTOR_AGENT_ID) : 0) + liveSpend.inFlightUsd(agentId);
+    const spentFn = (agentId: string) => () => billedSpentUsd(agentId);
     const skillsHubDir = opts.skillsHubDir ?? appEnv.ORQ_SKILLS_DIR;
     // Los workers Claude leen el hub de skills (las `skillRefs` de los encargos apuntan allí).
     const skillsRoot = skillsReadRoot(skillsHubDir);
@@ -133,6 +149,7 @@ export function compose(opts: ComposeOptions = {}): Composition {
     const adapterFactory = createAdapterFactory({
       plugins: plugins.source(),
       spentUsd: spentFn,
+      liveSpend: (agentId) => liveSpend.open(agentId),
       ...(opts.hostEnv ? { hostEnv: opts.hostEnv } : {}),
       ...(opts.anthropicFetch ? { fetch: opts.anthropicFetch } : {}),
       claude,
@@ -228,6 +245,8 @@ export function compose(opts: ComposeOptions = {}): Composition {
       hostEnv: opts.hostEnv ?? (() => process.env),
       deps,
       spentUsd,
+      billedSpentUsd,
+      liveSpend,
       loadAdapters,
       close,
       async shutdown() {

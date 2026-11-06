@@ -3,7 +3,7 @@
 - **Área:** Mente y chat (gasto) · Cupos
 - **Severidad:** media
 - **Archivos:** `src/core/app/f5-chat.ts:103`, `src/core/app/conductor.ts:160`, `src/core/app/compose.ts:124`, `src/core/app/adapters.ts:67`, `src/core/adapters/claude-sdk/adapter.ts:321`, `src/core/adapters/claude-sdk/adapter.ts:406`, `src/core/app/quotas.ts:40`, `src/core/quota/manual-budget.ts:60`, `src/core/chat/service.ts:677`, `src/core/chat/service.ts:695`, `src/core/chat/service.ts:733`, `src/core/conductor/session.ts:350`, `src/core/quota/monitor.ts:98`, `src/core/store/store.ts:665`, `tests/integration/compose.test.ts:78`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `autoeval-gasto-01` (topes por turno y por día de la mente), `uso-real-02` (gasto de la mente contado dos veces al reanudar, que también achica el `maxBudgetUsd`), `agy-20` (presupuesto de los agentes por API), `datos-04` (fotos de cupo; no es el mismo problema, pero `ManualBudgetQuota` escribe ahí)
 

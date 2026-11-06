@@ -9,7 +9,8 @@ import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index
 import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, chromeServerSpec, pluginsSection } from '../../../src/core/plugins/index.ts';
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
-import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, meteredTurn, sdkInit, sdkResult, sdkText, settleChat, tick, usageCost, type ChatBench, type TurnFn } from './helpers.ts';
+import { LiveSpend } from '../../../src/core/quota/live-spend.ts';
+import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, meteredTurn, sdkInit, sdkResult, sdkSpent, sdkText, settleChat, tick, usageCost, type ChatBench, type TurnFn } from './helpers.ts';
 
 afterEach(closeBenches);
 
@@ -214,6 +215,86 @@ describe('ChatService: mensajes, eventos y costo', () => {
     await expect(b.service.send(chat.id, { text: 'hola' })).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/Presupuesto/) });
     expect(b.service.messages(chat.id)).toEqual([]);
     expect(b.service.get(chat.id).state).toBe('idle');
+  });
+});
+
+describe('ChatService: saldo común de la clave', () => {
+  /** Saldo de 1 USD sobre lo que la mente tiene guardado en SQLite más lo que llevan en curso sus sesiones vivas. */
+  async function sharedBench(t: TurnFn) {
+    const ledger = new LiveSpend();
+    const holder: { b?: ChatBench } = {};
+    const b = await bench({
+      turn: t,
+      liveSpend: (id) => ledger.open(id),
+      budgetLeftUsd: (id) => 1 - (holder.b?.store.spentUsd('orquestador') ?? 0) - ledger.inFlightUsd(id),
+    });
+    holder.b = b;
+    return { b, ledger };
+  }
+
+  async function until(cond: () => boolean, ms = 2_000) {
+    const t0 = Date.now();
+    while (!cond()) {
+      if (Date.now() - t0 > ms) throw new Error('la condición no se cumplió');
+      await tick();
+    }
+  }
+
+  it('un chat que llega mientras otro gasta recibe solo lo que queda, y sin saldo se rechaza aunque su sesión siga viva', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    const t: TurnFn = (_m, ctx) => {
+      const sid = `sdk-${ctx.process}`;
+      if (ctx.process === 1) {
+        return (async function* () {
+          yield sdkInit(sid);
+          yield sdkSpent('trabajando', sid, 0.8);
+          await gate;
+          yield sdkResult('listo A', sid, 0.8);
+        })();
+      }
+      return [...(ctx.index === 0 ? [sdkInit(sid)] : []), sdkText('eco', sid), sdkResult('listo B', sid, 0.2 * (ctx.index + 1))];
+    };
+    const { b, ledger } = await sharedBench(t);
+    const chatA = b.service.create({ projectId: 'demo' });
+    const chatB = b.service.create({ projectId: 'demo' });
+    await b.service.send(chatA.id, { text: 'largo' });
+    await until(() => ledger.inFlightUsd('claude') > 0.79);
+
+    // A lleva 0,8 USD sin guardar: B nace con lo que queda, no con el saldo entero.
+    await turn(b, chatB.id, 'corto');
+    expect(optionsOf(b, 1).maxBudgetUsd).toBeLessThanOrEqual(0.2 + 1e-9);
+    expect(b.service.get(chatA.id).state).toBe('running');
+
+    release();
+    await b.settle(chatA.id);
+    expect(ledger.inFlightUsd('claude')).toBe(0);
+    expect(b.store.spentUsd('orquestador')).toBeCloseTo(1, 9);
+    // Sin saldo: B se rechaza con su sesión todavía viva (no se recrea ni se cierra).
+    await expect(b.service.send(chatB.id, { text: 'otro' })).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/Presupuesto/) });
+    expect(b.q.calls).toHaveLength(2);
+    expect(b.q.closed).toBe(0);
+    expect(b.service.messages(chatB.id).filter((m) => m.role === 'user')).toHaveLength(1);
+  });
+
+  it('si a mitad de turno se acaba el saldo común, avisa y corta el turno', async () => {
+    const t: TurnFn = (_m, ctx) =>
+      (async function* () {
+        yield sdkInit('sdk-1');
+        yield sdkSpent('sigo gastando', 'sdk-1', 1.2);
+        await ctx.stopped;
+        yield sdkResult(undefined, 'sdk-1', 1.2, 'error_during_execution');
+      })();
+    const { b, ledger } = await sharedBench(t);
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'caro' });
+    await b.settle(chat.id);
+    expect(b.q.interrupted).toBe(1);
+    expect(b.service.get(chat.id).state).toBe('idle');
+    const errors = b.events(chat.sessionId).filter((e) => e.type === 'error');
+    // Primero el aviso del presupuesto; después llega el `result` del turno cortado.
+    expect(errors[0]?.type === 'error' && [errors[0].payload.code, errors[0].payload.message]).toEqual(['quota_exhausted', expect.stringMatching(/Presupuesto de claude agotado/)]);
+    expect(ledger.inFlightUsd('claude')).toBe(0);
   });
 });
 

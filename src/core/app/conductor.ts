@@ -2,7 +2,6 @@ import { join } from 'node:path';
 import type { MindMode, QuotaProvider, TaskBrief } from '../../shared/index.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import {
-  CONDUCTOR_AGENT_ID,
   ConductorSession,
   TaskProposals,
   approveAndDeliver,
@@ -158,7 +157,8 @@ export async function createConductor(comp: Composition, opts: ConductorOptions)
   const proposals = new TaskProposals();
 
   const budget = agent.config.budgetUsd;
-  const left = budget === undefined ? undefined : budget - comp.spentUsd(agent.config.id) - comp.spentUsd(CONDUCTOR_AGENT_ID);
+  // Esta sesión es la mente y paga con la clave de `agent`, sea o no la mente de los ajustes.
+  const left = budget === undefined ? undefined : budget - comp.billedSpentUsd(agent.config.id, true);
   if (left !== undefined && left <= 0 && opts.maxBudgetUsd === undefined) {
     quotas.stop();
     throw new Error(`Presupuesto de ${agent.config.id} agotado (${budget} USD).`);
