@@ -1,4 +1,7 @@
-import type { Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { HookCallbackMatcher, Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startsMainTurn } from '../../../src/core/chat/index.ts';
 import type { ConductorQueryFn } from '../../../src/core/conductor/index.ts';
@@ -262,5 +265,55 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     await b.settle(chat.id);
     expect(b.q.calls).toHaveLength(1);
     expect(b.q.closed).toBe(0);
+  });
+});
+
+describe('ChatService: quitar una carpeta extra la revoca al instante, aunque haya subagentes vivos', () => {
+  const guardOf = (o: Options | undefined) => {
+    const hook = (o?.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
+    if (!hook) throw new Error('falta la guardia');
+    const signal = new AbortController().signal;
+    return async (tool_name: string, tool_input: unknown, agent_id?: string): Promise<boolean> => {
+      const input = { hook_event_name: 'PreToolUse' as const, tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd: '.', ...(agent_id ? { agent_id } : {}) };
+      return !JSON.stringify(await hook(input, 't', { signal })).includes('"deny"');
+    };
+  };
+
+  it('modo chat: Read y Write sobre la carpeta quitada se niegan sin recrear la sesión; al volver a agregarla, se permiten', async () => {
+    const extra = await mkdtemp(join(tmpdir(), 'orq-extra-'));
+    try {
+      await writeFile(join(extra, 'a.txt'), 'hola');
+      const q = injectableQuery(launchScript);
+      const b = await bench({ query: q.fn });
+      const chat = b.service.create({ projectId: 'demo', mode: 'chat', extraRoots: [extra] });
+      await b.service.send(chat.id, { text: 'investiga' });
+      await b.settle(chat.id);
+      expect(b.service.get(chat.id).backgroundTasks).toBe(1);
+      const allow = guardOf(q.calls[0]?.options);
+      const read = { file_path: join(extra, 'a.txt') };
+      const write = { file_path: join(extra, 'b.txt'), content: 'x' };
+      expect(await allow('Read', read)).toBe(true);
+      expect(await allow('Write', write)).toBe(true);
+
+      b.service.patch(chat.id, { extraRoots: [] });
+      expect(await allow('Read', read)).toBe(false);
+      expect(await allow('Write', write)).toBe(false);
+      expect(await allow('Grep', { pattern: 'x', path: extra })).toBe(false);
+      expect(await allow('Read', read, 'investigador-1')).toBe(false);
+
+      // Otro mensaje con el subagente vivo: misma sesión y la carpeta sigue cerrada.
+      await b.service.send(chat.id, { text: 'como vas' });
+      await b.settle(chat.id);
+      expect(q.calls).toHaveLength(1);
+      expect(await allow('Read', read)).toBe(false);
+      expect(await allow('Write', write)).toBe(false);
+
+      b.service.patch(chat.id, { extraRoots: [extra] });
+      expect(await allow('Read', read)).toBe(true);
+      expect(await allow('Write', write)).toBe(true);
+      expect(q.calls).toHaveLength(1);
+    } finally {
+      await rm(extra, { recursive: true, force: true });
+    }
   });
 });

@@ -403,7 +403,10 @@ export class ChatService {
     return out;
   }
 
-  /** Renombrar, cambiar el modo o las carpetas extra. Rige desde el turno siguiente (la guardia ve el modo al instante). */
+  /**
+   * Renombrar, cambiar el modo o las carpetas extra. El prompt cambia desde el turno siguiente; la guardia ve el modo y
+   * las carpetas extra al instante (quitar una carpeta la revoca también para los subagentes ya lanzados).
+   */
   patch(chatId: string, body: PatchChatBody): Chat {
     this.#require(chatId);
     const patch: ChatUpdate = {};
@@ -766,7 +769,8 @@ export class ChatService {
       ports: { ...this.#deps.ports, planner: this.#planner, fleet: this.#fleet, proposals: live.proposals },
       projectId: chat.projectId,
       cwd: chat.cwd,
-      extraRoots: chat.extraRoots,
+      // La guardia lee las carpetas extra vigentes en cada llamada: quitarlas las revoca aunque haya subagentes vivos.
+      extraRoots: () => this.#repo.get(chatId)?.chat.extraRoots ?? [],
       // Sin `workspace` el proyecto trabaja en modo local (directo en la carpeta, sin commits).
       ...(chat.projectId ? { workMode: this.#deps.store.getProject(chat.projectId)?.workspace ? 'worktrees' as const : 'local' as const } : {}),
       mode: () => this.#modeOf(chatId),
@@ -774,7 +778,7 @@ export class ChatService {
       recordDestination: (input) => this.#recordDestination(chatId, input),
       readRoots: () => {
         const current = this.#repo.get(chatId)?.chat;
-        return current ? [...current.extraRoots, ...this.#rootsFor(current, live)] : roots;
+        return current ? this.#rootsFor(current, live) : roots;
       },
       denyPaths: [...(this.#deps.denyPaths ?? [])],
       env,

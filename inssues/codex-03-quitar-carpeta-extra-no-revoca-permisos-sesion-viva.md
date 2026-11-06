@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex)
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/session.ts:159`, `src/core/conductor/session.ts:301-304`, `src/core/conductor/session.ts:313`, `src/core/conductor/session.ts:347`, `src/core/chat/service.ts:348-355`, `src/core/chat/service.ts:677-691`, `src/core/chat/service.ts:712`, `src/core/chat/service.ts:718-721`, `src/core/conductor/guard.ts:120-122`, `src/ui/features/chat/components/ChatHeader.tsx:204`, `src/ui/features/chat/store.ts:386`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Fusiona:** `mente-07-quitar-carpeta-extra-no-revoca.md` (revisión de «Mente y chat»), que describía el mismo defecto
   encontrado por otra vía. Ese archivo se borró. Lo calificaba de severidad baja; se deja **media** porque es una
   revocación de permisos que el usuario hace a propósito y que no tiene efecto.

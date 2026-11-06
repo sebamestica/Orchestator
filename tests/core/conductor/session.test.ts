@@ -359,6 +359,32 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     s.close();
   });
 
+  it('extraRoots dinámico: la guardia de lectura y escritura sigue la lista vigente en los dos sentidos', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orq-extra-'));
+    try {
+      const extra = [dir];
+      const { s, q } = session({ mode: 'chat', extraRoots: () => extra });
+      s.send('hola');
+      const o = optionsOf(q);
+      expect(o.additionalDirectories).toEqual([dir]);
+      expect((o.systemPrompt as string[])[2]).toContain(`Carpetas extra de lectura: ${dir}`);
+      const pre = hookOf(o);
+      const read = { file_path: join(dir, 'a.txt') };
+      const write = { file_path: join(dir, 'b.txt'), content: 'x' };
+      expect(await pre('Read', read)).toBe('{}');
+      expect(await pre('Write', write)).toBe('{}');
+      extra.length = 0;
+      expect(await pre('Read', read)).toMatch(/deny/);
+      expect(await pre('Write', write)).toMatch(/deny/);
+      extra.push(dir);
+      expect(await pre('Read', read)).toBe('{}');
+      expect(await pre('Write', write)).toBe('{}');
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('send con imágenes: bloques image en base64 antes del texto; tope de 5 MB en base64', () => {
     const { s, q } = session();
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64');

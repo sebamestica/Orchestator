@@ -156,8 +156,12 @@ export interface ConductorSessionOptions {
   autoApprove?: (taskIds: readonly string[]) => Awaitable<readonly ProposedTask[]>;
   /** Guarda el destino de `crear_tareas.destino` (ver `ConductorToolsOptions.recordDestination`); con él, el prompt explica `destino`. */
   recordDestination?: ConductorToolsOptions['recordDestination'];
-  /** Carpetas extra que eligió el usuario: se pueden leer, se nombran en el prompt y, en bypass, también se escriben. */
-  extraRoots?: readonly string[];
+  /**
+   * Carpetas extra que eligió el usuario: se pueden leer, se nombran en el prompt y, en los modos que editan, también se
+   * escriben. Con una función, la guardia la lee en cada llamada (quitar una carpeta la revoca al instante, aunque la
+   * sesión siga viva con subagentes); el prompt y `additionalDirectories` toman el valor inicial.
+   */
+  extraRoots?: readonly string[] | (() => readonly string[]);
   /** Modo de trabajo de la flota en el proyecto (worktrees o local), para el prompt. */
   workMode?: ConductorWorkMode;
   /** Archivos o carpetas que nunca se leen ni se escriben (bóveda y base de datos del núcleo). */
@@ -309,9 +313,11 @@ export class ConductorSession {
       ...plugins.map(([name]) => `mcp__${name}__*`),
     ];
     this.allowedTools = allowedTools;
-    const extraRoots = [...(opts.extraRoots ?? [])];
-    const rootsOption = opts.readRoots;
-    const readRoots = (): string[] => [...extraRoots, ...(typeof rootsOption === 'function' ? rootsOption() : (rootsOption ?? []))];
+    // La guardia lee las raíces en cada llamada: un cambio rige al instante, también con la sesión viva.
+    const extra = readerOf(opts.extraRoots);
+    const more = readerOf(opts.readRoots);
+    const readRoots = (): string[] => [...extra(), ...more()];
+    const extraRoots = extra();
     this.readRoots = [...new Set(readRoots())];
     const fleetTools = new Set(FLEET_TOOL_NAMES.map(mcpToolName));
     const actTools = new Set<string>(BYPASS_TOOLS);
@@ -323,7 +329,7 @@ export class ConductorSession {
       readRoots,
       denyPaths: [...(opts.denyPaths ?? [])],
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
-      ...(acts ? { writeRoots: [o.cwd, ...extraRoots], shellRoot: o.cwd } : {}),
+      ...(acts ? { writeRoots: () => [o.cwd, ...extra()], shellRoot: o.cwd } : {}),
       deny: (name) => {
         const plugin = pluginLive && pluginOf(name);
         if (plugin && !pluginLive(plugin)) return `${plugin} se desconectó en Plugins: ya no está disponible para ti en esta sesión.`;
@@ -519,6 +525,13 @@ export class ConductorSession {
 export function sdkSessionIdOf(message: SDKMessage): string | undefined {
   const id = (message as { session_id?: unknown }).session_id;
   return typeof id === 'string' && id.length > 0 && id.length <= 200 ? id : undefined;
+}
+
+/** Una función se lee en cada llamada; una lista fija se copia al crear la sesión. */
+function readerOf(v: readonly string[] | (() => readonly string[]) | undefined): () => readonly string[] {
+  if (typeof v === 'function') return v;
+  const fixed = [...(v ?? [])];
+  return () => fixed;
 }
 
 function mb(bytes: number): string {
