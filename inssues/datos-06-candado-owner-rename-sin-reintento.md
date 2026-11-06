@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/locks/manager.ts:417-426`, `src/core/locks/manager.ts:340-352`, `src/core/locks/manager.ts:368-373`, `src/core/plugins/chrome-gate.ts:216-223`, `src/core/plugins/service.ts:389-399`, `src/core/memory/safe-fs.ts:76-80`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

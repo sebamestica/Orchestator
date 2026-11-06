@@ -418,7 +418,8 @@ export class LockManager {
       // Escritura + rename: quien lea `owner` nunca ve un JSON a medias.
       const temp = join(path, `.${OWNER_FILE}-${this.pid}-${randomBytes(4).toString('hex')}.tmp`);
       await this.fs.writeFile(temp, content, { flag: 'wx' });
-      await this.fs.rename(temp, join(path, OWNER_FILE));
+      // Defender abre un instante el temporal recién escrito y el rename falla con EPERM: reintentar como al soltar.
+      await this.renameRetrying(temp, join(path, OWNER_FILE));
     } catch (error) {
       await this.fs.rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => undefined);
       throw error;
