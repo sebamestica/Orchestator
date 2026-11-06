@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WorktreeManager } from '../../../src/core/workspace/index.ts';
@@ -124,6 +124,52 @@ describe('WorktreeManager.integrate', () => {
     const res = await Promise.all(tareas.map((ws) => mgr.integrate('demo', ws)));
     expect(res.map((r) => r.ok)).toEqual([true, true, true]);
     expect(t.git(t.repo, 'rev-list', '--merges', '--count', 'orq/integracion').trim()).toBe('3');
+  });
+
+  it('gate que modifica un archivo versionado: no confirma, vuelve con el motivo y no ensucia la integración', async () => {
+    const { t, mgr, integ } = setup([nodeCmd("require('fs').appendFileSync('a.txt','x')")]);
+    const b = await mgr.create('demo', brief('tarea-m'));
+    const c = await mgr.create('demo', brief('tarea-n'));
+    commitFile(t, b.path, 'b.txt', 'b\n');
+    commitFile(t, c.path, 'c.txt', 'c\n');
+    const before = head(t, t.repo, 'orq/integracion');
+    for (const ws of [b, c]) {
+      const res = await mgr.integrate('demo', ws);
+      expect(res.ok).toBe(false);
+      expect(res.gateSummary).toMatch(/el gate modificó archivos versionados: a\.txt/);
+      expect(head(t, t.repo, 'orq/integracion')).toBe(before);
+      assertCleanIntegration(t, integ);
+    }
+  });
+
+  it('gate fallido que modificó un archivo versionado del merge: no lanza ni deja MERGE_HEAD, y la siguiente se integra', async () => {
+    const { t, mgr, integ } = setup([nodeCmd("const fs = require('fs'); if (fs.existsSync('b.txt')) { fs.appendFileSync('b.txt', 'x'); process.exit(1); }")]);
+    const b = await mgr.create('demo', brief('tarea-o'));
+    commitFile(t, b.path, 'b.txt', 'b\n');
+    const res = await mgr.integrate('demo', b);
+    expect(res.ok).toBe(false);
+    expect(res.gateSummary).toMatch(/gate fallido/);
+    assertCleanIntegration(t, integ);
+    const c = await mgr.create('demo', brief('tarea-p'));
+    commitFile(t, c.path, 'c.txt', 'c\n');
+    expect((await mgr.integrate('demo', c)).ok).toBe(true);
+    assertCleanIntegration(t, integ);
+    // Al recrear la carpeta, el enlace se quita sin seguirlo: la copia del usuario queda intacta y se vuelve a enlazar.
+    expect(readFileSync(join(t.repo, 'node_modules', 'paquete', 'keep.txt'), 'utf8')).toBe('no borrar');
+    expect(existsSync(join(integ, 'node_modules', 'paquete', 'keep.txt'))).toBe(true);
+  });
+
+  it('cambios versionados que quedaron en la integración (otra versión, proceso cortado) se recuperan', async () => {
+    const { t, mgr, integ } = setup();
+    const b = await mgr.create('demo', brief('tarea-q'));
+    commitFile(t, b.path, 'b.txt', 'b\n');
+    expect((await mgr.integrate('demo', b)).ok).toBe(true);
+    writeFileSync(join(integ, 'a.txt'), 'sucio\n');
+    const c = await mgr.create('demo', brief('tarea-r'));
+    commitFile(t, c.path, 'c.txt', 'c\n');
+    expect((await mgr.integrate('demo', c)).ok).toBe(true);
+    expect(t.git(t.repo, 'show', 'orq/integracion:a.txt')).toBe('linea original\n');
+    assertCleanIntegration(t, integ);
   });
 
   it('rama ya integrada o inexistente', async () => {

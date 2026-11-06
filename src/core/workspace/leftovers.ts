@@ -3,6 +3,16 @@ import { join } from 'node:path';
 import type { GitRunner } from './git.ts';
 import { isInside } from './guard.ts';
 
+/** Archivos versionados cuya copia de trabajo difiere del índice (lo que cambió alguien después del último merge o commit). */
+export async function modifiedTracked(git: GitRunner, cwd: string): Promise<string[]> {
+  return (await git(cwd, ['diff', '--name-only', '-z'])).stdout.split('\0').filter(Boolean);
+}
+
+/** Motivo para el autor cuando el gate cambió archivos versionados (no se confirma un árbol distinto del verificado). */
+export function gateModifiedNote(files: readonly string[]): string {
+  return `el gate modificó archivos versionados: ${files.slice(0, 20).join(', ')}${files.length > 20 ? ` y ${String(files.length - 20)} más` : ''}`;
+}
+
 /**
  * Borra los archivos no versionados ni ignorados del worktree de integración (restos de un gate o de un
  * merge abortado) para que no bloqueen el siguiente merge («untracked working tree files would be

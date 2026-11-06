@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** media
 - **Archivos:** `src/core/workspace/integrate.ts:51-53`, `src/core/workspace/integrate.ts:99-103`, `src/core/workspace/integrate.ts:117-128`, `src/core/workspace/integrate.ts:131-140`, `src/core/workspace/leftovers.ts:13-14`, `src/core/workspace/guard-rules.ts:3`, `src/core/workspace/guard-rules.ts:58-78`, `src/core/orchestrator/fleet.ts:432-438`, `src/core/orchestrator/fleet.ts:344-347`, `src/core/app/commit-step.ts:229-231`, `tests/core/workspace/review-agy.cases.ts:117-129`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Cada proyecto con worktrees integra las tareas aprobadas en un worktree propio, `<worktreesRoot>/_integracion`, que
