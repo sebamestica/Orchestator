@@ -2,9 +2,10 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { compose, type Composition } from '../../../src/core/app/compose.ts';
-import { chatRouteModule, lazyFleetPort } from '../../../src/core/app/f5-chat.ts';
+import { chatRouteModule, lazyFleetPort, type ChatWiring } from '../../../src/core/app/f5-chat.ts';
 import { ROUTE_MODULE_FACTORIES } from '../../../src/core/app/route-modules.ts';
 import type { ChatService } from '../../../src/core/chat/index.ts';
+import { PluginStateStore } from '../../../src/core/plugins/index.ts';
 import { AgentRegistry } from '../../../src/core/registry/index.ts';
 import { EventHub, createApp, generateToken } from '../../../src/core/server/index.ts';
 import { MemoryVault } from '../../../src/core/vault/index.ts';
@@ -30,7 +31,7 @@ afterEach(async () => {
   await cleanupDirs();
 });
 
-async function setup() {
+async function setup(extra: { real?: boolean } = {}) {
   const dir = await tempDir();
   const net = mockFetch(anthropicRoutes(planJson('demo')));
   const comp = compose({
@@ -55,6 +56,21 @@ async function setup() {
   const hub = new EventHub(comp.store);
   const registry = new AgentRegistry({ store: comp.store, vault: comp.vault, detectors: [] });
   const asked: string[] = [];
+  const wiring: ChatWiring = {
+    query: q.fn,
+    settings: () => ({ ...DEFAULT_SETTINGS, mind: { agentId: null, effort: 'max' } }),
+    // `real`: sin `mcpServersFor` inyectado, los plugins salen de `comp.plugins` (como en producción).
+    ...(extra.real
+      ? {}
+      : {
+          mcpServersFor: (agentId: string) => {
+            asked.push(agentId);
+            return {};
+          },
+        }),
+    drives: () => ['C:\\'],
+    onReady: (s) => services.push(s),
+  };
   const core = createApp({
     token,
     allowedHosts: () => [HOST],
@@ -62,18 +78,7 @@ async function setup() {
     registry,
     hub,
     validateResponses: true,
-    routeModules: [
-      chatRouteModule(comp, {
-        query: q.fn,
-        settings: () => ({ ...DEFAULT_SETTINGS, mind: { agentId: null, effort: 'max' } }),
-        mcpServersFor: (agentId) => {
-          asked.push(agentId);
-          return {};
-        },
-        drives: () => ['C:\\'],
-        onReady: (s) => services.push(s),
-      }),
-    ],
+    routeModules: [chatRouteModule(comp, wiring)],
   });
   const call = async (method: string, path: string, body?: unknown) =>
     core.app.request(`http://${HOST}${path}`, {
@@ -83,6 +88,21 @@ async function setup() {
     });
   return { dir, comp, q, key, call, asked };
 }
+
+type Setup = Awaited<ReturnType<typeof setup>>;
+
+/** Marca Chrome conectado en la base (el lanzador por defecto no se ejecuta: solo se arma su comando). */
+function chromeConnected(comp: Composition): void {
+  new PluginStateStore(comp.store.database).put({ id: 'chrome', status: 'connected', agents: [], steps: [], profile: 'personal', updatedAt: new Date().toISOString() });
+}
+
+async function say(s: Setup, chatId: string, text: string): Promise<void> {
+  expect((await s.call('POST', `/chats/${chatId}/messages`, { text })).status).toBe(201);
+  for (let i = 0; i < 200 && services[0]?.get(chatId).state === 'running'; i++) await tick();
+}
+
+type Guard = (...a: unknown[]) => Promise<unknown>;
+const guardOf = (o: Options | undefined) => (o?.hooks?.PreToolUse as { hooks: Guard[] }[] | undefined)?.[0]?.hooks[0];
 
 describe('f5-chat: cableado con la composición', () => {
   it('la línea de c15 está en ROUTE_MODULE_FACTORIES', () => {
@@ -129,5 +149,32 @@ describe('f5-chat: cableado con la composición', () => {
     expect(comp.fleet.queue.get('tarea-a')).toBeDefined();
     expect(comp.store.getTask('tarea-a')).toBeDefined();
     expect((await lazyFleetPort(comp).status('tarea-a'))?.taskId).toBe('tarea-a');
+  });
+
+  it('desconectar Chrome en Plugins se lo quita a la sesión viva de la mente (y conectarlo se lo da)', async () => {
+    const s = await setup({ real: true });
+    chromeConnected(s.comp);
+    const { chat } = (await (await s.call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
+    await say(s, chat.id, 'lista mis pestañas');
+    const first = s.q.calls[0]?.options as Options;
+    expect(Object.keys(first.mcpServers ?? {})).toContain('chrome-personal');
+    expect(first.allowedTools).toContain('mcp__chrome-personal__*');
+
+    await s.comp.plugins.disconnect('chrome');
+    // La sesión vieja deja de usarlo en el acto (p. ej. un subagente que sigue trabajando).
+    const deny = JSON.stringify(await guardOf(first)?.({ hook_event_name: 'PreToolUse', tool_name: 'mcp__chrome-personal__list_pages', tool_input: {}, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd: s.dir }, 't', { signal: new AbortController().signal }));
+    expect(deny).toMatch(/deny/);
+    await say(s, chat.id, 'lista mis pestañas otra vez');
+    expect(s.q.calls).toHaveLength(2);
+    const second = s.q.calls[1]?.options as Options;
+    expect(Object.keys(second.mcpServers ?? {})).not.toContain('chrome-personal');
+    expect(second.allowedTools).not.toContain('mcp__chrome-personal__*');
+    expect(second.resume).toBe('sdk-1');
+
+    // Al revés: conectarlo con el chat abierto lo entrega en el mensaje siguiente.
+    chromeConnected(s.comp);
+    await say(s, chat.id, 'y ahora');
+    expect(s.q.calls).toHaveLength(3);
+    expect(Object.keys(s.q.calls[2]?.options.mcpServers ?? {})).toContain('chrome-personal');
   });
 });

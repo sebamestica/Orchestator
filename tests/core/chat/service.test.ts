@@ -575,6 +575,34 @@ describe('ChatService: plugins para la mente', () => {
     expect(await guardOf(o)('mcp__chrome__navigate_page', { url: 'https://example.com' })).toBe(true);
     expect(await guardOf(o)('mcp__otro__borrar', {})).toBe(false);
   });
+
+  it('un token renovado (mismo servidor, otro secreto) recrea la sesión reanudada; si nada cambia, la reutiliza', async () => {
+    let token = `Bearer ${'a'.repeat(24)}`;
+    const canva = { type: 'http' as const, url: 'https://mcp.canva.com/mcp', headers: { Authorization: '${ORQ_MCP_CANVA_AUTHORIZATION}' } };
+    const b = await bench({ plugins: async () => ({ mcpServers: { canva }, env: { ORQ_MCP_CANVA_AUTHORIZATION: token } }) });
+    const chat = b.service.create({ projectId: 'demo' });
+    await turn(b, chat.id, 'uno');
+    await turn(b, chat.id, 'dos');
+    expect(b.q.calls).toHaveLength(1);
+    token = `Bearer ${'b'.repeat(24)}`;
+    await turn(b, chat.id, 'tres');
+    expect(b.q.calls).toHaveLength(2);
+    expect(optionsOf(b, 1).resume).toBe('sdk-1');
+    expect(optionsOf(b, 1).env?.ORQ_MCP_CANVA_AUTHORIZATION).toBe(token);
+  });
+
+  it('pluginLive: la guardia de la sesión viva niega en el acto un plugin que se desconectó', async () => {
+    let on = true;
+    const fake = { type: 'stdio' as const, command: 'node', args: ['servidor-falso.mjs'] };
+    const b = await bench({ mcpServersFor: () => ({ chrome: fake }), pluginLive: (agentId, server) => agentId === 'claude' && server === 'chrome' && on });
+    const chat = b.service.create({ projectId: 'demo' });
+    await turn(b, chat.id, 'navega');
+    const guard = guardOf(optionsOf(b));
+    expect(await guard('mcp__chrome__list_pages', {})).toBe(true);
+    on = false;
+    expect(await guard('mcp__chrome__list_pages', {})).toBe(false);
+    expect(await guard('Read', { file_path: join(b.repo, 'a.txt') })).toBe(true);
+  });
 });
 
 describe('ChatService: el texto sale tachado', () => {

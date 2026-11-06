@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, redactSecrets } from '../../shared/index.ts';
 import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
-import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes } from '../chat/index.ts';
+import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes, type MindPlugins, type MindPort } from '../chat/index.ts';
 import { CONDUCTOR_AGENT_ID, type ConductorQueryFn, type FleetPort, type FleetTaskStatus } from '../conductor/index.ts';
 import type { QueueEntry } from '../orchestrator/index.ts';
 import type { RouteModule } from '../server/index.ts';
@@ -23,7 +23,7 @@ import { withoutHostCredentials } from './env.ts';
 export interface ChatWiring {
   /** Ajustes vigentes (c14: `SettingsStore`); por defecto `DEFAULT_SETTINGS`. */
   settings?: () => Settings;
-  /** Servidores MCP de los plugins conectados para la mente (c16: `PluginService.mcpServersFor`). */
+  /** Servidores MCP fijos para la mente (pruebas). Sin esto, los plugins de `comp.plugins`, leídos en cada mensaje. */
   mcpServersFor?: (agentId: string) => Readonly<Record<string, McpServerConfig>>;
   /** `query` del SDK (pruebas). */
   query?: ConductorQueryFn;
@@ -63,31 +63,25 @@ export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Co
 }
 
 /**
- * Plugins de la composición para la mente (Claude): `mcpServersFor` es síncrono en `ChatService`, así que se sirve
- * la última lectura y se refresca al cargar el entorno de la mente (justo antes de abrir cada sesión). Los valores
- * secretos (token de Canva) van por variables de entorno del proceso del SDK (`${VAR}` en la configuración), nunca
- * en los argumentos.
+ * Plugins de la composición para la mente (Claude), leídos en cada mensaje (`ChatService` decide con ellos si la
+ * sesión viva sirve) y su estado de ahora para la guardia. Los valores secretos (token de Canva) van por variables de
+ * entorno del proceso del SDK (`${VAR}` en la configuración), nunca en los argumentos.
  */
-function mindPlugins(comp: Composition) {
-  const cache = new Map<string, { mcpServers: Record<string, McpServerConfig>; env: Record<string, string> }>();
+function mindPlugins(comp: Composition): Required<Pick<MindPort, 'plugins' | 'pluginLive'>> {
   return {
-    servers: (agentId: string) => cache.get(agentId)?.mcpServers ?? {},
-    async refresh(agentId: string): Promise<Record<string, string>> {
+    async plugins(agentId: string): Promise<MindPlugins> {
       try {
-        const opts = claudeMcpOptions(await comp.plugins.mcpServersFor(agentId, 'claude-sdk'));
-        cache.set(agentId, opts);
-        return opts.env;
+        return claudeMcpOptions(await comp.plugins.mcpServersFor(agentId, 'claude-sdk'));
       } catch {
-        cache.delete(agentId);
-        return {};
+        return { mcpServers: {}, env: {} };
       }
     },
+    pluginLive: (agentId, server) => comp.plugins.delivers(agentId, 'claude-sdk', server),
   };
 }
 
 export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): RouteModule {
   return (ctx) => {
-    const plugins = wiring.mcpServersFor ? undefined : mindPlugins(comp);
     const db = ctx.store.database;
     const attachments = new AttachmentStore({ db, dir: join(comp.config.dataDir, 'attachments'), now: ctx.now });
     const skillsRoot = comp.skills.installRoot;
@@ -98,7 +92,8 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
       settings: wiring.settings ?? (() => DEFAULT_SETTINGS),
       mind: {
         agents: () => comp.registry.list().map((a) => a.config),
-        env: async (agentId) => ({ ...(plugins ? await plugins.refresh(agentId) : {}), ...(await comp.env.load(agentId)) }),
+        env: (agentId) => comp.env.load(agentId),
+        ...(wiring.mcpServersFor ? {} : mindPlugins(comp)),
         baseEnv: () => withoutHostCredentials(comp.hostEnv()),
         budgetLeftUsd: (agentId) => {
           const budget = comp.registry.get(agentId)?.config.budgetUsd;
@@ -115,7 +110,7 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
       },
       translator: (init) => new ClaudeSdkTranslator(init),
       attachments,
-      mcpServersFor: wiring.mcpServersFor ?? ((agentId) => plugins?.servers(agentId) ?? {}),
+      ...(wiring.mcpServersFor ? { mcpServersFor: wiring.mcpServersFor } : {}),
       readRoots: existsSync(skillsRoot) ? [skillsRoot] : [],
       conversationsRoot: wiring.conversationsRoot ?? conversationsRoot(comp.config.dataDir),
       // Bóveda de claves, base del núcleo y memoria de Obsidian (la de todos los proyectos; también en bypass).

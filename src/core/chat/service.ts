@@ -13,7 +13,7 @@
  * - Destino de los cambios (`target`): local salvo que la mente haya anotado con `crear_tareas.destino` el repositorio
  *   que indicó el usuario; cada cambio se difunde como `chat_target`.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -87,10 +87,23 @@ export type ChatStorePort = Pick<SqliteStore, 'getProject' | 'getTask' | 'putTas
 /** Lo que el chat necesita del hub (`/ws`). */
 export type ChatHub = Pick<EventHub, 'append' | 'publish' | 'publishTask'>;
 
+/** Plugins de la mente leídos en el momento (c16): servidores para el SDK y el entorno con sus secretos (`ORQ_MCP_*`). */
+export interface MindPlugins {
+  mcpServers: Readonly<Record<string, McpServerConfig>>;
+  env: Readonly<Record<string, string>>;
+}
+
 /** De dónde sale la mente: agentes registrados y su entorno (clave de la bóveda, solo en memoria). */
 export interface MindPort {
   agents(): readonly AgentConfig[];
   env(agentId: string): Promise<Readonly<Record<string, string>>>;
+  /**
+   * Plugins de la mente leídos en cada mensaje, antes de decidir si la sesión viva sirve: conectar, desconectar o
+   * renovar un token cambia la forma y la sesión se recrea (reanudada). Sin esto, `ChatServiceDeps.mcpServersFor`.
+   */
+  plugins?(agentId: string): Promise<MindPlugins>;
+  /** Si el servidor de un plugin sigue conectado para la mente ahora (la guardia lo mira en cada llamada). */
+  pluginLive?(agentId: string, server: string): boolean;
   /** Entorno base del proceso del SDK, sin credenciales del anfitrión. */
   baseEnv?(): Readonly<Record<string, string | undefined>>;
   /** Lo que queda del presupuesto del agente (USD); `undefined` sin tope. */
@@ -110,7 +123,7 @@ export interface ChatServiceDeps {
   /** Traductor de mensajes del SDK a eventos (c1 `ClaudeSdkTranslator`). */
   translator: (init: TranslatorInit) => SdkMessageTranslator;
   attachments: AttachmentStore;
-  /** Servidores MCP de plugins para la mente (c16 `PluginService.mcpServersFor`). */
+  /** Servidores MCP fijos para la mente, sin entorno (pruebas); los plugins vivos llegan por `MindPort.plugins`. */
   mcpServersFor?: (agentId: string) => Readonly<Record<string, McpServerConfig>>;
   /** Raíces fijas de lectura (p. ej. el hub de skills). */
   readRoots?: readonly string[];
@@ -216,6 +229,12 @@ export function resolveMind(settings: Settings, agents: readonly AgentConfig[]):
 export function composeUserText(text: string, files: readonly Pick<Attachment, 'path'>[]): string {
   const lines = files.map((f) => `Adjuntos: ${f.path}`);
   return [text.trim() ? text : '', lines.join('\n')].filter(Boolean).join('\n\n');
+}
+
+/** Hash de los servidores y de su entorno (con los secretos): cambia si cambia cualquier valor, sin guardarlo. */
+function pluginsFingerprint(plugins: MindPlugins): string {
+  const sorted = (o: Readonly<Record<string, unknown>>) => Object.keys(o).sort().map((k) => [k, o[k]]);
+  return createHash('sha256').update(JSON.stringify([sorted(plugins.mcpServers), sorted(plugins.env)])).digest('hex');
 }
 
 function titleFrom(text: string, attachments: readonly Attachment[]): string {
@@ -662,18 +681,19 @@ export class ChatService {
     const model = settings.mind.model ?? mind.model;
     const effort = turnEffort ?? settings.mind.effort;
     const roots = this.#rootsFor(chat, live);
-    const keyOf = (plugins: Readonly<Record<string, unknown>>) =>
-      JSON.stringify({
-        mind: mind.id,
-        model: model ?? null,
-        mode: chat.mode,
-        cwd: chat.cwd,
-        extraRoots: chat.extraRoots,
-        roots: [...roots].sort(),
-        plugins: Object.keys(plugins).sort(),
-        quotaFloor: settings.quotaFloor,
-      });
-    const key = keyOf(this.#deps.mcpServersFor?.(mind.id) ?? {});
+    const plugins = await this.#pluginsOf(mind.id);
+    const key = JSON.stringify({
+      mind: mind.id,
+      model: model ?? null,
+      mode: chat.mode,
+      cwd: chat.cwd,
+      extraRoots: chat.extraRoots,
+      roots: [...roots].sort(),
+      plugins: Object.keys(plugins.mcpServers).sort(),
+      // Huella de la configuración y de los secretos (un token renovado recrea la sesión): solo el hash, nunca el valor.
+      pluginsHash: pluginsFingerprint(plugins),
+      quotaFloor: settings.quotaFloor,
+    });
     const alive = live.session && !live.session.closed ? live.session : undefined;
     if (alive) {
       const sameShape = live.key === key;
@@ -696,14 +716,12 @@ export class ChatService {
     if (left !== undefined && left <= 0) throw new ChatError('conflict', `Presupuesto de ${mind.id} agotado: súbelo en Ajustes → Agentes`);
     let env: Readonly<Record<string, string>>;
     try {
-      env = await this.#deps.mind.env(mind.id);
+      env = { ...plugins.env, ...(await this.#deps.mind.env(mind.id)) };
     } catch (err) {
       throw new ChatError('not_configured', `No se pudo cargar la clave de ${mind.id}: ${oneLine(err)}`);
     }
     if (chat.mindAgentId !== mind.id) this.#update(chatId, { mindAgentId: mind.id });
-    // Cargar el entorno refresca los plugins de la mente: la sesión y su clave usan la lectura nueva (si no, el
-    // mensaje siguiente vería otra clave y recrearía la sesión sin motivo).
-    const plugins = { ...(this.#deps.mcpServersFor?.(mind.id) ?? {}) };
+    const port = this.#deps.mind;
 
     const session = new ConductorSession({
       ports: { ...this.#deps.ports, planner: this.#planner, fleet: this.#fleet, proposals: live.proposals },
@@ -729,18 +747,24 @@ export class ChatService {
       translator: this.#deps.translator,
       ...(this.#deps.query ? { query: this.#deps.query } : {}),
       ...(sdkSessionId ? { resume: sdkSessionId } : {}),
-      ...(Object.keys(plugins).length ? { mcpServers: plugins } : {}),
+      ...(Object.keys(plugins.mcpServers).length ? { mcpServers: { ...plugins.mcpServers } } : {}),
+      ...(port.pluginLive ? { pluginLive: (server: string) => port.pluginLive?.(mind.id, server) ?? true } : {}),
       ...(left !== undefined ? { maxBudgetUsd: left } : {}),
       onStderr: (line) => this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`),
     });
     live.session = session;
-    live.key = keyOf(plugins);
+    live.key = key;
     // Los subagentes de un proceso anterior ya no existen.
     this.#stopBackground(chatId, live);
     // Un proceso del SDK nuevo cuenta el uso desde cero.
     live.delta = usageDeltas();
     void this.#read(chatId, live, session);
     return session;
+  }
+
+  #pluginsOf(agentId: string): Promise<MindPlugins> {
+    if (this.#deps.mind.plugins) return this.#deps.mind.plugins(agentId);
+    return Promise.resolve({ mcpServers: this.#deps.mcpServersFor?.(agentId) ?? {}, env: {} });
   }
 
   /** `crear_tareas.destino`: lo guarda (o vuelve a local con `null`), lo difunde como `chat_target` y lo devuelve resuelto. */

@@ -300,6 +300,15 @@ export class PluginService {
     };
   }
 
+  /**
+   * Si el servidor de un plugin (`chrome-personal`, `canva`) se le sigue entregando a este agente, según el estado de
+   * ahora. La guardia de la mente lo mira en cada llamada: un «Desconectar» corta también a la sesión que ya lo tenía.
+   */
+  delivers(agentId: string, kind: AgentKind, server: string): boolean {
+    const id: PluginId | undefined = server === CHROME_SERVER ? 'chrome' : server === 'canva' ? 'canva' : undefined;
+    return id !== undefined && this.#wants(id, this.#state(id), agentId, kind);
+  }
+
   /** `McpServerSource` para `createAdapterFactory({ plugins })` y la mente. */
   source(): McpServerSource {
     return (req) => this.grant(req);
@@ -319,10 +328,9 @@ export class PluginService {
   async #collect(agentId: string, kind: AgentKind, taskId?: string): Promise<{ servers: Record<string, McpServerSpec>; notes: string[] }> {
     const servers: Record<string, McpServerSpec> = {};
     const notes: string[] = [];
-    const wants = (id: PluginId, s: PluginState) => s.status === 'connected' && PLUGIN_AGENT_KINDS[id].includes(kind) && (s.agents.length === 0 || s.agents.includes(agentId));
 
     const chrome = this.#state('chrome');
-    if (wants('chrome', chrome)) {
+    if (this.#wants('chrome', chrome, agentId, kind)) {
       const gate = this.#opts.chrome?.gate ?? {};
       servers[CHROME_SERVER] = chromeServerSpec(this.#launcher(), {
         agent: lockId(agentId, 'agente'),
@@ -335,7 +343,7 @@ export class PluginService {
       notes.push(NO_BROWSER_NOTE);
     }
     const canva = this.#state('canva');
-    if (wants('canva', canva)) {
+    if (this.#wants('canva', canva, agentId, kind)) {
       try {
         const token = await this.#canva.accessToken();
         if (token) {
@@ -351,6 +359,10 @@ export class PluginService {
       }
     }
     return { servers, notes };
+  }
+
+  #wants(id: PluginId, s: PluginState, agentId: string, kind: AgentKind): boolean {
+    return s.status === 'connected' && PLUGIN_AGENT_KINDS[id].includes(kind) && (s.agents.length === 0 || s.agents.includes(agentId));
   }
 
   #connectChrome(body: ConnectPluginBody): Promise<Plugin> {

@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** alta
 - **Archivos:** `src/core/app/f5-chat.ts:71`, `src/core/app/f5-chat.ts:74`, `src/core/app/f5-chat.ts:101`, `src/core/app/f5-chat.ts:118`, `src/core/chat/service.ts:665`, `src/core/chat/service.ts:673`, `src/core/chat/service.ts:676`, `src/core/chat/service.ts:681`, `src/core/chat/service.ts:699`, `src/core/chat/service.ts:706`, `src/core/conductor/session.ts:295`, `src/core/plugins/service.ts:239`, `src/core/plugins/service.ts:342`, `src/core/plugins/service.ts:488`, `src/core/plugins/chrome-gate.ts:177`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index.ts';
-import { AttachmentStore, ChatService, type ChatServiceDeps } from '../../../src/core/chat/index.ts';
+import { AttachmentStore, ChatService, type ChatServiceDeps, type MindPort } from '../../../src/core/chat/index.ts';
 import type { ConductorQueryFn } from '../../../src/core/conductor/index.ts';
 import { EventHub, type HubMessage } from '../../../src/core/server/index.ts';
 import { SqliteStore } from '../../../src/core/store/index.ts';
@@ -146,6 +146,9 @@ export interface BenchOptions extends Partial<Omit<ChatServiceDeps, 'db' | 'stor
   settings?: Settings;
   agents?: AgentConfig[];
   budgetLeftUsd?: (agentId: string) => number | undefined;
+  /** Plugins vivos de la mente (`MindPort.plugins` y `pluginLive`). */
+  plugins?: MindPort['plugins'];
+  pluginLive?: MindPort['pluginLive'];
 }
 
 const benches: ChatBench[] = [];
@@ -165,7 +168,7 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
   const settings = { value: opts.settings ?? DEFAULT_SETTINGS };
   const agents = opts.agents ?? [claudeAgent];
   const envCalls: string[] = [];
-  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, flags: _f, ...rest } = opts;
+  const { turn: _turn, settings: _s, agents: _a, budgetLeftUsd, flags: _f, plugins, pluginLive, ...rest } = opts;
   const service = new ChatService({
     db: store.database,
     store,
@@ -179,6 +182,8 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
       },
       baseEnv: () => ({ PATH: 'C:\\Windows' }),
       ...(budgetLeftUsd ? { budgetLeftUsd } : {}),
+      ...(plugins ? { plugins } : {}),
+      ...(pluginLive ? { pluginLive } : {}),
     },
     ports: { planner: ports.planner, fleet: ports.fleet, quotas: ports.quotas, memory: ports.memory, skills: ports.skills },
     translator: (init) => new ClaudeSdkTranslator(init),

@@ -164,6 +164,11 @@ export interface ConductorSessionOptions {
   /** Servidores MCP extra (plugins); sus herramientas entran en `allowedTools` como `mcp__<nombre>__*`. */
   mcpServers?: Readonly<Record<string, McpServerConfig>>;
   /**
+   * Si un plugin de `mcpServers` sigue conectado para la mente. La guardia lo consulta en cada llamada a
+   * `mcp__<nombre>__*`: un «Desconectar» en Plugins corta en el acto, también a los subagentes de la sesión viva.
+   */
+  pluginLive?: (server: string) => boolean;
+  /**
    * Entorno de la sesión que sale de la bóveda (`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`): se aplica sobre
    * `baseEnv`. Solo vive en memoria; las claves que trae se tachan en todas las salidas.
    */
@@ -304,6 +309,8 @@ export class ConductorSession {
     this.readRoots = [...new Set(readRoots())];
     const fleetTools = new Set(FLEET_TOOL_NAMES.map(mcpToolName));
     const actTools = new Set<string>(BYPASS_TOOLS);
+    const pluginLive = opts.pluginLive;
+    const pluginOf = (tool: string) => plugins.find(([name]) => tool.startsWith(`mcp__${name}__`))?.[0];
     const guard = createToolGuard({
       allowedTools,
       cwd: o.cwd,
@@ -312,6 +319,8 @@ export class ConductorSession {
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
       ...(acts ? { writeRoots: [o.cwd, ...extraRoots], shellRoot: o.cwd } : {}),
       deny: (name) => {
+        const plugin = pluginLive && pluginOf(name);
+        if (plugin && !pluginLive(plugin)) return `${plugin} se desconectó en Plugins: ya no está disponible para ti en esta sesión.`;
         if (standalone && fleetTools.has(name)) return `${name} no está disponible en una conversación (sin proyecto ni flota).`;
         if (name === mcpToolName('delegar') && mode?.() === 'plan') return 'delegar no está disponible en modo plan: el usuario aprueba y la tarea pasa sola a la flota.';
         // La sesión sigue viva si el modo cambia con subagentes trabajando: la guardia lee el modo vigente.

@@ -250,13 +250,10 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     expect(open).toEqual([]);
   });
 
-  it('los plugins que se refrescan al abrir la sesión no hacen que el mensaje siguiente la recree', async () => {
+  it('los plugins que se vuelven a leer en cada mensaje no hacen que el siguiente recree la sesión si no cambiaron', async () => {
     const fake = { type: 'stdio' as const, command: 'node', args: ['chrome-falso.mjs'] };
-    const holder: { envCalls?: string[] } = {};
-    // Como en f5-chat: la caché de plugins se llena al cargar el entorno de la mente.
-    const none: Record<string, typeof fake> = {};
-    const b = await bench({ mcpServersFor: () => ((holder.envCalls?.length ?? 0) > 0 ? { chrome: fake } : none) });
-    holder.envCalls = b.envCalls;
+    // Como en f5-chat: cada lectura arma objetos nuevos con el mismo contenido.
+    const b = await bench({ plugins: async () => ({ mcpServers: { chrome: { ...fake } }, env: { ORQ_MCP_CHROME_X: 'valor-fijo' } }) });
     const chat = b.service.create({ projectId: 'demo' });
     await b.service.send(chat.id, { text: 'uno' });
     await b.settle(chat.id);
