@@ -308,6 +308,24 @@ describe('BoardView', () => {
     });
   });
 
+  it('el modal de detalle muestra el estado en español', () => {
+    render(<BoardView />);
+    fireEvent.click(screen.getByLabelText(/Tarea t-pending-1/i));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Pendiente')).toBeTruthy();
+    expect(within(dialog).queryByText('pending')).toBeNull();
+  });
+
+  it('el modal de detalle de una tarea traspasada dice «Traspasada»', () => {
+    render(<BoardView />);
+    fireEvent.click(screen.getByLabelText(/Tarea t-handed-1/i));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Traspasada')).toBeTruthy();
+    expect(within(dialog).queryByText('handed_off')).toBeNull();
+  });
+
   it('permite Cancelar una tarea en curso llamando a POST /tasks/:id/cancel', async () => {
     render(<BoardView />);
 

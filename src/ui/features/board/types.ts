@@ -1,4 +1,4 @@
-import type { TaskRecord } from '../../api/types.ts';
+import type { TaskRecord, TaskState } from '../../api/types.ts';
 
 export interface BoardColumnDef {
   key: string;
@@ -43,6 +43,22 @@ export function difficultyLabel(difficulty: string): string {
     default:
       return difficulty;
   }
+}
+
+/** Etiqueta en español de cada estado; el `Record` exhaustivo obliga a traducir cualquier estado nuevo. */
+export const TASK_STATE_LABEL: Readonly<Record<TaskState, string>> = {
+  pending: 'Pendiente',
+  ready: 'Lista',
+  running: 'En curso',
+  review: 'Revisión',
+  integrated: 'Integrada',
+  failed: 'Fallida',
+  handed_off: 'Traspasada',
+  cancelled: 'Cancelada',
+};
+
+export function taskStateLabel(state: TaskState): string {
+  return TASK_STATE_LABEL[state];
 }
 
 export function taskMatchesColumn(task: TaskRecord, column: BoardColumnDef): boolean {

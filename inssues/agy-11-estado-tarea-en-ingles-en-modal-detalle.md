@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/board/TaskDetailModal.tsx:103-105`, `src/ui/features/board/types.ts:9-17`, `src/ui/features/board/types.ts:35`, `src/ui/features/board/TaskCard.tsx:69-73`, `src/shared/tasks.ts:22`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

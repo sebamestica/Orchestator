@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client.ts';
 import { retryTask, taskActionError } from '../../api/tasks.ts';
 import type { AgentRecord, TaskRecord } from '../../api/types.ts';
-import { difficultyLabel, formatRelativeTime } from './types.ts';
+import { difficultyLabel, formatRelativeTime, taskStateLabel } from './types.ts';
 
 interface TaskDetailModalProps {
   task: TaskRecord | null;
@@ -78,7 +78,7 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
               <span className="font-mono text-xs text-muted">{brief.id}</span>
               <div className="flex items-center gap-2">
                 <Chip size="sm" variant="soft">
-                  {task.state}
+                  {taskStateLabel(task.state)}
                 </Chip>
                 <Chip size="sm" variant="soft">
                   {difficultyLabel(brief.difficulty)}

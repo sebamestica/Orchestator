@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { lastActivity, retryTask, taskActionError } from '../../api/tasks.ts';
 import type { TaskRecord } from '../../api/types.ts';
 import { useApp } from '../../store/app.ts';
-import { difficultyLabel, formatRelativeTime } from './types.ts';
+import { difficultyLabel, formatRelativeTime, taskStateLabel } from './types.ts';
 
 interface TaskCardProps {
   task: TaskRecord;
@@ -70,7 +70,7 @@ export function TaskCard({ task, agentName, onClick }: TaskCardProps) {
           <div className="flex items-center gap-1.5 shrink-0">
             {isHandedOff && (
               <Chip size="sm" variant="soft" color="warning" className="text-[10px] font-medium h-5 px-1.5">
-                Traspasada
+                {taskStateLabel(task.state)}
               </Chip>
             )}
             <Chip
