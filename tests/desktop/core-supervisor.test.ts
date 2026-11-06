@@ -59,10 +59,15 @@ function slow(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /** `fetch` falso: núcleo caído hasta que «arranca»; luego /tasks con el token correcto (con `delayMs`, lento). */
-function fakeFetch(state: { up: boolean; running: number; token?: string; delayMs?: number }): FetchLike {
+function fakeFetch(state: { up: boolean; running: number; token?: string; delayMs?: number; allowedOrigins?: string[] }): FetchLike {
   return async (url, init) => {
     if (!state.up) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
     if (state.delayMs) await slow(state.delayMs, init.signal);
+    // Guardia de origen del núcleo (antes que la del token): solo el propio origen o ORQ_ALLOWED_ORIGINS.
+    const requestOrigin = init.headers?.Origin;
+    if (requestOrigin !== undefined && requestOrigin !== `http://127.0.0.1:${PORT}` && !(state.allowedOrigins ?? []).includes(requestOrigin)) {
+      return { status: 403, json: async () => ({ error: { code: 'forbidden_origin' } }) };
+    }
     const auth = init.headers?.Authorization;
     if (url.endsWith('/health')) return { status: 401, json: async () => ({ error: { code: 'unauthorized', message: 'x' } }) };
     if (url.endsWith('/tasks') || url.endsWith('/chats')) {
@@ -231,6 +236,45 @@ describe('CoreSupervisor', () => {
     expect((await sup.connect()).ok).toBe(false);
     expect(existsSync(config.sessionPath)).toBe(false);
     expect(killed).toEqual([]);
+  });
+
+  describe('con ORQ_UI_DEV=1 (interfaz en 5174)', () => {
+    const DEV = 'http://127.0.0.1:5174';
+    const devConfig = () => ({ ...config, uiDev: true, appOrigin: DEV, startUrl: `${DEV}/` });
+    const saveSession = () => {
+      mkdirSync(config.dataDir, { recursive: true });
+      writeFileSync(config.sessionPath, encodeSession({ port: PORT, pid: 999_999, token: TOKEN, startedAt: '2026-11-04T10:00:00.000Z' }, cipher));
+    };
+
+    it('no adopta un núcleo que no acepta el origen de desarrollo, y no lanza otro', async () => {
+      config = devConfig();
+      saveSession();
+      const spawned: { command?: string } = {};
+      const r = await supervisor({ fetch: fakeFetch({ up: true, running: 1 }), spawn: fakeSpawn('ready', spawned) }).connect();
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.title).toContain('5174');
+      expect(spawned.command).toBeUndefined();
+      expect(existsSync(config.sessionPath)).toBe(true);
+    });
+
+    it('adopta el núcleo si acepta el origen de desarrollo', async () => {
+      config = devConfig();
+      saveSession();
+      const r = await supervisor({ fetch: fakeFetch({ up: true, running: 1, allowedOrigins: [DEV] }) }).connect();
+      expect(r).toMatchObject({ ok: true, core: { ownership: 'adopted', pid: 999_999 } });
+    });
+
+    it('con ORQ_CORE_TOKEN tampoco acepta un núcleo sin el origen de desarrollo', async () => {
+      const token = 'w'.repeat(43);
+      config = { ...devConfig(), coreToken: token };
+      const r = await supervisor({ fetch: fakeFetch({ up: true, running: 0, token }) }).connect();
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.title).toContain('5174');
+        expect(r.hint).toBe(`Vuelve a arrancarlo a mano con ORQ_ALLOWED_ORIGINS=${DEV} y usa ORQ_CORE_TOKEN.`);
+        expect(r.hint).not.toContain('Vuelve a arráncalo');
+      }
+    });
   });
 
   it('ORQ_CORE_TOKEN conecta con un núcleo ajeno que nunca se apaga', async () => {

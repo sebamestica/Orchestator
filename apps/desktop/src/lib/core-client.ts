@@ -10,6 +10,7 @@ export type ProbeResult = 'alive' | 'down' | 'foreign' | 'timeout';
 
 const healthOk = z.object({ ok: z.literal(true), version: z.string(), startedAt: z.string() });
 const unauthorized = z.object({ error: z.object({ code: z.literal('unauthorized') }) });
+const forbiddenOrigin = z.object({ error: z.object({ code: z.literal('forbidden_origin') }) });
 const tasksBody = z.object({ tasks: z.array(z.object({ state: z.string() }).loose()) });
 const chatsBody = z.object({ chats: z.array(z.object({ state: z.string(), backgroundTasks: z.number().optional() }).loose()) });
 /** Estados de tarea con trabajo pendiente o en curso: apagar el núcleo los cortaría. */
@@ -40,6 +41,22 @@ export async function probeCore(origin: string, fetchImpl: FetchLike, timeoutMs 
     return 'foreign';
   } catch (err) {
     return isTimeout(err) ? 'timeout' : 'down';
+  }
+}
+
+/**
+ * ¿Acepta el núcleo peticiones con `Origin: appOrigin`? La guardia de origen corre antes que la del token, así que
+ * basta `GET /health` con ese encabezado: 403 `forbidden_origin` = rechazará el /ws y los POST de la ventana; 200 o
+ * 401 = la deja pasar. El proceso principal pide sin `Origin`, por eso validar el token no lo detecta.
+ */
+export async function acceptsOrigin(origin: string, appOrigin: string, fetchImpl: FetchLike, timeoutMs = 3000): Promise<'yes' | 'no' | 'error'> {
+  try {
+    const res = await fetchImpl(`${origin}/health`, { method: 'GET', headers: { Origin: appOrigin }, signal: AbortSignal.timeout(timeoutMs) });
+    if (res.status === 200 || res.status === 401) return 'yes';
+    if (res.status === 403 && forbiddenOrigin.safeParse(await readJson(res)).success) return 'no';
+    return 'error';
+  } catch {
+    return 'error';
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { probeCore, runningTasks, type FetchLike } from '../../apps/desktop/src/lib/core-client.ts';
+import { acceptsOrigin, probeCore, runningTasks, type FetchLike } from '../../apps/desktop/src/lib/core-client.ts';
 
 const ORIGIN = 'http://127.0.0.1:47899';
 const TOKEN = 'x'.repeat(43);
@@ -78,5 +78,21 @@ describe('runningTasks', () => {
     expect(await runningTasks(ORIGIN, TOKEN, fakeFetch(() => ({ status: 200 })))).toEqual({ status: 'error' });
     expect(await runningTasks(ORIGIN, TOKEN, fakeFetch(refused))).toEqual({ status: 'error' });
     expect(await runningTasks(ORIGIN, TOKEN, fakeFetch(timeout))).toEqual({ status: 'error' });
+  });
+});
+
+describe('acceptsOrigin', () => {
+  const DEV = 'http://127.0.0.1:5174';
+
+  it('manda el Origin de la ventana a /health y distingue la guardia de origen del token', async () => {
+    const f = fakeFetch(() => ({ status: 401, body: { error: { code: 'unauthorized' } } }));
+    expect(await acceptsOrigin(ORIGIN, DEV, f)).toBe('yes');
+    expect(f.calls).toEqual([{ url: `${ORIGIN}/health`, headers: { Origin: DEV } }]);
+    expect(await acceptsOrigin(ORIGIN, DEV, fakeFetch(() => ({ status: 403, body: { error: { code: 'forbidden_origin' } } })))).toBe('no');
+  });
+
+  it('sin respuesta o con otra cosa no se sabe', async () => {
+    expect(await acceptsOrigin(ORIGIN, DEV, fakeFetch(refused))).toBe('error');
+    expect(await acceptsOrigin(ORIGIN, DEV, fakeFetch(() => ({ status: 403, body: {} })))).toBe('error');
   });
 });

@@ -4,7 +4,7 @@ import { rename } from 'node:fs/promises';
 import { dirname, join, win32 } from 'node:path';
 import { renameWithRetry } from '../../../src/core/memory/safe-fs.ts';
 import { UI_DEV_ORIGIN, type DesktopConfig } from './lib/config.ts';
-import { probeCore, runningTasks, type FetchLike, type RunningCheck } from './lib/core-client.ts';
+import { acceptsOrigin, probeCore, runningTasks, type FetchLike, type RunningCheck } from './lib/core-client.ts';
 import { childEnv } from './lib/node-path.ts';
 import { tailLines, waitForReady } from './lib/ready-line.ts';
 import { decodeSession, encodeSession, type Cipher, type CoreSession } from './lib/session-file.ts';
@@ -158,6 +158,8 @@ export class CoreSupervisor {
     if (config.coreToken) {
       const check = await runningTasks(origin, config.coreToken, fetch);
       if (check.status === 'ok') {
+        const refused = await this.refusesAppOrigin(origin, false);
+        if (refused) return refused;
         log(`núcleo ajeno en ${origin} con ORQ_CORE_TOKEN: no se apagará al cerrar`);
         return this.connected({ origin, wsUrl, token: config.coreToken, port, ownership: 'external', pid: null });
       }
@@ -197,6 +199,8 @@ export class CoreSupervisor {
     if (session && session.port === port) {
       const check = await runningTasks(origin, session.token, fetch);
       if (check.status === 'ok') {
+        const refused = await this.refusesAppOrigin(origin, true);
+        if (refused) return refused;
         log(`núcleo vivo de una apertura anterior (pid ${session.pid}, ${check.running} tareas en curso): se reutiliza`);
         return this.connected({ origin, wsUrl, token: session.token, port, ownership: 'adopted', pid: session.pid });
       }
@@ -212,6 +216,26 @@ export class CoreSupervisor {
       title: `Berland no tiene el token del núcleo de 127.0.0.1:${port}`,
       detail: 'Berland solo guarda el token (cifrado) de los núcleos que lanza ella misma. Ese núcleo lo abrió otro programa (por ejemplo «iniciar» en una terminal) o una apertura anterior de Berland que no pudo guardar su sesión.',
       hint: 'Si lo abriste en una terminal, ciérralo con Ctrl+C. Si no, ciérralo en el Administrador de tareas (proceso node.exe) y vuelve a abrir Berland.',
+    };
+  }
+
+  /**
+   * Un núcleo que se reutiliza fijó al arrancar los orígenes que acepta. Si la ventana carga desde otro (la interfaz
+   * de desarrollo en 5174), comprueba que lo acepte: si no, el /ws y todo POST responderían 403. No lo reinicia:
+   * puede tener tareas en curso.
+   */
+  private async refusesAppOrigin(origin: string, adopted: boolean): Promise<ConnectResult | null> {
+    const { config, fetch, log } = this.deps;
+    if (config.appOrigin === origin || (await acceptsOrigin(origin, config.appOrigin, fetch)) !== 'no') return null;
+    log(`el núcleo de ${origin} no acepta el origen ${config.appOrigin}: no se reutiliza`);
+    const manual = `ORQ_ALLOWED_ORIGINS=${config.appOrigin} y usa ORQ_CORE_TOKEN`;
+    return {
+      ok: false,
+      title: `Este núcleo no acepta la interfaz de desarrollo (${config.appOrigin})`,
+      detail: `El núcleo de ${origin} se arrancó sin ${config.appOrigin} en ORQ_ALLOWED_ORIGINS: la interfaz cargaría, pero sin actualizaciones en vivo y sin poder enviar nada.`,
+      hint: adopted
+        ? `Ciérralo desde Berland sin -dev cuando terminen sus tareas, o arráncalo a mano con ${manual}.`
+        : `Vuelve a arrancarlo a mano con ${manual}.`,
     };
   }
 

@@ -3,7 +3,7 @@
 - **Área:** Escritorio y arranque
 - **Severidad:** baja
 - **Archivos:** `apps/desktop/src/core-supervisor.ts:205`, `apps/desktop/src/core-supervisor.ts:162`, `apps/desktop/src/core-supervisor.ts:139`, `apps/desktop/src/lib/config.ts:101`, `src/ui/vite.config.ts:27`, `src/core/server/security.ts:61`, `src/core/server/app.ts:195`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
