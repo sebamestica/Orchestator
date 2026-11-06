@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** baja
 - **Archivos:** `src/ui/app/App.tsx:26`, `src/ui/app/App.tsx:28`, `src/ui/features/chat/ChatView.tsx:148-161`, `src/ui/features/chat/ChatView.tsx:311-312`, `src/ui/features/chat/ChatView.tsx:361-374`, `src/ui/features/composer/Composer.tsx:59`, `src/ui/features/composer/Composer.tsx:69`, `src/ui/features/composer/Composer.tsx:146-156`, `src/ui/features/composer/useAttachments.ts:19`, `src/ui/features/chat/components/ChatHeader.tsx:146-149`, `src/ui/features/chat/components/ChatHeader.tsx:165-168`, `src/ui/features/chat/store.ts:287-291`, `src/ui/features/chat/store.ts:298-320`, `src/core/chat/service.ts:424`, `src/core/chat/service.ts:443-447`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Cada proyecto (y «Conversaciones», sin proyecto) se ve en una sola `ChatView`. En su encabezado, el selector de

@@ -462,6 +462,8 @@ describe('estado vacío y primer mensaje', () => {
     expect(body.projectId).toBeNull();
     expect(body).not.toHaveProperty('cwd');
     expect(window.location.hash).toBe('#/conversaciones/chat_new001');
+    // El texto que pasó al chat nuevo se vacía al aceptarse el envío.
+    await waitFor(() => expect((screen.getByLabelText('Mensaje') as HTMLTextAreaElement).value).toBe(''));
     expect(screen.queryByText(/berland-conversaciones/)).toBeNull();
     expect(screen.queryByTestId('target-line')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
@@ -531,6 +533,48 @@ describe('adjuntos', () => {
     setBridge({ pathForFile: () => 'C:\\Users\\yo\\nota.txt' });
     expect((await composer().onAttach(file)).id).toBe('att_path01');
     expect(calls.find((c) => c.path === '/attachments/by-path')?.body).toEqual({ path: 'C:\\Users\\yo\\nota.txt' });
+  });
+});
+
+describe('borrador por conversación', () => {
+  const field = () => screen.getByLabelText('Mensaje') as HTMLTextAreaElement;
+  const picker = () => screen.getByRole('button', { name: 'Conversaciones del proyecto' });
+
+  it('el borrador no pasa a otra conversación y vuelve al regresar', async () => {
+    const a = makeChat({ id: 'chat_aaa111', title: 'Alfa', updatedAt: at(50) });
+    const b = makeChat({ id: 'chat_bbb222', title: 'Beta', sessionId: 'sess_b', updatedAt: at(10) });
+    const { calls } = fakeCore({ chats: [a, b], messages: { chat_aaa111: [], chat_bbb222: [] } });
+    const view = render(<ChatView projectId="demo" chatId="chat_aaa111" />);
+    await waitFor(() => expect(field().disabled).toBe(false));
+    fireEvent.change(field(), { target: { value: 'para A' } });
+
+    fireEvent.click(picker());
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Conversaciones' })).getByText('Beta'));
+    // Sin `App`, la ruta nueva llega a la misma instancia de la vista (como hace `App.tsx`).
+    view.rerender(<ChatView projectId="demo" chatId="chat_bbb222" />);
+    await waitFor(() => expect(picker().textContent).toContain('Beta'));
+    await waitFor(() => expect(field().disabled).toBe(false));
+    expect(field().value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/chats/chat_bbb222/messages')).toBe(true));
+    expect(calls.filter((c) => c.method === 'POST').map((c) => (c.body as { text?: string }).text)).not.toContain('para A');
+
+    view.rerender(<ChatView projectId="demo" chatId="chat_aaa111" />);
+    await waitFor(() => expect(picker().textContent).toContain('Alfa'));
+    await waitFor(() => expect(field().value).toBe('para A'));
+    // La bandeja de adjuntos del Composer sigue al chat abierto.
+    expect(composer().resetKey).toBe('chat_aaa111');
+  });
+
+  it('el primer envío fallido no borra el texto', async () => {
+    fakeCore({ chats: [] }, (method, path) =>
+      method === 'POST' && path === '/chats/chat_new001/messages' ? { status: 500, body: { error: { code: 'internal', message: 'falla' } } } : undefined);
+    render(<ChatView projectId="demo" />);
+    await waitFor(() => expect(field().disabled).toBe(false));
+    fireEvent.change(field(), { target: { value: 'hola' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    expect(await screen.findByText(/No se pudo enviar/)).toBeTruthy();
+    expect(field().value).toBe('hola');
   });
 });
 

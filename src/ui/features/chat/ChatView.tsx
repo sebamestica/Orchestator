@@ -10,7 +10,7 @@ import { effortSchema, nextMindMode, type Attachment, type Chat, type Effort, ty
 import { navigate } from '../../app/routes.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
 import { useApp } from '../../store/app.ts';
-import { Composer } from '../composer/Composer.tsx';
+import { Composer, type ComposerProps } from '../composer/Composer.tsx';
 import { ChatHeader } from './components/ChatHeader.tsx';
 import { EmptyChat } from './components/EmptyChat.tsx';
 import { LiveReply } from './components/LiveReply.tsx';
@@ -20,7 +20,7 @@ import { ProposalsCard } from './components/ProposalsCard.tsx';
 import { BackgroundLine } from './components/BackgroundLine.tsx';
 import { TargetLine } from './components/TargetLine.tsx';
 import { APP_NAME } from './format.ts';
-import { attachFile, awaitsDelivery, chosenEffort, effortIn, errorText, pickFolder, useChat } from './store.ts';
+import { attachFile, awaitsDelivery, chosenEffort, composingId, draftOf, effortIn, errorText, pickFolder, useChat } from './store.ts';
 import { anchorProposals, buildReply, PROPOSALS_AT_END, splitTurns } from './timeline.ts';
 import { useChatLive } from './use-chat-live.ts';
 
@@ -65,6 +65,15 @@ function isTextField(el: Element | null): boolean {
   if (el.tagName !== 'INPUT') return false;
   const type = (el as HTMLInputElement).type;
   return !['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'file', 'image'].includes(type);
+}
+
+const setDraft = (text: string) => useChat.getState().setDraft(text);
+
+/** El Composer con el borrador del chat abierto. Solo él se vuelve a dibujar al escribir, no el hilo. */
+function ChatComposer(props: Omit<ComposerProps, 'text' | 'onTextChange' | 'resetKey'>) {
+  const text = useChat(draftOf);
+  const draftChat = useChat(composingId);
+  return <Composer {...props} text={text} onTextChange={setDraft} resetKey={draftChat ?? ''} />;
 }
 
 export default function ChatView({ projectId, chatId }: ChatViewProps) {
@@ -372,7 +381,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
         )}
         {chat && (chat.backgroundTasks ?? 0) > 0 ? <BackgroundLine count={chat.backgroundTasks ?? 0} /> : null}
         <ModeChip mode={mode} onChange={setMode} mind={mind} isDisabled={unavailable} />
-        <Composer
+        <ChatComposer
           placeholder={projectName ? `Pídele algo a ${APP_NAME} sobre ${projectName}…` : `Pídele algo a ${APP_NAME}…`}
           mode={mode}
           onModeChange={setMode}

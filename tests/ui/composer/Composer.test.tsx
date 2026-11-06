@@ -175,6 +175,38 @@ describe('Composer', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('No se pudo enviar'));
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('Borrador');
   });
+  it('con otro resetKey vacía la bandeja, salvo si cambia durante el envío', async () => {
+    const { props, rerender } = setup({ resetKey: 'chat_a' });
+    paste([image()]);
+    await waitFor(() => expect(screen.queryByText('Subiendo…')).toBeNull());
+    rerender(<Composer {...props} resetKey="chat_b" />);
+    expect(screen.queryByAltText('foto.png')).toBeNull();
+
+    // El chat que crea el propio envío no es otra conversación: si el envío falla, la bandeja sigue.
+    let resolve: ((accepted: boolean) => void) | undefined;
+    const onSubmit = vi.fn(() => new Promise<boolean>((done) => { resolve = done; }));
+    rerender(<Composer {...props} resetKey="" onSubmit={onSubmit} />);
+    paste([image()]);
+    await waitFor(() => expect(screen.queryByText('Subiendo…')).toBeNull());
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    rerender(<Composer {...props} resetKey="chat_new" onSubmit={onSubmit} />);
+    await act(async () => { resolve?.(false); });
+    expect(screen.getByAltText('foto.png')).toBeTruthy();
+  });
+  it('con text y onTextChange, el texto lo guarda quien lo monta', async () => {
+    const onTextChange = vi.fn();
+    const { props, rerender } = setup({ text: 'de A', onTextChange });
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(input.value).toBe('de A');
+    fireEvent.change(input, { target: { value: 'de A!' } });
+    expect(onTextChange).toHaveBeenLastCalledWith('de A!');
+    rerender(<Composer {...props} text="" />);
+    expect(input.value).toBe('');
+    rerender(<Composer {...props} text="hola" />);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledWith({ text: 'hola', attachments: [] }));
+    await waitFor(() => expect(onTextChange).toHaveBeenLastCalledWith(''));
+  });
   it('deshabilitado impide cargas pero cancela la navegación al soltar', () => {
     const { props } = setup({ isDisabled: true });
     const dataTransfer = { types: ['Files'], files: [image()] };

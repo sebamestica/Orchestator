@@ -8,7 +8,10 @@ import type { ComposerProps } from '../../../src/ui/features/composer/Composer.t
 export const lastComposerProps: { current: ComposerProps | null } = { current: null };
 
 export function FakeComposer(props: ComposerProps) {
-  const [text, setText] = useState('');
+  const [own, setOwn] = useState('');
+  // Como el de verdad: con `text`/`onTextChange` el texto lo guarda quien lo monta.
+  const text = props.text ?? own;
+  const setText = props.onTextChange ?? setOwn;
   lastComposerProps.current = props;
   return (
     <div data-testid="composer" data-streaming={props.isStreaming ? 'true' : 'false'} data-mode={props.mode} data-effort={props.effort}>

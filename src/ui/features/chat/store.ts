@@ -190,6 +190,30 @@ interface ChatData {
   efforts: Efforts;
   /** Esfuerzo elegido antes de crear el chat: pasa al chat nuevo al crearlo. */
   draftEffort: Effort | null;
+  /** Texto sin enviar de cada chat (id → texto), para que no pase de una conversación a otra. */
+  drafts: Drafts;
+  /** Texto escrito antes de crear el chat: pasa al chat nuevo al crearlo. */
+  draftText: string;
+}
+
+type Drafts = Readonly<Record<string, string>>;
+
+/** Borradores con el de `chatId` cambiado (vacío: se olvida). */
+function withDraft(drafts: Drafts, chatId: string, text: string): Record<string, string> {
+  const rest = Object.entries(drafts).filter(([id]) => id !== chatId);
+  return Object.fromEntries(text ? [...rest, [chatId, text] as const] : rest);
+}
+
+/** Chat al que va el próximo mensaje: el abierto o el que se está abriendo. `null`: aún no hay chat. */
+export function composingId(s: Pick<ChatData, 'chat' | 'activeId' | 'status'>): string | null {
+  return s.chat?.id ?? (s.status === 'loading' ? s.activeId : null);
+}
+
+/** Texto sin enviar del chat del próximo mensaje (o, sin chat, del borrador). */
+export function draftOf(s: Pick<ChatData, 'chat' | 'activeId' | 'status' | 'drafts' | 'draftText'>): string {
+  const id = composingId(s);
+  if (!id) return s.draftText;
+  return Object.hasOwn(s.drafts, id) ? (s.drafts[id] ?? '') : '';
 }
 
 /**
@@ -197,7 +221,7 @@ interface ChatData {
  * borrador. `null`: no se eligió; la vista usa el de Ajustes.
  */
 export function chosenEffort(s: Pick<ChatData, 'chat' | 'activeId' | 'status' | 'efforts' | 'draftEffort'>): Effort | null {
-  const id = s.chat?.id ?? (s.status === 'loading' ? s.activeId : null);
+  const id = composingId(s);
   return id ? effortIn(s.efforts, id) : s.draftEffort;
 }
 
@@ -213,6 +237,8 @@ interface ChatActions {
   setExtraRoots(roots: string[]): Promise<void>;
   /** Recuerda el esfuerzo del chat abierto (o del borrador, si aún no hay chat). */
   setEffort(effort: Effort): void;
+  /** Guarda el texto sin enviar del chat del próximo mensaje (o del borrador, si aún no hay chat). */
+  setDraft(text: string): void;
   send(chatId: string, text: string, attachments: Attachment[], effort?: Effort): Promise<boolean>;
   interrupt(): Promise<void>;
   decide(taskId: string, decision: Decision): Promise<void>;
@@ -242,6 +268,8 @@ const INITIAL: Omit<ChatData, 'efforts'> = {
   notice: null,
   busy: {},
   draftEffort: null,
+  drafts: {},
+  draftText: '',
 };
 
 /** Cambia en cada `open`/`reset`: las respuestas de una apertura anterior se descartan. */
@@ -383,6 +411,9 @@ export const useChat = create<ChatStore>((set, get) => {
           lastSeq: -1,
           pendingRoots: [],
           draftEffort: null,
+          // Lo escrito antes de crearlo es del chat nuevo: si el primer envío falla, sigue en el campo.
+          drafts: s.draftText ? withDraft(s.drafts, r.chat.id, s.draftText) : s.drafts,
+          draftText: '',
           status: 'ready',
           notice: null,
         }));
@@ -411,7 +442,7 @@ export const useChat = create<ChatStore>((set, get) => {
       }
       rememberEffort(chatId, null);
       const rest = get().chats.filter((c) => c.id !== chatId);
-      set({ chats: rest });
+      set((s) => ({ chats: rest, drafts: withDraft(s.drafts, chatId, '') }));
       if (get().activeId !== chatId) return;
       const next = rest[0];
       if (next) {
@@ -460,6 +491,12 @@ export const useChat = create<ChatStore>((set, get) => {
       const chat = get().chat;
       if (chat) rememberEffort(chat.id, effort);
       else set({ draftEffort: effort });
+    },
+
+    setDraft(text) {
+      const id = composingId(get());
+      if (id) set((s) => ({ drafts: withDraft(s.drafts, id, text) }));
+      else set({ draftText: text });
     },
 
     async send(chatId, text, attachments, effort) {

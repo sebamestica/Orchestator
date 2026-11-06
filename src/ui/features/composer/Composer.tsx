@@ -34,6 +34,11 @@ export interface ComposerProps {
   onEffortChange?: (effort: Effort) => void;
   /** Niveles que ofrece la barra (por defecto, los de `EffortSlider`). */
   effortLevels?: readonly Effort[];
+  /** Texto del campo guardado por quien monta el Composer (p. ej., uno por chat). Sin él, el Composer guarda el suyo. */
+  text?: string;
+  onTextChange?: (text: string) => void;
+  /** Conversación del borrador: al cambiar se vacía la bandeja de adjuntos, salvo si cambia durante un envío. */
+  resetKey?: string;
 }
 
 const MAX_HEIGHT_PX = 192;
@@ -55,8 +60,13 @@ export function Composer({
   effort,
   onEffortChange,
   effortLevels,
+  text: controlledText,
+  onTextChange,
+  resetKey,
 }: ComposerProps) {
-  const [text, setText] = useState('');
+  const [ownText, setOwnText] = useState('');
+  const text = controlledText ?? ownText;
+  const setText = onTextChange ?? setOwnText;
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -78,6 +88,15 @@ export function Composer({
   add.current = attachments.add;
 
   useEffect(() => growTextarea(textarea.current, MAX_HEIGHT_PX), [text]);
+
+  // Otra conversación: los adjuntos eran de la anterior. El chat que crea el propio envío no cuenta como otra.
+  const clearAttachments = attachments.clear;
+  const shownKey = useRef(resetKey);
+  useEffect(() => {
+    if (shownKey.current === resetKey) return;
+    shownKey.current = resetKey;
+    if (!submitting.current) clearAttachments();
+  }, [resetKey, clearAttachments]);
 
   useEffect(() => {
     if (!isStreaming) return;
