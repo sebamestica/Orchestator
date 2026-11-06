@@ -253,14 +253,17 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await allowed('Bash', { command: 'git status' }, path.join(root, 'src'))).toBe(true);
   });
 
-  it('con la sesión fuera del proyecto, un comando que empieza volviendo con cd se evalúa; el resto se niega', async () => {
+  it('con la sesión fuera del proyecto, solo pasa un cd solo que vuelve; el resto se niega', async () => {
     const fwdRoot = root.replace(/\\/g, '/');
     expect(await allowed('Bash', { command: `cd ${fwdRoot}` }, outside)).toBe(true);
-    expect(await allowed('PowerShell', { command: `Set-Location ${root}; Get-ChildItem` }, outside)).toBe(true);
-    expect(await allowed('Bash', { command: `cd ${fwdRoot}/src && git status` }, outside)).toBe(true);
+    expect(await allowed('PowerShell', { command: `Set-Location ${root}` }, outside)).toBe(true);
     expect(await allowed('PowerShell', { command: `pushd ${root}` }, outside)).toBe(true);
     expect(await reason('Bash', { command: 'git status' }, outside)).toMatch(/fuera del proyecto.*cd /);
-    expect(await reason('Bash', { command: `cd ${fwdRoot} && git push` }, outside)).toMatch(/git push/);
+    // Con algo detrás del cd, lo que sigue correría fuera si el cd falla, va en segundo plano o se salta.
+    for (const command of [`cd ${fwdRoot} & rm -rf *`, `cd ${fwdRoot} || rm -rf *`, `cd ${fwdRoot}/no-existe; rm -rf *`, `cd ${fwdRoot}/src && git status`, `cd ${fwdRoot} && git push`]) {
+      expect(await reason('Bash', { command }, outside), command).toMatch(/fuera del proyecto/);
+    }
+    expect(await allowed('PowerShell', { command: `Set-Location ${root}; Get-ChildItem` }, outside)).toBe(false);
     expect(await allowed('Bash', { command: `cd ${outside.replace(/\\/g, '/')}` }, outside)).toBe(false);
     // Por tubería el cd corre en otro proceso: lo que sigue no se ejecuta en el proyecto.
     expect(await allowed('Bash', { command: `cd ${fwdRoot} | ls` }, outside)).toBe(false);
