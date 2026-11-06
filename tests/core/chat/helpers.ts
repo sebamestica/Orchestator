@@ -79,7 +79,7 @@ export interface TurnContext {
 export type TurnOutput = SDKMessage | Error;
 
 /** Guion de un turno: los mensajes de una vez, o un iterable asíncrono que puede esperar a mitad de turno. */
-export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<TurnOutput[]> | TurnOutput[] | AsyncIterable<TurnOutput>;
+export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<TurnOutput[] | AsyncIterable<TurnOutput>> | TurnOutput[] | AsyncIterable<TurnOutput>;
 
 export interface ChatQuery {
   fn: ConductorQueryFn;

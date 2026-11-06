@@ -427,6 +427,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     let q: (AsyncIterable<unknown> & { close?: () => void }) | undefined;
     let thrown: unknown;
     let liveUsd = 0;
+    let settledUsd = 0;
     try {
       const queryFn = this.#opts.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
       // Las reglas del repo ya van en el prompt de sistema: el encargo no pide volver a leerlas.
@@ -434,12 +435,17 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       for await (const message of q) {
         this.#opts.onSdkMessage?.(message);
         for (const event of tr.translate(message)) yield event;
+        // El `result` ya dejó su gasto registrado (evento `usage`): lo en curso se mide desde ahí, para no contarlo dos veces.
+        if (live && (message as { type?: unknown }).type === 'result') {
+          liveUsd = settledUsd = tr.spentUsd;
+          live.set(0);
+        }
         if (tr.finished) break;
         if (cap !== undefined && tr.spentUsd > cap) stop('budget');
         // Solo cuando el gasto cambió: la mente y otras tareas gastan con la misma clave mientras esta corre.
         if (live && tr.spentUsd !== liveUsd) {
           liveUsd = tr.spentUsd;
-          live.set(liveUsd);
+          live.set(liveUsd - settledUsd);
           if (await this.#commonBudgetExceeded(live)) stop('common-budget');
         }
         if (tr.fatal && !this.#opts.retryPermanentErrors) stop('fatal');
