@@ -477,6 +477,8 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
     expect(o.allowDangerouslySkipPermissions).toBeUndefined();
     // Bash y los MCP stdio no heredan la clave; el proceso del SDK sí la tiene.
     expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    // El shell vuelve a la carpeta del proyecto tras cada comando: un cd fuera no deja la sesión afuera.
+    expect(o.env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe('1');
     expect(o.env?.ANTHROPIC_API_KEY).toBe(PROXY_KEY);
     expect((o.systemPrompt as string[])[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: bypass[\s\S]*Hazlo tú mismo[\s\S]*No preguntes/);
@@ -517,6 +519,7 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
       expect(o.tools, mode).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
       expect(o.disallowedTools, mode).toEqual([...BLOCKED_TOOLS]);
       expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, mode).toBeUndefined();
+      expect(o.env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR, mode).toBeUndefined();
       const pre = guardAt(o, project);
       for (const t of BYPASS_TOOLS) expect(o.allowedTools, `${mode} ${t}`).not.toContain(t);
       expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' }), mode).toMatch(/"deny".*Write no está permitido/);
@@ -595,6 +598,7 @@ describe('ConductorSession: modo chat (como Claude Code, sin flota)', () => {
     for (const t of ['Monitor', 'EnterWorktree', 'Workflow']) expect(o.disallowedTools).toContain(t);
     for (const t of BYPASS_TOOLS) expect(o.disallowedTools).not.toContain(t);
     expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
+    expect(o.env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe('1');
     const prompt = o.systemPrompt as string[];
     expect(prompt[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     expect(prompt[2]).toMatch(/## Modo: chat[\s\S]*como Claude Code[\s\S]*No creas tareas ni delegas a la flota/);

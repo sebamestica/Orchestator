@@ -69,10 +69,13 @@ export function modeActs(mode: MindMode | undefined, standalone: boolean): boole
 }
 
 /**
- * Entorno extra de `bypass` y `chat`: Claude Code quita las credenciales (ANTHROPIC_API_KEY y otras) del entorno de sus
- * subprocesos (Bash, PowerShell, hooks y servidores MCP stdio); su propio proceso las conserva.
+ * Entorno extra de `bypass` y `chat`:
+ * - Claude Code quita las credenciales (ANTHROPIC_API_KEY y otras) del entorno de sus subprocesos (Bash, PowerShell,
+ *   hooks y servidores MCP stdio); su propio proceso las conserva;
+ * - el shell vuelve a la carpeta de la sesión después de cada comando. Sin esto, un `cd` a una raíz de lectura
+ *   (`additionalDirectories`) se conserva y la guardia niega todo lo que sigue por trabajar fuera del proyecto.
  */
-export const BYPASS_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' };
+export const BYPASS_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1' };
 
 /** Subagente propio: investiga en paralelo con las mismas herramientas de lectura. */
 export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {

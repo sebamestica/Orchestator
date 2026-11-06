@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/guard.ts:216-217`, `src/core/conductor/guard.ts:239`, `src/core/adapters/claude-sdk/shell-policy.ts:388`, `src/core/adapters/claude-sdk/shell-policy.ts:639-645`, `src/core/conductor/session.ts:73`, `src/core/conductor/session.ts:270`, `src/core/conductor/session.ts:303`, `src/core/conductor/session.ts:313`, `src/core/conductor/session.ts:372`, `src/core/chat/service.ts:647-648`, `src/core/chat/service.ts:718-721`, `src/core/app/f5-chat.ts:119`, `src/core/conductor/prompt.ts:156`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

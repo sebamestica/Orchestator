@@ -24,7 +24,7 @@
 import path from 'node:path';
 import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import type { ShellKind } from '../adapters/claude-sdk/shell-parse.ts';
-import { lexicallyInside, shellCommandProblem, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
+import { leadingCdTarget, lexicallyInside, shellCommandProblem, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
 import { realOrNearest } from '../memory/safe-fs.ts';
 
 export type GuardDecision = { allow: true } | { allow: false; reason: string };
@@ -123,6 +123,12 @@ function shellDeniedText(denied: readonly string[], project: string): string[] {
     if (parent !== d && path.dirname(parent) !== parent && !lexicallyInside(parent, project)) add(parent);
   }
   return [...out];
+}
+
+/** True si el primer comando de `command` es un `cd` que, desde `dir`, vuelve dentro de `root`. */
+function startsBackInside(command: string, kind: ShellKind, root: string, dir: string): boolean {
+  const target = leadingCdTarget(command, kind, dir);
+  return target !== undefined && lexicallyInside(root, target);
 }
 
 export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
@@ -250,7 +256,10 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     if (!command.trim()) return { allow: false, reason: `${toolName}: falta el comando.` };
     if (!shellRoot) return { allow: false, reason: `${toolName} no está disponible en esta sesión.` };
     const dir = at ? path.resolve(shellRoot, at) : shellRoot;
-    if (!lexicallyInside(shellRoot, dir)) return { allow: false, reason: `${toolName}: la sesión trabaja fuera del proyecto (${dir}); vuelve a ${shellRoot}.` };
+    // Con la sesión afuera solo pasa el comando que empieza volviendo al proyecto; el resto se evalúa desde ese cd.
+    if (!lexicallyInside(shellRoot, dir) && !startsBackInside(command, kind, shellRoot, dir)) {
+      return { allow: false, reason: `${toolName}: la sesión trabaja fuera del proyecto (${dir}); empieza el comando con \`cd ${shellRoot}\` para volver.` };
+    }
     const text = comparable(command);
     if (deniedText.some((d) => text.includes(d))) return { allow: false, reason: `${toolName}: el comando nombra los datos del núcleo (bóveda o base de datos); no se tocan.` };
     const problem = await shellCommandProblem(command, kind, shellRoot, dir);

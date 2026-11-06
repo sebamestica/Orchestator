@@ -253,6 +253,20 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await allowed('Bash', { command: 'git status' }, path.join(root, 'src'))).toBe(true);
   });
 
+  it('con la sesión fuera del proyecto, un comando que empieza volviendo con cd se evalúa; el resto se niega', async () => {
+    const fwdRoot = root.replace(/\\/g, '/');
+    expect(await allowed('Bash', { command: `cd ${fwdRoot}` }, outside)).toBe(true);
+    expect(await allowed('PowerShell', { command: `Set-Location ${root}; Get-ChildItem` }, outside)).toBe(true);
+    expect(await allowed('Bash', { command: `cd ${fwdRoot}/src && git status` }, outside)).toBe(true);
+    expect(await allowed('PowerShell', { command: `pushd ${root}` }, outside)).toBe(true);
+    expect(await reason('Bash', { command: 'git status' }, outside)).toMatch(/fuera del proyecto.*cd /);
+    expect(await reason('Bash', { command: `cd ${fwdRoot} && git push` }, outside)).toMatch(/git push/);
+    expect(await allowed('Bash', { command: `cd ${outside.replace(/\\/g, '/')}` }, outside)).toBe(false);
+    // Por tubería el cd corre en otro proceso: lo que sigue no se ejecuta en el proyecto.
+    expect(await allowed('Bash', { command: `cd ${fwdRoot} | ls` }, outside)).toBe(false);
+    expect(await guard.hook(pre('Bash', { command: `cd ${fwdRoot}` }, outside), 'tu', { signal })).toEqual({});
+  });
+
   it('check síncrono nunca aprueba edición ni shell; el hook y canUseTool usan la decisión completa', async () => {
     expect(guard.check('Write', { file_path: path.join(root, 'a.md'), content: 'x' }).allow).toBe(false);
     expect(guard.check('Bash', { command: 'git status' }).allow).toBe(false);

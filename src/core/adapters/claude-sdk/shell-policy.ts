@@ -394,7 +394,7 @@ async function evalCommand(input: readonly Word[], c: ShellContext): Promise<Out
   if (c.piped && PIPE_SENSITIVE.has(name) && c.kind === 'powershell') {
     return `${first.text} recibe rutas por la tubería: no se pueden verificar`;
   }
-  if (['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location'].includes(name)) return evalCd(args, c);
+  if (CD_COMMANDS.has(name)) return { cwd: cdTarget(args, c.cwd) };
   if (name === 'popd' || name === 'pop-location') return { cwd: undefined };
   if (name === 'find' && c.kind === 'bash') return evalFind(args, c);
 
@@ -645,12 +645,29 @@ async function evalNpm(name: string, args: readonly Word[], c: ShellContext): Pr
   return evalCommand(args.slice(k), c);
 }
 
-async function evalCd(args: readonly Word[], c: ShellContext): Promise<Outcome> {
+const CD_COMMANDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location']);
+
+/** Carpeta a la que mueve un `cd` (o `Set-Location`, `pushd`) con estos argumentos; undefined si no se sabe. */
+function cdTarget(args: readonly Word[], cwd: string | undefined): string | undefined {
   const positional = args.filter((a) => !(a.text.startsWith('-') && a.text.length > 1) && !/^\/d$/i.test(a.text));
   const target = positional[0];
-  if (!target || target.text === '-') return { cwd: undefined };
-  const r = resolveShellPath(target, c.cwd);
-  return { cwd: 'abs' in r ? r.abs : undefined };
+  if (!target || target.text === '-') return undefined;
+  const r = resolveShellPath(target, cwd);
+  return 'abs' in r ? r.abs : undefined;
+}
+
+/**
+ * Carpeta a la que vuelve `command` si su primer comando es un `cd` (o `Set-Location`, `pushd`) a una ruta literal,
+ * resuelta contra `cwd`; undefined si empieza con otra cosa o el destino no se puede verificar. Si la salida del `cd`
+ * va por una tubería, lo que sigue corre en otro proceso y no cuenta como vuelta.
+ */
+export function leadingCdTarget(command: string, kind: ShellKind, cwd: string): string | undefined {
+  const parsed = parseShell(command, kind);
+  if (parsed.problems.length > 0) return undefined;
+  const [first, next] = parsed.commands;
+  const name = first?.words[0];
+  if (!first || !name || name.dynamic || next?.piped || !CD_COMMANDS.has(commandName(name.text))) return undefined;
+  return cdTarget(first.words.slice(1), path.resolve(cwd));
 }
 
 async function evalFind(args: readonly Word[], c: ShellContext): Promise<Outcome> {
