@@ -1,7 +1,7 @@
 # Issues abiertos de Berland (`inssues/`)
 
 Esta carpeta junta los problemas **abiertos** que se encontraron en Berland (el orquestador de `C:\dev\orquestador`)
-el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **96 issues**, uno por archivo `.md`, y
+el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **119 issues** (23 de ellas `autoeval-*`, agregadas después), uno por archivo `.md`, y
 cada uno se verificó leyendo el código (archivo:línea). Los `uso-real-*` se verificaron además con copias de solo lectura
 de la base y de los registros reales. Los números de línea son los del código en el commit `63748b8`. Si el código se
 mueve, busca el fragmento citado.
@@ -17,6 +17,7 @@ Origen de cada prefijo:
 | `agy-` | Revisión de agy (Antigravity), verificada y corregida por Claude (lo que agy tenía mal está anotado en cada archivo) |
 | `codex-` | Revisión de seguridad y corrección de Codex, verificada por Claude |
 | `uso-real-` | Evidencia de uso real: la base `%LOCALAPPDATA%\orquestador\orquestador.db` y `logs\nucleo-escritorio.log` |
+| `autoeval-` | Las vulnerabilidades que la propia mente de Berland dijo tener. Cada una se verificó en el código (5 verificadores, más un revisor que intentó refutar cada borrador) y se cruzó con las demás issues: solo se escribió lo que ninguna cubría |
 
 La numeración tiene huecos (por ejemplo `flota-05` o `agy-03`): esos números no tienen archivo. Los cinco
 duplicados que se fusionaron hoy están en «Duplicados fusionados».
@@ -166,6 +167,38 @@ Ordenado por severidad (alta, media, baja) y después por área.
 
 Totales: 7 de severidad alta, 42 media y 47 baja.
 
+### Autoevaluación de la mente (`autoeval-*`)
+
+Se agregaron después del índice principal. Ordenadas por severidad.
+
+| Archivo | Título | Severidad | Área |
+|---|---|---|---|
+| [autoeval-navegador-02-modo-plan-actua-en-chrome-y-canva.md](autoeval-navegador-02-modo-plan-actua-en-chrome-y-canva.md) | En modo plan (y en auto) la mente hace clic, rellena formularios y ejecuta JavaScript en tu Chrome, y confirma cambios en Canva, sin tu aprobación | alta | Mente y chat |
+| [autoeval-navegador-03-acciones-de-salida-sin-confirmacion.md](autoeval-navegador-03-acciones-de-salida-sin-confirmacion.md) | En chat y bypass ninguna acción de salida en tu Chrome o tu Canva pide confirmación: una página puede llevar a la mente a enviar un formulario, ejecutar JavaScript con tus sesiones o publicar un diseño | alta | Mente y chat |
+| [autoeval-navegador-05-red-devuelve-cookies-de-sesion.md](autoeval-navegador-05-red-devuelve-cookies-de-sesion.md) | Al revisar la red del Chrome personal, la mente y la flota reciben las cookies de sesión y los encabezados de autorización de tus cuentas abiertas | alta | Plugins y navegador |
+| [autoeval-reglas-01-mente-git-en-tu-carpeta-sin-barrera.md](autoeval-reglas-01-mente-git-en-tu-carpeta-sin-barrera.md) | En bypass y chat la mente puede fusionar en `main`, hacer commits, cambiar de rama y descartar tus cambios sin confirmar en tu carpeta: la política de shell frena push, rebase, `reset --hard`, `clean -f` y borrar ramas, pero deja pasar `merge`, `commit`, `checkout`, `restore` y `stash` | alta | Mente y chat |
+| [autoeval-reglas-02-worktree-alcanza-stash-y-ramas-del-repo.md](autoeval-reglas-02-worktree-alcanza-stash-y-ramas-del-repo.md) | Desde el worktree de una tarea, `git stash pop\|drop\|clear` saca o borra tu stash y `git checkout -B`/`git switch -C` mueve cualquier rama del repo (también `main`, con `--ignore-other-worktrees`) | alta | Núcleo de la flota (política de shell de los workers Claude, que también usa la mente) |
+| [autoeval-reglas-03-modo-local-sin-bloqueo-de-push.md](autoeval-reglas-03-modo-local-sin-bloqueo-de-push.md) | En modo local no se aplica el bloqueo de push de los worktrees: Codex y agy pueden publicar desde tu carpeta con tus credenciales de git | alta | Núcleo de la flota |
+| [autoeval-trabajo-01-decisiones-de-memoria-no-vuelven.md](autoeval-trabajo-01-decisiones-de-memoria-no-vuelven.md) | Las decisiones que la mente guarda con `escribir_memoria`, incluido el «Plan: …» obligatorio, nunca vuelven en `leer_memoria` ni en los encargos de la flota | alta | Datos y almacenamiento |
+| [autoeval-trabajo-02-prompt-de-sistema-congelado-al-reanudar.md](autoeval-trabajo-02-prompt-de-sistema-congelado-al-reanudar.md) | Al cambiar de modo, sumar una carpeta extra o retomar el chat otro día, la mente sigue leyendo el contexto de la primera sesión: cree estar en el modo viejo, con la fecha y los cupos de entonces | alta | Mente y chat |
+| [autoeval-gasto-01-mente-sin-tope-por-turno-sesion-ni-dia.md](autoeval-gasto-01-mente-sin-tope-por-turno-sesion-ni-dia.md) | La mente no tiene tope de gasto por turno, por sesión ni por día: un turno con subagentes, o una cadena de turnos autónomos, puede gastar hasta el presupuesto total del agente Claude (hoy 60.000 USD) | media | Mente y chat (gasto) |
+| [autoeval-gasto-02-presupuesto-claude-no-es-tope-comun.md](autoeval-gasto-02-presupuesto-claude-no-es-tope-comun.md) | El presupuesto del agente Claude no es un tope común: la flota y el panel de cupos no descuentan lo que gasta la mente, y cada chat abierto recibe el saldo entero | media | Mente y chat (gasto) · Cupos |
+| [autoeval-gasto-03-mente-reintenta-sin-limite-tope-de-tarea.md](autoeval-gasto-03-mente-reintenta-sin-limite-tope-de-tarea.md) | En auto y bypass, la mente puede reintentar sin límite una tarea que la flota frenó por el tope de gasto, y cada reintento arranca con el tope entero | media | Mente y chat · Flota (gasto) |
+| [autoeval-gasto-04-bajar-y-ejecutar-desde-internet.md](autoeval-gasto-04-bajar-y-ejecutar-desde-internet.md) | En bypass y chat, la mente (y los workers Claude) pueden bajar un script o un ejecutable de internet y correrlo en el mismo comando; `certutil`, `bitsadmin` y `msiexec` ni siquiera pasan por la regla de escritura | media | Mente y chat · Seguridad (política de shell) |
+| [autoeval-navegador-01-prompt-sin-aviso-de-contenido-externo.md](autoeval-navegador-01-prompt-sin-aviso-de-contenido-externo.md) | La mente no sabe que lo que lee en páginas, diseños de Canva, archivos y adjuntos son datos y no órdenes: su prompt propio dejó fuera el aviso de inyección que trae Claude Code | media | Mente y chat |
+| [autoeval-navegador-04-agentes-manejan-pestanas-del-usuario.md](autoeval-navegador-04-agentes-manejan-pestanas-del-usuario.md) | Cualquier agente puede leer, navegar o cerrar las pestañas que tú tienes abiertas en tu Chrome (correo, banco), no solo las suyas: «trabaja solo en tu pestaña» no lo hace cumplir nadie | media | Plugins y navegador |
+| [autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md](autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md) | agy corre sin ninguna barrera técnica de Berland: escribe fuera del worktree, ejecuta cualquier git y se salta el bloqueo de push con `git -C <tu copia del repo> push` o `-c remote.<r>.pushurl= -c remote.<r>.pushurl=… push --no-verify` | media | Adaptadores de agentes |
+| [autoeval-reglas-05-worker-claude-ve-la-clave-y-commit-sin-revisar-secretos.md](autoeval-reglas-05-worker-claude-ve-la-clave-y-commit-sin-revisar-secretos.md) | Los workers Claude tienen tu clave de API (y el token de Canva) en el entorno de Bash y PowerShell, y Berland confirma a tu nombre lo que escriban sin buscar secretos | media | Adaptadores de agentes |
+| [autoeval-reglas-06-modo-local-rutas-propias-solo-por-lo-que-informa-el-agente.md](autoeval-reglas-06-modo-local-rutas-propias-solo-por-lo-que-informa-el-agente.md) | En modo local, las rutas propias solo se comprueban con lo que el agente dice haber tocado: lo que escriba por Bash, PowerShell o un script fuera de ellas no se ve ni se frena, y la tarea se integra igual | media | Núcleo de la flota |
+| [autoeval-reglas-07-codex-sandbox-depende-de-config-global.md](autoeval-reglas-07-codex-sandbox-depende-de-config-global.md) | La única barrera de Codex es su sandbox, y en Windows lo configura tu `~/.codex/config.toml`: Berland no lo fija ni comprueba que esté activo, y en modo `unelevated` la red no queda cortada | media | Adaptadores de agentes |
+| [autoeval-subagentes-01-subagentes-integrados-con-todas-las-herramientas.md](autoeval-subagentes-01-subagentes-integrados-con-todas-las-herramientas.md) | La mente lanza los subagentes que trae el SDK (general-purpose, Plan, Explore, claude), no el `investigador` de Berland: reciben tu Chrome personal, Canva y las herramientas de la flota, sin las reglas de Berland | media | Mente y chat |
+| [autoeval-trabajo-03-resultados-cortados-y-subagentes-ocultos.md](autoeval-trabajo-03-resultados-cortados-y-subagentes-ocultos.md) | En el hilo del chat, cada resultado de herramienta se corta a 300 caracteres y los pasos de los subagentes no aparecen: el usuario no puede comprobar de dónde sacó la mente sus cifras | media | Interfaz: chat y composer |
+| [autoeval-trabajo-04-trabajo-propio-de-la-mente-sin-memoria.md](autoeval-trabajo-04-trabajo-propio-de-la-mente-sin-memoria.md) | Lo que la mente cambia ella misma en modo bypass o chat no queda en la memoria del proyecto: la flota y los chats siguientes no saben qué tocó ni por qué | media | Mente y chat |
+| [autoeval-trabajo-05-estado-sin-tarea-ciego-tras-reinicio.md](autoeval-trabajo-05-estado-sin-tarea-ciego-tras-reinicio.md) | Tras reiniciar el núcleo, `estado()` sin `taskId` deja fuera el estado de las tareas: la mente informa la flota a medias, sin las fallidas ni las integradas | media | Mente y chat |
+| [autoeval-trabajo-06-compactacion-invisible-en-el-chat.md](autoeval-trabajo-06-compactacion-invisible-en-el-chat.md) | Cuando el SDK compacta la conversación de la mente, el chat no lo muestra: el usuario no sabe que la mente resumió lo anterior y puede haber perdido detalles | baja | Interfaz: chat y composer |
+
+Totales con las `autoeval-*`: 15 de severidad alta, 56 media y 48 baja.
+
 ## Orden sugerido
 
 La idea: primero que el gate dé resultados fiables, después las altas, y cada una junto con las que tocan el mismo
@@ -274,6 +307,23 @@ Cada arreglo tiene que pasar `npm run -s check`. Con la CPU al límite, hoy el g
   con `datos-05` (memoria de Obsidian, `obsidian-memory.ts`).
 - **Documentación del API:** `servidor-07` y `pruebas-08`, en `docs/api/` y `tests/docs/`.
 - **Sueltas:** `agy-02`, `agy-04`, `agy-20`, `plugins-06`.
+
+### 4. Autoevaluación de la mente (`autoeval-*`)
+
+Entran según su severidad: las altas, después de las altas del bloque 1; las medias, al final de las medias; la baja,
+con las bajas.
+
+- **Altas:**
+  - `autoeval-navegador-02` (plan y auto actúan en Chrome y Canva) y `autoeval-navegador-03` (acciones de salida sin
+    confirmación): las dos cambian el permiso de los plugins en `conductor/session.ts` y la guardia (`guard.ts`).
+  - `autoeval-navegador-05` (la red devuelve cookies de sesión): el lanzador de Chrome personal.
+  - `autoeval-reglas-01` (la mente usa git en tu carpeta), `autoeval-reglas-02` (stash y ramas desde el worktree) y
+    `autoeval-reglas-03` (push en modo local): la política de shell y el modo local.
+  - `autoeval-trabajo-01` (las decisiones de memoria no vuelven) y `autoeval-trabajo-02` (prompt de sistema congelado
+    al reanudar).
+- **Medias:** `autoeval-navegador-01` y `autoeval-navegador-04`; `autoeval-subagentes-01`; `autoeval-reglas-04` a
+  `autoeval-reglas-07`; `autoeval-gasto-01` a `autoeval-gasto-04`; `autoeval-trabajo-03` a `autoeval-trabajo-05`.
+- **Baja:** `autoeval-trabajo-06` (la compactación no se ve en el chat).
 
 ## Cómo levantar todo después de resolver las issues
 
