@@ -3,7 +3,8 @@ import './activity.css';
 
 export function ActivityRowView({ name, row, quota }: { name: string; row: ActivityRow; quota?: string | undefined }) {
   const color = row.status === 'Error' || row.status === 'Detenido' ? 'bg-red-500' : row.status === 'En espera' || row.status === 'Sin señal' ? 'bg-amber-500' : row.active ? 'bg-emerald-500' : 'bg-foreground/25';
-  return <article aria-label={name} tabIndex={0} className="relative min-w-0 overflow-hidden rounded-xl bg-foreground/[0.035] px-3 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground">
+  // Solo informa: sin foco propio (la lista que la contiene es la única parada de Tab) y los cambios salen por aria-live.
+  return <article aria-label={name} className="relative min-w-0 overflow-hidden rounded-xl bg-foreground/[0.035] px-3 py-3">
     <div className="flex items-center gap-2.5">
       <span aria-hidden="true" className={`relative flex size-4 shrink-0 items-center justify-center ${row.active && row.thinking ? 'animate-spin motion-reduce:animate-none' : ''}`}>
         {row.active && row.thinking && <span className="absolute inset-0 rounded-full border border-emerald-500/25 border-t-emerald-500" />}

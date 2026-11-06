@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/agents-panel/ActivityRowView.tsx:6`, `src/ui/features/agents-panel/AgentsPanel.tsx:80`, `src/ui/features/agents-panel/AgentsPanel.tsx:82-92`, `src/ui/app/App.tsx:105`, `src/ui/app/App.tsx:132`, `src/ui/features/composer/Composer.tsx:196`, `tests/ui/agents-panel/AgentsPanel.test.tsx:77-87`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

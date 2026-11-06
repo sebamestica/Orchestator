@@ -120,17 +120,23 @@ describe('Panel mínimo', () => {
     send({ type: 'chat_deleted', chatId: 'other1' });
     expect(within(screen.getByRole('article', { name: 'Mente' })).getByText('Libre')).toBeTruthy();
   });
-  it('oculta agentes deshabilitados y conserva las filas accesibles', () => {
+  it('oculta agentes deshabilitados; las filas informan sin ser paradas de Tab', () => {
     const agent = useApp.getState().agents[0];
     if (!agent) throw new Error('falta el agente de prueba');
-    useApp.setState({ agents: [agent, { ...agent, config: { ...agent.config, id: 'disabled', displayName: 'Oculto', enabled: false } }] });
+    const second = { ...agent, config: { ...agent.config, id: 'codex', displayName: 'Mi Codex' } };
+    useApp.setState({ agents: [agent, second, { ...agent, config: { ...agent.config, id: 'disabled', displayName: 'Oculto', enabled: false } }] });
     render(<AgentsPanel />);
     expect(screen.queryByText('Oculto')).toBeNull();
-    for (const row of screen.getAllByRole('article')) {
-      expect(row.tabIndex).toBe(0);
-      expect(row.className).toContain('focus-visible:');
+    const rows = screen.getAllByRole('article');
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.hasAttribute('tabindex')).toBe(false);
       expect(row.querySelector('[aria-live="polite"]')).toBeTruthy();
     }
+    const aside = screen.getByRole('complementary', { name: 'Agentes en vivo' });
+    const stops = [...aside.querySelectorAll('[tabindex]')].filter((el) => el.getAttribute('tabindex') !== '-1');
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.getAttribute('aria-label')).toBe('Lista de agentes');
   });
   it('no anima el punto libre; las animaciones activas respetan reduced motion', () => {
     const { rerender } = render(<AgentsPanel />);

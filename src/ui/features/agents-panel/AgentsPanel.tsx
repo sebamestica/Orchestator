@@ -105,7 +105,9 @@ export function AgentsPanel({ overlay = false, onClose }: { overlay?: boolean; o
   return <aside aria-label="Agentes en vivo" data-overlay={overlay ? '' : undefined} onKeyDown={onKeyDown}
     className={`chrome-surface ${overlay ? PLACEMENT.overlay : PLACEMENT.inline} w-[var(--panel-width)] flex-col overflow-hidden`}>
     <header className="border-b border-foreground/[0.06] px-4 py-3"><h2 className="text-sm font-medium">Agentes</h2></header>
-    <div className="flex-1 space-y-2 overflow-y-auto p-3">
+    {/* Una sola parada de Tab para desplazar la lista con el teclado; las filas no se enfocan. */}
+    <div role="group" aria-label="Lista de agentes" tabIndex={0}
+      className="flex-1 space-y-2 overflow-y-auto p-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground">
       <ActivityRowView name="Mente" row={mindRow(chat, views, events)} />
       {connection !== 'open' && <p role="status" className="px-3 text-xs text-muted">Sin conexión en vivo</p>}
       {notice && <p role="status" className="px-3 text-xs text-amber-600 dark:text-amber-400">{notice}</p>}
