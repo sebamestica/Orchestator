@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/store/store.ts:671`, `src/core/store/store.ts:681`, `src/core/store/store.ts:684`, `src/core/store/store.ts:691`, `src/core/store/schema.ts:77`, `src/core/store/schema.ts:87`, `src/core/main.ts:89`, `src/core/main.ts:109`, `src/core/config/config.ts:10`, `src/core/registry/quotas.ts:75`, `src/core/server/hub.ts:65`, `src/core/app/f5-chat.ts:111`, `src/core/conductor/session.ts:350`, `src/core/conductor/tools.ts:338`, `src/core/server/app.ts:363`, `src/core/usage-stats/summary.ts:405`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Mientras el núcleo está encendido, `main.ts` crea un `QuotaRefresher` cuyo `publish` es `hub.publishQuota`

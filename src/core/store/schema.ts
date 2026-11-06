@@ -1,4 +1,8 @@
 /** Esquema SQLite del núcleo. Cada versión se aplica una sola vez (PRAGMA user_version). */
+
+/** Fotos de cupo que se guardan por agente: un día a la cadencia por defecto (5 min). Casi todo lee solo la última. */
+export const QUOTA_KEEP_PER_AGENT = 288;
+
 export const MIGRATIONS: readonly string[] = [
   // v1
   `
@@ -98,5 +102,12 @@ export const MIGRATIONS: readonly string[] = [
   // v4: índice por día para el resumen de uso y GET /usage con rango y sin agente (usage_agent_day empieza por agent_id).
   `
   CREATE INDEX usage_day ON usage(day);
+  `,
+  // v5: recorta el historial de fotos de cupo acumulado; desde aquí recordQuota lo mantiene acotado.
+  `
+  DELETE FROM quota_snapshots WHERE id IN (
+    SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY id DESC) AS rn FROM quota_snapshots)
+    WHERE rn > ${QUOTA_KEEP_PER_AGENT}
+  );
   `,
 ];

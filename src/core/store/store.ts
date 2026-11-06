@@ -25,7 +25,7 @@ import {
 import { defaultWorktreesRoot, physicalPath, projectsOverlapProblem, projectWorkspaceProblem, projectWorkspaceSchema, type ProjectWorkspace } from '../workspace/config.ts';
 import { isInside } from '../workspace/guard.ts';
 import { redactDeep } from './redact-deep.ts';
-import { MIGRATIONS } from './schema.ts';
+import { MIGRATIONS, QUOTA_KEEP_PER_AGENT } from './schema.ts';
 
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
@@ -691,10 +691,17 @@ export class SqliteStore implements EventSink {
   recordQuota(snapshot: QuotaSnapshot): QuotaRecord {
     const s = sanitize(quotaSnapshotSchema, snapshot, 'Foto de cupo');
     const recordedAt = this.iso();
-    this.stmt(
-      'INSERT INTO quota_snapshots (agent_id, method, taken_at, stale, error, snapshot_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(s.agentId, s.method, s.takenAt, s.stale ? 1 : 0, s.error ?? null, JSON.stringify(s), recordedAt);
-    return { snapshot: s, recordedAt };
+    return this.tx(() => {
+      this.stmt(
+        'INSERT INTO quota_snapshots (agent_id, method, taken_at, stale, error, snapshot_json, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run(s.agentId, s.method, s.takenAt, s.stale ? 1 : 0, s.error ?? null, JSON.stringify(s), recordedAt);
+      // Retención: sin esto la tabla crece con cada lectura de cupo y latestQuotas recorre todo su índice.
+      this.stmt(
+        `DELETE FROM quota_snapshots WHERE agent_id = ?
+         AND id <= (SELECT id FROM quota_snapshots WHERE agent_id = ? ORDER BY id DESC LIMIT 1 OFFSET ${QUOTA_KEEP_PER_AGENT})`,
+      ).run(s.agentId, s.agentId);
+      return { snapshot: s, recordedAt };
+    });
   }
 
   /** Última foto de cupo de cada agente. */
