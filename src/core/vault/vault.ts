@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 import { z } from 'zod';
 import { idSchema } from '../../shared/index.ts';
+import { renameWithRetry, retryWhileBusy } from '../memory/safe-fs.ts';
 import { VaultError, type Cipher } from './dpapi.ts';
 import { FileLockBusyError, withFileLock, type FileLockOptions } from './file-lock.ts';
 
@@ -36,6 +37,20 @@ const fileSchema = z.strictObject({
 });
 type VaultFile = z.infer<typeof fileSchema>;
 
+/** Cabecera mínima para distinguir un archivo de otra versión de Berland (no es daño) de uno roto. */
+const headerSchema = z.looseObject({ version: z.number(), scheme: z.string().optional() });
+
+/** Lo que hay en un archivo de bóveda. `foreign`: JSON válido con `version` o `scheme` que esta versión no conoce. */
+type FileState = { kind: 'ok'; file: VaultFile } | { kind: 'missing' } | { kind: 'damaged'; reason: string } | { kind: 'foreign' };
+
+/** Contenido leído y si `vault.json` estaba sano (solo entonces se copia a `.bak` antes de reemplazarlo). */
+interface Loaded {
+  file: VaultFile;
+  mainIsSound: boolean;
+}
+
+const emptyFile = (): VaultFile => ({ version: 1, scheme: 'dpapi-currentuser', entries: {} });
+
 export interface FileVaultOptions {
   /** `%LOCALAPPDATA%\orquestador\vault.json` en producción; un temporal en pruebas. */
   path: string;
@@ -56,7 +71,9 @@ function checkRef(ref: string): string {
 }
 
 /**
- * Bóveda en un archivo JSON con los valores cifrados (DPAPI). Escrituras atómicas (temporal + rename).
+ * Bóveda en un archivo JSON con los valores cifrados (DPAPI). Escrituras atómicas (temporal con flush + rename
+ * con reintentos) y copia del archivo sano anterior en `<path>.bak`. Si `<path>` está dañado se lee la copia;
+ * si tampoco sirve, `set` aparta el dañado como `<path>.danada-<fecha>` y empieza una bóveda vacía.
  * Cada lectura-modificación-reemplazo va en serie dentro del proceso y con un candado entre procesos
  * (`<path>.lock`, `mkdir` atómico), para que dos instancias sobre el mismo archivo no pierdan cambios.
  * El cifrado y descifrado (PowerShell, ~0,5 s) se hacen fuera del candado.
@@ -76,12 +93,12 @@ export class FileVault implements SecretVault {
     const label = meta.label;
     const protectedB64 = await this.opts.cipher.protect(value);
     return this.locked(async () => {
-      const file = await this.read();
+      const { file, mainIsSound } = await this.read({ repair: true });
       const ts = this.iso();
       const prev = file.entries[id];
       const entry = { protected: protectedB64, createdAt: prev?.createdAt ?? ts, updatedAt: ts, ...(label ?? prev?.label ? { label: label ?? prev?.label } : {}) };
       file.entries[id] = entrySchema.parse(entry);
-      await this.write(file);
+      await this.write(file, mainIsSound);
       this.log(`vault set ${id}`);
       return info(id, file.entries[id]);
     });
@@ -89,7 +106,7 @@ export class FileVault implements SecretVault {
 
   async get(ref: string): Promise<string | undefined> {
     const id = checkRef(ref);
-    const entry = await this.locked(async () => (await this.read()).entries[id]);
+    const entry = await this.locked(async () => (await this.read()).file.entries[id]);
     if (!entry) return undefined;
     this.log(`vault get ${id}`);
     return this.opts.cipher.unprotect(entry.protected);
@@ -98,10 +115,10 @@ export class FileVault implements SecretVault {
   async delete(ref: string): Promise<boolean> {
     const id = checkRef(ref);
     return this.locked(async () => {
-      const file = await this.read();
+      const { file, mainIsSound } = await this.read();
       if (!file.entries[id]) return false;
       file.entries = Object.fromEntries(Object.entries(file.entries).filter(([k]) => k !== id));
-      await this.write(file);
+      await this.write(file, mainIsSound);
       this.log(`vault delete ${id}`);
       return true;
     });
@@ -109,7 +126,7 @@ export class FileVault implements SecretVault {
 
   list(): Promise<SecretRefInfo[]> {
     return this.locked(async () => {
-      const file = await this.read();
+      const { file } = await this.read();
       return Object.entries(file.entries)
         .map(([id, e]) => info(id, e))
         .sort((a, b) => a.ref.localeCompare(b.ref));
@@ -132,31 +149,39 @@ export class FileVault implements SecretVault {
     return next;
   }
 
-  private async read(): Promise<VaultFile> {
-    let raw: string;
+  /**
+   * Lee `<path>`; si está dañado, la copia `<path>.bak`. Con `repair` (solo `set`) y sin copia útil, aparta el
+   * dañado y devuelve una bóveda vacía. Un archivo de otra versión nunca se trata como daño.
+   */
+  private async read(opts: { repair?: boolean } = {}): Promise<Loaded> {
+    const main = await readVaultFile(this.opts.path);
+    if (main.kind === 'ok') return { file: main.file, mainIsSound: true };
+    if (main.kind === 'missing') return { file: emptyFile(), mainIsSound: false };
+    if (main.kind === 'foreign') throw new VaultError('La bóveda es de otra versión de Berland (versión o esquema desconocido)');
+    const backup = await readVaultFile(`${this.opts.path}.bak`);
+    if (backup.kind === 'ok') {
+      this.log('vault recuperada desde la copia (.bak)');
+      return { file: backup.file, mainIsSound: false };
+    }
+    if (!opts.repair) throw new VaultError(main.reason);
+    const aside = `${this.opts.path}.danada-${this.iso().replace(/[:.]/g, '-')}`;
     try {
-      raw = await readFile(this.opts.path, 'utf8');
+      await renameWithRetry(this.opts.path, aside);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, scheme: 'dpapi-currentuser', entries: {} };
-      throw new VaultError(`No se pudo leer la bóveda (${(err as NodeJS.ErrnoException).code ?? 'error'})`);
+      throw new VaultError(`No se pudo apartar la bóveda dañada (${(err as NodeJS.ErrnoException).code ?? 'error'})`);
     }
-    let data: unknown;
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      throw new VaultError('La bóveda está dañada (JSON inválido)');
-    }
-    const parsed = fileSchema.safeParse(data);
-    if (!parsed.success) throw new VaultError('La bóveda está dañada (formato inválido)');
-    return parsed.data;
+    this.log(`vault dañada apartada como ${basename(aside)}; se empieza una vacía`);
+    return { file: emptyFile(), mainIsSound: false };
   }
 
-  private async write(file: VaultFile): Promise<void> {
+  /** Temporal con flush, copia del archivo sano anterior en `.bak` y reemplazo con reintentos ante el antivirus. */
+  private async write(file: VaultFile, mainIsSound: boolean): Promise<void> {
     await mkdir(dirname(this.opts.path), { recursive: true });
     const tmp = `${this.opts.path}.${randomBytes(6).toString('hex')}.tmp`;
     try {
-      await writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-      await rename(tmp, this.opts.path);
+      await writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flush: true });
+      if (mainIsSound) await retryWhileBusy(() => copyFile(this.opts.path, `${this.opts.path}.bak`));
+      await renameWithRetry(tmp, this.opts.path);
     } catch (err) {
       await rm(tmp, { force: true });
       throw new VaultError(`No se pudo escribir la bóveda (${(err as NodeJS.ErrnoException).code ?? 'error'})`);
@@ -170,6 +195,28 @@ export class FileVault implements SecretVault {
   private iso(): string {
     return (this.opts.now?.() ?? new Date()).toISOString();
   }
+}
+
+/** Lee y valida un archivo de bóveda sin lanzar por daño; solo lanza si no se puede leer (salvo ENOENT). */
+async function readVaultFile(path: string): Promise<FileState> {
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' };
+    throw new VaultError(`No se pudo leer la bóveda (${(err as NodeJS.ErrnoException).code ?? 'error'})`);
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return { kind: 'damaged', reason: 'La bóveda está dañada (JSON inválido)' };
+  }
+  const parsed = fileSchema.safeParse(data);
+  if (parsed.success) return { kind: 'ok', file: parsed.data };
+  const head = headerSchema.safeParse(data);
+  if (head.success && (head.data.version !== 1 || (head.data.scheme !== undefined && head.data.scheme !== 'dpapi-currentuser'))) return { kind: 'foreign' };
+  return { kind: 'damaged', reason: 'La bóveda está dañada (formato inválido)' };
 }
 
 function info(ref: string, e: z.infer<typeof entrySchema>): SecretRefInfo {

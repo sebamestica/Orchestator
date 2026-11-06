@@ -86,20 +86,25 @@ export async function assertRealInside(root: string, target: string): Promise<vo
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
 /**
- * `rename` con reintentos: en Windows el antivirus (u Obsidian) abre un instante el archivo recién escrito
- * y `rename` sobre él falla con EPERM. Esperas cortas y crecientes: 5, 10, 20… ms (≈ 1,3 s en total).
+ * Repite `op` mientras falle con EPERM, EACCES o EBUSY: en Windows el antivirus (u Obsidian) abre un instante
+ * el archivo recién escrito y `rename` o `copyFile` sobre él fallan. Esperas cortas y crecientes: 5, 10, 20… ms
+ * (≈ 1,3 s en total).
  */
-export async function renameWithRetry(from: string, to: string, attempts = 9): Promise<void> {
+export async function retryWhileBusy<T>(op: () => Promise<T>, attempts = 9): Promise<T> {
   for (let k = 1; ; k++) {
     try {
-      await rename(from, to);
-      return;
+      return await op();
     } catch (err) {
       const code = errorCode(err);
       if (k >= attempts || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) throw err;
       await sleep(5 * 2 ** (k - 1));
     }
   }
+}
+
+/** `rename` con los reintentos de `retryWhileBusy`. */
+export function renameWithRetry(from: string, to: string, attempts = 9): Promise<void> {
+  return retryWhileBusy(() => rename(from, to), attempts);
 }
 
 /** Escritura atómica dentro de `root`: temporal en el mismo directorio + `rename`. Crea las carpetas que falten. */
@@ -113,7 +118,7 @@ export async function writeFileAtomic(root: string, target: string, content: str
   await assertRealInside(root, dir);
   const tmp = path.join(dir, `.${path.basename(absolute)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
   try {
-    await writeFile(tmp, content, { flag: 'wx' });
+    await writeFile(tmp, content, { flag: 'wx', flush: true });
     await renameWithRetry(tmp, absolute);
   } catch (err) {
     await rm(tmp, { force: true });

@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** media
 - **Archivos:** `src/core/vault/vault.ts:154`, `src/core/vault/vault.ts:158`, `src/core/vault/vault.ts:159`, `src/core/vault/vault.ts:162`, `src/core/vault/vault.ts:135`, `src/core/vault/vault.ts:143`, `src/core/vault/vault.ts:150`, `src/core/vault/vault.ts:78`, `src/core/vault/vault.ts:79`, `src/core/memory/safe-fs.ts:77`, `src/core/memory/safe-fs.ts:81`, `src/core/memory/safe-fs.ts:105`, `src/core/plugins/canva.ts:229`, `src/core/plugins/canva.ts:240`, `src/core/plugins/canva.ts:272`, `src/core/registry/registry.ts:237`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
