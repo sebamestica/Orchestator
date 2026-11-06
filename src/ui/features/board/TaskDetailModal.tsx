@@ -11,8 +11,8 @@ import {
   ModalHeading,
 } from '@heroui/react';
 import { AlertCircle, CheckCircle, RefreshCw, XCircle } from 'lucide-react';
-import { useState } from 'react';
-import { api, ApiError } from '../../api/client.ts';
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../../api/client.ts';
 import { retryTask, taskActionError } from '../../api/tasks.ts';
 import type { AgentRecord, TaskRecord } from '../../api/types.ts';
 import { difficultyLabel, formatRelativeTime } from './types.ts';
@@ -31,6 +31,14 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Una respuesta que llega con el detalle ya cerrado no cierra el detalle de otra tarea.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   if (!task || !isOpen) return null;
 
@@ -41,56 +49,25 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
   const currentAgent = agents.find((a) => a.config.id === (task.agentId || brief.suggestedAgent));
   const agentDisplayName = currentAgent?.config.displayName || task.agentId || brief.suggestedAgent || 'Sin asignar';
 
-  const handleApprove = async () => {
+  /** Aprobar, cancelar o reintentar: al terminar refresca el tablero y cierra este detalle (si sigue abierto). */
+  const runAction = async (action: string, request: () => Promise<unknown>) => {
     try {
       setSubmitting(true);
       setErrorNotice(null);
-      const body = selectedAgent.trim() ? { agentId: selectedAgent.trim() } : {};
-      await api.post(`/tasks/${encodeURIComponent(brief.id)}/approve`, body);
+      await request();
       onTaskUpdated();
-      onClose();
+      if (mounted.current) onClose();
     } catch (err) {
-      if (err instanceof ApiError) {
-        setErrorNotice(`Aviso: Error ${err.status} (${err.code}) al aprobar la tarea: ${err.message}`);
-      } else {
-        setErrorNotice(err instanceof Error ? err.message : String(err));
-      }
+      setErrorNotice(taskActionError(action, err));
     } finally {
       setSubmitting(false);
     }
   };
-
-  const handleCancel = async () => {
-    try {
-      setSubmitting(true);
-      setErrorNotice(null);
-      await api.post(`/tasks/${encodeURIComponent(brief.id)}/cancel`, {});
-      onTaskUpdated();
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        setErrorNotice(`Aviso: Error ${err.status} (${err.code}) al cancelar la tarea: ${err.message}`);
-      } else {
-        setErrorNotice(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleRetry = async () => {
-    try {
-      setSubmitting(true);
-      setErrorNotice(null);
-      await retryTask(brief.id);
-      onTaskUpdated();
-      onClose();
-    } catch (err) {
-      setErrorNotice(taskActionError('al reintentar la tarea', err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const taskPath = `/tasks/${encodeURIComponent(brief.id)}`;
+  const handleApprove = () =>
+    runAction('al aprobar la tarea', () => api.post(`${taskPath}/approve`, selectedAgent.trim() ? { agentId: selectedAgent.trim() } : {}));
+  const handleCancel = () => runAction('al cancelar la tarea', () => api.post(`${taskPath}/cancel`, {}));
+  const handleRetry = () => runAction('al reintentar la tarea', () => retryTask(brief.id));
 
   return (
     <ModalBackdrop isOpen={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>

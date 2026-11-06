@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** media
 - **Archivos:** `src/ui/features/board/BoardView.tsx:202`, `src/ui/features/board/TaskDetailModal.tsx:31`, `src/ui/features/board/TaskDetailModal.tsx:32`, `src/ui/features/board/TaskDetailModal.tsx:35`, `src/ui/features/board/TaskDetailModal.tsx:48`, `src/ui/features/board/TaskDetailModal.tsx:234`, `src/core/server/app.ts:248`, `src/core/app/fleet-service.ts:321`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

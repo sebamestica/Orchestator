@@ -198,16 +198,19 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
         </div>
       )}
 
-      {/* Modal de detalle de tarea */}
-      <TaskDetailModal
-        task={selectedTask}
-        isOpen={Boolean(selectedTask)}
-        onClose={() => setSelectedTaskId(null)}
-        agents={agents}
-        onTaskUpdated={() => {
-          void refreshTasks();
-        }}
-      />
+      {/* Modal de detalle de tarea: una instancia por tarea abierta (agente elegido, aviso y envío no pasan a otra). */}
+      {selectedTask && (
+        <TaskDetailModal
+          key={selectedTask.task.id}
+          task={selectedTask}
+          isOpen
+          onClose={() => setSelectedTaskId(null)}
+          agents={agents}
+          onTaskUpdated={() => {
+            void refreshTasks();
+          }}
+        />
+      )}
 
       {/* Diálogo de tarea manual */}
       <ManualTaskDialog

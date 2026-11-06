@@ -406,4 +406,66 @@ describe('BoardView', () => {
     expect(within(dialog).getByLabelText('Motivo del estado').textContent).toBe('esperando a t-running-1');
     expect(within(dialog).queryByRole('button', { name: /aprobar tarea/i })).toBeNull();
   });
+
+  describe('detalle de tarea: cada apertura empieza limpia', () => {
+    const openTask = (id: string) => {
+      fireEvent.click(screen.getByLabelText(new RegExp(`Tarea ${id}`, 'i')));
+      return screen.getByRole('dialog');
+    };
+    const closeDetail = () => {
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cerrar detalle/i }));
+    };
+
+    it('el agente elegido en una tarea no pasa a la siguiente', async () => {
+      render(<BoardView />);
+      fireEvent.change(within(openTask('t-pending-1')).getByLabelText('Asignar agente'), { target: { value: 'codex-1' } });
+      closeDetail();
+
+      const dialog = openTask('t-pending-beta');
+      expect((within(dialog).getByLabelText('Asignar agente') as HTMLSelectElement).value).toBe('');
+      fireEvent.click(within(dialog).getByRole('button', { name: /aprobar tarea/i }));
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:47811/tasks/t-pending-beta/approve',
+          expect.objectContaining({ method: 'POST', body: JSON.stringify({}) }),
+        );
+      });
+    });
+
+    it('el aviso de error no pasa a otra tarea', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({ error: { code: 'conflict', message: 'x' } }),
+      });
+      render(<BoardView />);
+      fireEvent.click(within(openTask('t-pending-1')).getByRole('button', { name: /aprobar tarea/i }));
+      expect(await screen.findByRole('alert')).toBeTruthy();
+      closeDetail();
+
+      openTask('t-pending-beta');
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it('una respuesta tardía de otra tarea no cierra ni pinta el detalle abierto', async () => {
+      let answer: (res: unknown) => void = () => undefined;
+      mockFetch.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      );
+      render(<BoardView />);
+      fireEvent.click(within(openTask('t-pending-1')).getByRole('button', { name: /aprobar tarea/i }));
+      closeDetail();
+
+      const dialog = openTask('t-pending-beta');
+      // Los botones de B no quedan desactivados por la petición de A.
+      expect((within(dialog).getByRole('button', { name: /aprobar tarea/i }) as HTMLButtonElement).disabled).toBe(false);
+      answer({ ok: true, status: 200, text: async () => JSON.stringify({ task: { state: 'ready' } }) });
+      await waitFor(() => expect(refreshTasksMock).toHaveBeenCalled());
+      expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Tarea pendiente Beta' })).toBeTruthy();
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+  });
 });
