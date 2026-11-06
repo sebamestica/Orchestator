@@ -10,7 +10,8 @@ const PATTERNS: readonly RegExp[] = [
   /(?<![A-Za-z0-9])AIza[0-9A-Za-z_-]{30,}/g, // Google
   /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT / tokens OAuth
-  /(?<=(?:api[_-]?key|authorization|x-api-key|bearer)["']?\s*[:=]?\s*["']?(?:Bearer\s+)?)[A-Za-z0-9._~+/=-]{16,}/gi,
+  // Blancos acotados: con `\s*` dentro del lookbehind, un tramo largo de espacios costaba O(n³) (2000 espacios, 6 s).
+  /(?<=(?:api[_-]?key|authorization|x-api-key|bearer)["']?[ \t]{0,8}[:=]?[ \t]{0,8}["']?(?:Bearer[ \t]{1,8})?)[A-Za-z0-9._~+/=-]{16,}/gi,
   // Valor de `cookie`/`set-cookie`. Exige `nombre=` para no tocar frases ni el `<redacted>` de chrome-devtools-mcp.
   // Blancos y nombre acotados: sin tope, `'cookie:'.repeat(n)` o un tramo largo de blancos serían O(n²) o peor.
   // Como encabezado (`- cookie:a=b`, `Set-Cookie: a=b`), hasta el fin de línea: un valor puede llevar comillas.

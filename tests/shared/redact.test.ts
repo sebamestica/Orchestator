@@ -46,3 +46,19 @@ describe('redactSecrets: cookies sin costo cuadrático', () => {
     expect(performance.now() - t0).toBeLessThan(2000);
   });
 });
+
+describe('redactSecrets: claves tras authorization sin costo cúbico', () => {
+  it('20 000 espacios seguidos de «authorization» se procesan en menos de 100 ms', () => {
+    const text = `${' '.repeat(20_000)}authorization`;
+    const t0 = performance.now();
+    expect(redactSecrets(text)).toBe(text);
+    expect(performance.now() - t0).toBeLessThan(100);
+  });
+
+  it('sigue tachando la clave tras authorization, bearer, api_key o x-api-key', () => {
+    const token = 'abcdefghijklmnop1234';
+    for (const text of [`Authorization: Bearer ${token}`, `authorization=${token}`, `"api_key": "${token}"`, `x-api-key:${token}`, `bearer ${token}`]) {
+      expect(redactSecrets(text)).not.toContain(token);
+    }
+  });
+});
