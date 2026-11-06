@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real (núcleo y app de escritorio: registro y supervisión del proceso)
 - **Severidad:** media
 - **Archivos:** `src/core/app/cli.ts:24`, `src/core/app/cli.ts:59`, `src/core/app/cli.ts:66-70`, `src/core/app/cli.ts:76-83`, `src/core/app/cli-commands.ts:129-133`, `src/core/server/app.ts:191`, `src/core/app/fleet-service.ts:238-263`, `apps/desktop/src/core-supervisor.ts:58-59`, `apps/desktop/src/core-supervisor.ts:152-159`, `apps/desktop/src/core-supervisor.ts:162-176`, `apps/desktop/src/core-supervisor.ts:201`, `apps/desktop/src/core-supervisor.ts:231`, `apps/desktop/src/core-supervisor.ts:246-252`, `apps/desktop/src/core-supervisor.ts:275-278`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

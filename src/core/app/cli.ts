@@ -1,8 +1,10 @@
+import { writeSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { redactSecrets } from '../../shared/index.ts';
 import { agentes, agregarClaude, iniciar, probarClaude } from './cli-commands.ts';
 import { CliError, readLimited, USAGE, type CliIo } from './cli-io.ts';
 import { compose, type ComposeOptions, type Composition } from './compose.ts';
+import { installExitLog, stampedLog, STOP_SIGNALS } from './core-log.ts';
 
 type Command = (argv: readonly string[], io: CliIo, comp: Composition) => Promise<number>;
 
@@ -19,9 +21,9 @@ const LAZY = new Set(['conversar']);
 
 export type MakeComposition = (io: CliIo, opts: { verbose: boolean }) => Composition;
 
-/** Composición del CLI: configuración del entorno (ORQ_*); el registro va a stderr solo con `iniciar`. */
+/** Composición del CLI: configuración del entorno (ORQ_*); el registro, con hora, va a stderr solo con `iniciar`. */
 export const defaultComposition: MakeComposition = (io, { verbose }) => {
-  const opts: ComposeOptions = { env: io.env, ...(verbose ? { log: (line: string) => io.err(line) } : {}) };
+  const opts: ComposeOptions = { env: io.env, ...(verbose ? { log: stampedLog((line) => io.err(line)) } : {}) };
   return compose(opts);
 };
 
@@ -65,8 +67,11 @@ export function nodeIo(): CliIo {
     },
     waitForStop() {
       return new Promise<void>((resolve) => {
-        process.once('SIGINT', () => resolve());
-        process.once('SIGTERM', () => resolve());
+        const stop = (signal: NodeJS.Signals) => {
+          process.stderr.write(`${new Date().toISOString()} núcleo se detiene por ${signal}\n`);
+          resolve();
+        };
+        for (const signal of STOP_SIGNALS) process.once(signal, stop);
       });
     },
   };
@@ -78,6 +83,9 @@ if (import.meta.main) {
   process.stdout.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code !== 'EPIPE') throw err;
   });
-  const code = await runCli(process.argv.slice(2), nodeIo());
+  const argv = process.argv.slice(2);
+  // El núcleo deja con hora su salida o su caída en stderr (el registro de la app de escritorio).
+  if (argv[0] === 'iniciar') installExitLog(process, (text) => writeSync(2, text));
+  const code = await runCli(argv, nodeIo());
   process.exit(code);
 }

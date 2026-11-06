@@ -197,6 +197,29 @@ describe('CoreSupervisor', () => {
     expect(killed).toEqual([]);
   });
 
+  it('con una sesión guardada y sin núcleo vivo, registra que el anterior terminó sin apagarse', async () => {
+    mkdirSync(config.dataDir, { recursive: true });
+    writeFileSync(config.sessionPath, encodeSession({ port: PORT, pid: 5336, token: 'v'.repeat(43), startedAt: '2026-11-05T00:37:58.000Z' }, cipher));
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}) });
+    const r = await sup.connect();
+    if (!r.ok) throw new Error(r.title);
+    const note = 'el núcleo anterior (pid 5336, lanzado 2026-11-05T00:37:58.000Z) terminó sin que Berland lo apagara';
+    expect(logs).toContain(note);
+    const lines = readFileSync(sup.logPath, 'utf8').split('\n');
+    const header = lines.findIndex((l) => l.includes('Berland lanza el núcleo'));
+    expect(header).toBeGreaterThanOrEqual(0);
+    expect(lines[header + 1]).toBe(note);
+    // La sesión nueva pisa la vieja.
+    expect(readFileSync(config.sessionPath, 'utf8')).not.toContain('5336');
+  });
+
+  it('sin sesión guardada, al lanzar no dice que el anterior terminó', async () => {
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}) });
+    expect((await sup.connect()).ok).toBe(true);
+    expect(logs.some((l) => l.includes('terminó sin que Berland lo apagara'))).toBe(false);
+    expect(readFileSync(sup.logPath, 'utf8')).not.toContain('terminó sin que Berland lo apagara');
+  });
+
   it('si el núcleo muere al arrancar, el error trae la cola del registro', async () => {
     const sup = supervisor({ spawn: fakeSpawn('fail', {}) });
     const r = await sup.connect();

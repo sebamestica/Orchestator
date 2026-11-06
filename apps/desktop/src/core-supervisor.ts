@@ -156,7 +156,20 @@ export class CoreSupervisor {
     if (probe === 'timeout') {
       return { ok: false, title: `El núcleo de 127.0.0.1:${port} no responde`, hint: 'Puede estar muy ocupado: espera un momento y vuelve a abrir Berland.' };
     }
-    return probe === 'alive' ? this.adopt(origin, wsUrl, port) : this.launch(origin, port);
+    return probe === 'alive' ? this.adopt(origin, wsUrl, port) : this.launch(origin, port, this.previousCoreDied(port));
+  }
+
+  /**
+   * Puerto muerto con una sesión guardada para él: el núcleo anterior terminó sin que Berland lo apagara (al apagarlo
+   * se borra la sesión). Lo registra y devuelve la línea para el registro del núcleo; la sesión vieja se descarta.
+   */
+  private previousCoreDied(port: number): string | null {
+    const session = this.readSession();
+    if (!session || session.port !== port) return null;
+    const note = `el núcleo anterior (pid ${session.pid}, lanzado ${session.startedAt}) terminó sin que Berland lo apagara`;
+    this.deps.log(note);
+    this.removeSession();
+    return note;
   }
 
   private async adopt(origin: string, wsUrl: string, port: number): Promise<ConnectResult> {
@@ -183,7 +196,7 @@ export class CoreSupervisor {
     };
   }
 
-  private async launch(origin: string, port: number): Promise<ConnectResult> {
+  private async launch(origin: string, port: number, previousNote: string | null = null): Promise<ConnectResult> {
     const { config, log, nodePath } = this.deps;
     const cli = join(config.repoRoot, 'src', 'core', 'app', 'cli.ts');
     if (!existsSync(cli)) {
@@ -199,6 +212,7 @@ export class CoreSupervisor {
       rotate(logPath);
       fd = openSync(logPath, 'a');
       writeSync(fd, `--- ${(this.deps.now ?? (() => new Date()))().toISOString()} Berland lanza el núcleo en el puerto ${port} ---\n`);
+      if (previousNote) writeSync(fd, `${previousNote}\n`);
     } catch (err) {
       return { ok: false, title: 'No se pudo abrir el registro del núcleo', detail: err instanceof Error ? err.message : String(err) };
     }
