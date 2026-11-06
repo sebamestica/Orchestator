@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgyCliAdapter, agyBrowserOffArgs } from '../../../../src/core/adapters/agy-cli/index.ts';
+import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../../src/core/process/run-jsonl.ts';
 import type { AgentConfig, AgentEvent, RunContext, TaskBrief } from '../../../../src/shared/index.ts';
 import { agentConfigSchema, REDACTED, taskBriefSchema } from '../../../../src/shared/index.ts';
@@ -161,6 +162,23 @@ describe('AgyCliAdapter.run', () => {
       if (doneEv && doneEv.type === 'done') {
         expect(doneEv.payload.ok).toBe(true);
       }
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('modo local: el BRIEF-<tarea>.md lleva la sección «Modo local» (sin commits ni ramas)', async () => {
+    const tmp = await mkdtemp(path.join(tmpdir(), 'agy-adapter-local-'));
+    async function* mockRunner(): AsyncGenerator<JsonlLine> {
+      yield { kind: 'exit', code: 0, signal: null, timedOut: false, aborted: false };
+    }
+    try {
+      const adapter = new AgyCliAdapter(baseConfig, { runner: mockRunner });
+      const ctx: HintedRunContext = { worktreePath: tmp, env: {}, signal: new AbortController().signal, timeoutMs: 30000, local: { path: tmp } };
+      await collectEvents(adapter.run(sampleTask, ctx));
+      const brief = await readFile(path.join(tmp, '.orq', 'BRIEF-tarea-test.md'), 'utf8');
+      expect(brief).toContain('## Modo local (sin worktree)');
+      expect(brief).toContain('No hagas commits ni ramas');
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

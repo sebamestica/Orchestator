@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { AgentAdapter } from '../../../shared/contracts.ts';
 import type { AgentConfig, AgentEvent, ProbeResult, RunContext, TaskBrief } from '../../../shared/index.ts';
 import { redactSecrets } from '../../../shared/index.ts';
-import { effortFor, runHints, taskRole, type TaskRole } from '../../brief/reasoning.ts';
+import { briefHints, effortFor, runHints, taskRole, type TaskRole } from '../../brief/reasoning.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
 import { assertRealInside } from '../../memory/safe-fs.ts';
 import { mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
@@ -410,7 +410,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     try {
       const queryFn = this.#opts.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
       // Las reglas del repo ya van en el prompt de sistema: el encargo no pide volver a leerlas.
-      q = queryFn({ prompt: renderBrief(task, ctx.handoff, { rulesInSystemPrompt: repoRules !== undefined }), options });
+      q = queryFn({ prompt: renderBrief(task, ctx.handoff, { rulesInSystemPrompt: repoRules !== undefined, ...briefHints(ctx) }), options });
       for await (const message of q) {
         this.#opts.onSdkMessage?.(message);
         for (const event of tr.translate(message)) yield event;

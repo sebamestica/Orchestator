@@ -70,6 +70,8 @@ export interface AttemptOptions {
   retries?: number;
   /** Lo que la tarea aún puede gastar en USD: va al adaptador (`RunHints.budgetUsd`) y corta la ejecución si se pasa. */
   budgetUsd?: number;
+  /** Modo local (carpeta del usuario, sin worktree): va al adaptador (`RunHints.local`) para su encargo. */
+  local?: { path: string };
 }
 
 export interface BeforeAttemptInfo {
@@ -105,6 +107,8 @@ export interface ExecuteOptions {
   budgetUsd?: number;
   /** Reintentos que la tarea ya lleva antes de esta ejecución (p. ej. rondas de corrección): suben el esfuerzo. */
   retryBase?: number;
+  /** Modo local: cada intento lo pasa al adaptador (ver `AttemptOptions.local`). */
+  local?: { path: string };
 }
 
 export interface ExecuteResult {
@@ -223,6 +227,7 @@ export class Supervisor {
         const attempt = await this.runAttempt(task, agentId, {
           worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, maxRunMs: opts.maxRunMs, handoff, attempt: n, retries,
           ...(budget !== undefined ? { budgetUsd: Math.max(0, budget - spent) } : {}),
+          ...(opts.local ? { local: opts.local } : {}),
         });
         attempts.push(attempt);
         spent += attempt.usage.costUsd ?? 0;
@@ -317,6 +322,7 @@ export class Supervisor {
     if (opts.handoff) ctx.handoff = opts.handoff;
     if (opts.retries) ctx.retries = opts.retries;
     if (opts.budgetUsd !== undefined) ctx.budgetUsd = opts.budgetUsd;
+    if (opts.local) ctx.local = opts.local;
     const budget = opts.budgetUsd;
 
     let iterator: AsyncIterator<AgentEvent> | undefined;

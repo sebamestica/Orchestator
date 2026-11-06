@@ -1,5 +1,5 @@
 import type { RunContext, TaskBrief } from '../../shared/index.ts';
-import { isReviewTask } from './render-brief.ts';
+import { isReviewTask, type RenderBriefOptions } from './render-brief.ts';
 
 /**
  * Cómo razona cada ejecución (issue 6), el equivalente al `reasoningDefault` por propósito de Pollium:
@@ -47,6 +47,8 @@ export interface RunHints {
   retries?: number;
   /** Lo que la tarea aún puede gastar, en USD (tope por tarea menos lo ya gastado). */
   budgetUsd?: number;
+  /** Modo local: se trabaja en la carpeta del usuario. El encargo lleva la sección «Modo local» (`renderBrief`). */
+  local?: { path: string };
 }
 
 export type HintedRunContext = RunContext & RunHints;
@@ -57,5 +59,12 @@ export function runHints(ctx: RunContext): RunHints {
   const hints: RunHints = {};
   if (typeof c.retries === 'number' && Number.isFinite(c.retries) && c.retries > 0) hints.retries = Math.floor(c.retries);
   if (typeof c.budgetUsd === 'number' && Number.isFinite(c.budgetUsd) && c.budgetUsd >= 0) hints.budgetUsd = c.budgetUsd;
+  if (typeof c.local?.path === 'string' && c.local.path.trim()) hints.local = { path: c.local.path };
   return hints;
+}
+
+/** Opciones de `renderBrief` que salen del contexto (hoy, el modo local): las agregan los tres adaptadores. */
+export function briefHints(ctx: RunContext): Pick<RenderBriefOptions, 'local'> {
+  const { local } = runHints(ctx);
+  return local ? { local } : {};
 }

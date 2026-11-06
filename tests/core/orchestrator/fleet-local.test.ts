@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { briefHints } from '../../../src/core/brief/reasoning.ts';
+import { renderBrief } from '../../../src/core/brief/render-brief.ts';
 import { Fleet } from '../../../src/core/orchestrator/fleet.ts';
 import { TaskQueue, type TaskStateChange } from '../../../src/core/orchestrator/queue.ts';
 import { Router } from '../../../src/core/orchestrator/router.ts';
@@ -15,7 +17,7 @@ afterEach(async () => {
 
 const isReview = (t: TaskBrief) => t.id.endsWith('-revision');
 
-async function setup(opts: { exclusiveKey: (projectId: string) => string | undefined; localProjects?: readonly string[] }) {
+async function setup(opts: { exclusiveKey: (projectId: string) => string | undefined; localProjects?: readonly string[]; work?: (t: TaskBrief) => Step[] }) {
   const workspaces = await FakeWorkspaces.create();
   disposables.push(workspaces);
   const queue = new TaskQueue({ concurrency: 3 });
@@ -23,7 +25,7 @@ async function setup(opts: { exclusiveKey: (projectId: string) => string | undef
   queue.on((c) => changes.push(c));
   const list = [agents.claude1, agents.claude2, agents.codex];
   const router = new Router({ agents: list, quotas: [new FakeQuota('codex', 0.9)] });
-  const work = (t: TaskBrief): Step[] => (isReview(t) ? verdictScript('aprobado') : [{ wait: 80 }, ...okScript(t.id)]);
+  const work = opts.work ?? ((t: TaskBrief): Step[] => (isReview(t) ? verdictScript('aprobado') : [{ wait: 80 }, ...okScript(t.id)]));
   const adapters = list.map((a) => new ScriptedAdapter(a, work));
   const supervisor = new Supervisor({ adapters, router, sink: new MemorySink(), queue, graceMs: 30 });
   const writes: { path: string; content: string }[] = [];
@@ -40,7 +42,7 @@ async function setup(opts: { exclusiveKey: (projectId: string) => string | undef
     isLocal: (ws) => [...local].some((p) => ws.path.includes(`${p}`)),
     warn: () => undefined,
   });
-  return { queue, changes, fleet, writes };
+  return { queue, changes, fleet, writes, adapters };
 }
 
 /** Máximo de tareas activas a la vez entre las que cumplen `pick`. */
@@ -92,6 +94,42 @@ describe('Fleet: modo local (una tarea a la vez por carpeta)', () => {
     const brief = s.writes.find((w) => w.path.endsWith('BRIEF.md'))?.content ?? '';
     expect(brief).toContain('## Modo local (sin worktree)');
     expect(brief).toMatch(/No hagas commits ni ramas/);
+  });
+
+  it('el prompt de cada adaptador también la lleva: autor, autor tras un traspaso por cupo y revisor', async () => {
+    let first = true;
+    const work = (t: TaskBrief): Step[] => {
+      if (isReview(t)) return verdictScript('aprobado');
+      if (!first) return okScript(t.id);
+      first = false;
+      return [{ error: 'quota_exhausted' }, { done: false }];
+    };
+    const s = await setup({ exclusiveKey: () => 'local:x', localProjects: ['marketing'], work });
+    s.queue.add(task('m1', { projectId: 'marketing' }));
+    expect((await s.fleet.run()).states).toEqual({ m1: 'integrated' });
+    // Lo que arma cada adaptador real: `renderBrief` con las opciones que salen del contexto.
+    const calls = s.adapters.flatMap((a) => a.calls);
+    const prompt = (c: (typeof calls)[number]) => renderBrief(c.task, c.ctx.handoff, briefHints(c.ctx));
+    expect(calls.filter((c) => isReview(c.task))).toHaveLength(1);
+    for (const c of calls) {
+      expect(prompt(c)).toContain('## Modo local (sin worktree)');
+      expect(prompt(c)).toContain('No hagas commits ni ramas');
+    }
+    const continued = calls.find((c) => c.ctx.handoff && !isReview(c.task));
+    expect(continued).toBeDefined();
+    const text = continued ? prompt(continued) : '';
+    expect(text).toContain('Trabajas en la misma carpeta.');
+    expect(text).not.toContain('Trabajas en el mismo worktree');
+    expect(text).not.toContain('de esta rama');
+  });
+
+  it('una tarea con worktree no lleva el modo local al adaptador', async () => {
+    const s = await setup({ exclusiveKey: () => undefined });
+    s.queue.add(task('a1'));
+    await s.fleet.run();
+    const calls = s.adapters.flatMap((a) => a.calls);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(briefHints(c.ctx)).toEqual({});
   });
 });
 

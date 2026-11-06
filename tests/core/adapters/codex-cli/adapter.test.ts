@@ -56,6 +56,18 @@ describe('Codex CLI', () => {
     expect(opts?.args).not.toContain(task.objective);
     expect(opts?.signal).toBe(ctx.signal);
   });
+  it('modo local: el stdin lleva la sección «Modo local» solo si ctx.local viene', async () => {
+    const stdinOf = async (extra: Partial<HintedRunContext> = {}) => {
+      const run = runner([...await fixture('exec-ok.jsonl'), exit]);
+      const ctx = await context();
+      await collect(new CodexCliAdapter(config, { runner: run }), { ...ctx, ...extra });
+      return run.mock.calls[0]?.[0].stdin ?? '';
+    };
+    const withLocal = await stdinOf({ local: { path: 'C:\\x' } });
+    expect(withLocal).toContain('## Modo local (sin worktree)');
+    expect(withLocal).toContain('No hagas commits ni ramas');
+    expect(await stdinOf()).not.toContain('## Modo local');
+  });
   it('esfuerzo de razonamiento según rol y dificultad; cada reintento sube un nivel hasta high', async () => {
     const effortOf = async (t: TaskBrief, extra: Partial<HintedRunContext> = {}) => {
       const run = runner([...await fixture('exec-ok.jsonl'), exit]);

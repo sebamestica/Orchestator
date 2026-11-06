@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { agentConfigSchema, agentEventSchema, redactSecrets } from '../../../shared/index.ts';
 import type { AgentAdapter, AgentConfig, AgentEvent, ProbeResult, RunContext, TaskBrief } from '../../../shared/index.ts';
-import { effortFor, runHints, type Effort } from '../../brief/reasoning.ts';
+import { briefHints, effortFor, runHints, type Effort } from '../../brief/reasoning.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
 import { bearerToken, mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
 import { runJsonl } from '../../process/run-jsonl.ts';
@@ -171,7 +171,7 @@ export class CodexCliAdapter implements AgentAdapter {
     const secrets = [...Object.values(ctx.env), ...mcpSecrets(grant.servers)];
     const section = pluginsSection(grant);
     // Codex carga AGENTS.md de la raíz por su cuenta: el encargo no pide volver a leerlo.
-    const brief = renderBrief(task, ctx.handoff, { rulesInSystemPrompt: true });
+    const brief = renderBrief(task, ctx.handoff, { rulesInSystemPrompt: true, ...briefHints(ctx) });
     const sessionId = randomUUID();
     let seq = 0;
     let failed = false;

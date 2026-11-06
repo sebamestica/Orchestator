@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeSdkAdapter, DEFAULT_CLAUDE_MODEL, installedSdkVersion } from '../../../../src/core/adapters/claude-sdk/index.ts';
+import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import { renderBrief } from '../../../../src/core/brief/render-brief.ts';
-import { agentConfigSchema } from '../../../../src/shared/index.ts';
+import { agentConfigSchema, type RunContext } from '../../../../src/shared/index.ts';
 import { FAKE_KEY, WORKTREE, collect, config, ctx, fakeQuery, loadJsonl, payload, task } from './helpers.ts';
 
 const subagentRun = loadJsonl('subagent-run.jsonl');
@@ -37,6 +38,19 @@ describe('ClaudeSdkAdapter.run', () => {
     expect(options.abortController).toBeInstanceOf(AbortController);
     expect(options.maxBudgetUsd).toBeUndefined();
     expect(fake.closed).toBe(true);
+  });
+
+  it('modo local: el prompt lleva la sección «Modo local» solo si ctx.local viene', async () => {
+    const promptOf = async (c: RunContext) => {
+      const fake = fakeQuery(subagentRun);
+      await collect(new ClaudeSdkAdapter({ config, query: fake.query, baseEnv: {}, newSessionId: ids() }).run(task, c));
+      return fake.calls[0]?.prompt ?? '';
+    };
+    const local: HintedRunContext = { ...ctx(), local: { path: 'C:\\x' } };
+    const withLocal = await promptOf(local);
+    expect(withLocal).toContain('## Modo local (sin worktree)');
+    expect(withLocal).toContain('No hagas commits ni ramas');
+    expect(await promptOf(ctx())).not.toContain('## Modo local');
   });
 
   it('emite starting, la traducción de la fixture y termina en done ok', async () => {

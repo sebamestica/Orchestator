@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** alta
 - **Archivos:** `src/core/orchestrator/fleet.ts:367`, `src/core/orchestrator/fleet.ts:384`, `src/core/orchestrator/fleet.ts:398-401`, `src/core/orchestrator/fleet.ts:545-556`, `src/core/orchestrator/supervisor.ts:316-319`, `src/core/brief/reasoning.ts:45-50`, `src/core/adapters/claude-sdk/adapter.ts:413`, `src/core/adapters/codex-cli/index.ts:174`, `src/core/adapters/agy-cli/index.ts:205`, `src/core/adapters/agy-cli/index.ts:210-213`, `src/core/brief/render-brief.ts:23-31`, `src/core/brief/render-brief.ts:48`, `src/core/brief/render-brief.ts:50`, `src/core/brief/render-brief.ts:70`, `src/core/brief/render-brief.ts:74-77`, `src/core/adapters/claude-sdk/shell-policy.ts:490-497`, `src/core/adapters/claude-sdk/shell-policy.ts:539-545`, `tests/core/orchestrator/fleet-local.test.ts:88-94`, `docs/plan/issues/01-trabajo-local.md:72-76`, `docs/plan/issues/06-razonamiento-modelos.md:213-214`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 El issue 1 agregó el **modo local**: un proyecto registrado sin `workspace` (sin git, sin commits o sin gate, p. ej.

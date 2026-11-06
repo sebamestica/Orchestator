@@ -16,6 +16,7 @@ import {
   redactSecrets,
 } from '../../../shared/index.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
+import { briefHints } from '../../brief/reasoning.ts';
 import { runJsonl } from '../../process/run-jsonl.ts';
 import { relativizeChange } from '../common/paths.ts';
 import { resolveAgyExecutable, type AgyExecutable } from './executable.ts';
@@ -202,7 +203,7 @@ export class AgyCliAdapter implements AgentAdapter {
         const briefFullPath = join(ctx.worktreePath, '.orq', briefFileName);
 
         await mkdir(join(ctx.worktreePath, '.orq'), { recursive: true });
-        await writeFile(briefFullPath, renderBrief(task, ctx.handoff), 'utf8');
+        await writeFile(briefFullPath, renderBrief(task, ctx.handoff, briefHints(ctx)), 'utf8');
 
         const args: string[] = [
           ...this.executable.args,

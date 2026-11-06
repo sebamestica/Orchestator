@@ -376,7 +376,7 @@ export class Fleet {
     const workspace = await this.#workspaces.create(task.projectId, task);
     run.workspace = workspace;
     report.workspace = workspace;
-    const local = this.#isLocal(workspace) ? { path: workspace.path } : undefined;
+    const local = this.#localOf(workspace);
     const memoryContext = await this.#memoryContext(task);
     const plan = await this.#generalPlan(task);
     report.plan = { id: plan.id, source: plan.source, ...(plan.note ? { note: plan.note } : {}), exists: false, done: 0, pending: 0 };
@@ -393,7 +393,7 @@ export class Fleet {
         info.handoff.partialSummary = withTaskPlanNote(info.handoff.partialSummary, status);
       }
       await this.#writeFile(join(workspace.path, PLAN_FILE), plan.file);
-      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles, ...(local ? { local } : {}) }));
+      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles, ...local }));
     };
 
     const decision = await this.#router.route(task);
@@ -409,7 +409,7 @@ export class Fleet {
       // Cada ronda de corrección cuenta como reintento: el autor piensa un nivel más (`RunHints.retries`).
       const exec = await this.#supervisor.execute(current, {
         agentId: author, worktreePath: workspace.path, signal, timeoutMs: this.#timeoutMs, handoff, beforeAttempt: writeFiles('author'),
-        retryBase: round - 1, ...this.#budgetOf(run),
+        retryBase: round - 1, ...this.#budgetOf(run), ...local,
       });
       this.#spend(run, exec);
       run.attempts.push(...exec.attempts);
@@ -565,6 +565,7 @@ export class Fleet {
         beforeAttempt: writeFiles,
         retryBase: i,
         ...this.#budgetOf(run),
+        ...this.#localOf(workspace),
       });
       this.#spend(run, result);
       for (const r of result.authors) {
@@ -609,6 +610,11 @@ export class Fleet {
   #budgetOf(run: TaskRun): Pick<ExecuteOptions, 'budgetUsd'> {
     const cap = this.#taskCap(run.task);
     return cap === undefined ? {} : { budgetUsd: cap - run.spentUsd };
+  }
+
+  /** Modo local (carpeta del usuario): va a `.orq/BRIEF.md` y, por el Supervisor, al encargo de cada adaptador. */
+  #localOf(workspace: Workspace): Pick<ExecuteOptions, 'local'> {
+    return this.#isLocal(workspace) ? { local: { path: workspace.path } } : {};
   }
 
   #spend(run: TaskRun, exec: ExecuteResult): void {
