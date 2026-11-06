@@ -51,6 +51,26 @@ describe('Mente y subagentes', () => {
     expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ mind: { model: 'claude-sonnet-5-5' } }]);
   });
 
+  it('los topes de gasto de la mente se guardan; vacío quita el tope y un valor inválido no se envía', async () => {
+    const calls = fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }), 'PATCH /settings': patchSettings });
+    render(<SettingsView section="mente" />);
+    await screen.findByRole('radiogroup', { name: 'Mente' });
+    const turn = screen.getByRole('textbox', { name: 'US$ por turno' }) as HTMLInputElement;
+    expect(turn.value).toBe('5');
+    fireEvent.change(turn, { target: { value: '0,5' } });
+    fireEvent.blur(turn);
+    await waitFor(() => expect(useApp.getState().settings.mindLimits.turnUsd).toBe(0.5));
+    const day = screen.getByRole('textbox', { name: 'US$ por día' });
+    fireEvent.change(day, { target: { value: '' } });
+    fireEvent.keyDown(day, { key: 'Enter' });
+    await waitFor(() => expect(useApp.getState().settings.mindLimits.dayUsd).toBeNull());
+    const auto = screen.getByRole('textbox', { name: 'Turnos autónomos seguidos' }) as HTMLInputElement;
+    fireEvent.change(auto, { target: { value: '2,5' } });
+    fireEvent.blur(auto);
+    expect(auto.value).toBe('5');
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ mindLimits: { turnUsd: 0.5 } }, { mindLimits: { dayUsd: null } }]);
+  });
+
   it('el esfuerzo y el modo inicial se guardan', async () => {
     const calls = fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }), 'PATCH /settings': patchSettings });
     render(<SettingsView section="mente" />);

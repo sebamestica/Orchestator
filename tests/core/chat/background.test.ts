@@ -380,3 +380,40 @@ describe('ChatService: quitar una carpeta extra la revoca al instante, aunque ha
     }
   });
 });
+
+describe('ChatService: tope de turnos autónomos seguidos', () => {
+  it('al pasar el tope, cierra la sesión con sus subagentes y avisa; un mensaje del usuario reinicia la cuenta', async () => {
+    const q = injectableQuery(launchScript);
+    const limits = { ...DEFAULT_SETTINGS.mindLimits, maxAutonomousTurns: 2 };
+    const b = await bench({ query: q.fn, settings: { ...DEFAULT_SETTINGS, mindLimits: limits } });
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+    const sid = 'sdk-1';
+    // Dos turnos autónomos: cada uno termina un subagente y lanza otro.
+    for (const [i, name] of ['A', 'B'].entries()) {
+      q.inject([taskDone(`t${i + 1}`, `tu${i + 1}`, sid), sdkInit(sid), sdkText(`turno ${name}`, sid), taskStarted(`t${i + 2}`, `tu${i + 2}`, sid), sdkResult(`turno ${name}`, sid, 0.01)]);
+      await waitFor(() => b.service.messages(chat.id).some((m) => m.text === `turno ${name}`));
+      await b.settle(chat.id);
+    }
+    expect(q.closed).toBe(0);
+    expect(b.service.get(chat.id).backgroundTasks).toBe(1);
+    // El tercero pasa el tope: se corta antes de abrir el turno, con el subagente vivo.
+    q.inject([taskStarted('t9', 'tu9', sid), sdkInit(sid), sdkText('turno C', sid), sdkResult('turno C', sid, 0.01)]);
+    await waitFor(() => q.closed === 1);
+    await b.settle(chat.id);
+    expect(b.service.get(chat.id).backgroundTasks).toBeUndefined();
+    expect(b.service.get(chat.id).state).toBe('idle');
+    const texts = b.service.messages(chat.id).map((m) => m.text);
+    expect(texts).not.toContain('turno C');
+    expect(texts.at(-1)).toMatch(/2 turnos seguidos sin mensaje tuyo/);
+
+    // «sigue» reanuda la sesión con la cuenta en cero: un turno autónomo más pasa.
+    await b.service.send(chat.id, { text: 'sigue' });
+    await b.settle(chat.id);
+    expect(q.calls).toHaveLength(2);
+    q.inject([sdkInit(sid), sdkText('turno D', sid), sdkResult('turno D', sid, 0.01)]);
+    await waitFor(() => b.service.messages(chat.id).some((m) => m.text === 'turno D'));
+    expect(q.closed).toBe(1);
+  });
+});

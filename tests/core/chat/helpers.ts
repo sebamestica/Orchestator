@@ -30,10 +30,18 @@ export function sdkInit(sessionId: string): SDKMessage {
   return { type: 'system', subtype: 'init', session_id: sessionId, model: 'claude-opus-5-5', uuid: uuid() } as unknown as SDKMessage;
 }
 
-export function sdkText(text: string, sessionId: string, parentToolUseId: string | null = null): SDKMessage {
+/** Uso de un mensaje del asistente (por defecto, casi gratis). */
+export interface SdkUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+export function sdkText(text: string, sessionId: string, parentToolUseId: string | null = null, usage: SdkUsage = { input_tokens: 10, output_tokens: 5 }): SDKMessage {
   return {
     type: 'assistant',
-    message: { id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } },
+    message: { id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', usage },
     parent_tool_use_id: parentToolUseId,
     uuid: uuid(),
     session_id: sessionId,

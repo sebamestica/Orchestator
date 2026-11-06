@@ -50,8 +50,9 @@ export function resetStore(over: { agents?: AgentRecord[]; settings?: Settings }
 /** Responde a `PATCH /settings` aplicando el cambio a los ajustes actuales (un nivel, como el núcleo). */
 export function patchSettings(call: Call): { body: { settings: Settings } } {
   const cur = useApp.getState().settings;
-  const p = call.body as Partial<{ mind: Record<string, unknown>; appearance: Record<string, unknown> }> & Record<string, unknown>;
+  const p = call.body as Partial<{ mind: Record<string, unknown>; mindLimits: Record<string, unknown>; appearance: Record<string, unknown> }> & Record<string, unknown>;
   const mind: Record<string, unknown> = { ...cur.mind, ...(p.mind ?? {}) };
   if (mind.model === null) delete mind.model;
-  return { body: { settings: { ...cur, ...p, mind, appearance: { ...cur.appearance, ...(p.appearance ?? {}) } } as Settings } };
+  const mindLimits = { ...cur.mindLimits, ...(p.mindLimits ?? {}) };
+  return { body: { settings: { ...cur, ...p, mind, mindLimits, appearance: { ...cur.appearance, ...(p.appearance ?? {}) } } as Settings } };
 }

@@ -65,6 +65,7 @@ import { AttachmentError, sniffImage, type AttachmentStore } from './attachments
 import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
 import { ChatProposals, toProposal } from './proposals.ts';
 import { conversationDir } from './conversations.ts';
+import { chainCapNotice, dayCapMessage, dayLeftUsd, exhausted, freshSpend, MIND_MAX_TURNS, sessionCapUsd, turnCapNotice, type MindSpend } from './limits.ts';
 import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
 
 /** Sesión ociosa: se cierra y se reanuda con el próximo mensaje. */
@@ -84,7 +85,7 @@ export class ChatError extends Error {
 }
 
 /** Lo que el chat necesita del almacén del núcleo. */
-export type ChatStorePort = Pick<SqliteStore, 'getProject' | 'getTask' | 'putTask' | 'setTaskState' | 'getSession' | 'listTasks' | 'cancelOpenSessions'>;
+export type ChatStorePort = Pick<SqliteStore, 'getProject' | 'getTask' | 'putTask' | 'setTaskState' | 'getSession' | 'listTasks' | 'cancelOpenSessions' | 'spentUsd' | 'dayOf'>;
 /** Lo que el chat necesita del hub (`/ws`). */
 export type ChatHub = Pick<EventHub, 'append' | 'publish' | 'publishTask'>;
 
@@ -157,6 +158,10 @@ interface Turn {
   session: ConductorSession;
   texts: string[];
   interrupted: boolean;
+  /** Lo abrió la mente sola (sin mensaje del usuario). */
+  autonomous: boolean;
+  /** Aviso que se agrega a la respuesta (p. ej. el turno se cortó por un tope de gasto). */
+  notice?: string;
   grace?: ReturnType<typeof setTimeout>;
   /** Lo enviado a la mente: se repite una vez en una sesión nueva si la reanudación falló (`#retryLostResume`). */
   input?: { text: string; images: ImageInput[]; effort: Effort | undefined };
@@ -196,6 +201,8 @@ interface Live {
    * haya alguno, la sesión no se cierra por inactividad ni se recrea por un cambio de ajustes: se los mataría.
    */
   background: Set<string>;
+  /** Gasto en vivo desde el último mensaje del usuario (topes por mensaje y de turnos autónomos). */
+  spend: MindSpend;
 }
 
 export interface SendInput {
@@ -378,8 +385,12 @@ export class ChatService {
 
   /** El chat con lo que solo vive en memoria: los subagentes que siguen en segundo plano. */
   #withLive(chat: Chat): Chat {
-    const n = this.#live.get(chat.id)?.background.size ?? 0;
+    const live = this.#live.get(chat.id);
+    const n = live?.background.size ?? 0;
     let out = n > 0 ? { ...chat, backgroundTasks: n } : chat;
+    // Lo gastado desde el último `result` todavía no está guardado: la cabecera lo muestra mientras corre.
+    const inFlight = live ? this.#inFlightUsd(live) : 0;
+    if (inFlight > 0) out = { ...out, costUsd: Math.round((chat.costUsd + inFlight) * 1e9) / 1e9 };
     if (this.#isInternalFolder(chat.cwd)) out = { ...out, internalFolder: true };
     return out;
   }
@@ -563,7 +574,9 @@ export class ChatService {
       const patch: ChatUpdate = { state: 'running' };
       if (!stored.chat.title) patch.title = titleFrom(input.text, attachments);
       this.#update(chatId, patch);
-      live.turn = { session, texts: [], interrupted: false, input: { text, images, effort: input.effort } };
+      live.turn = { session, texts: [], interrupted: false, autonomous: false, input: { text, images, effort: input.effort } };
+      // Un mensaje del usuario abre otra cuenta: tope por mensaje y turnos autónomos desde cero.
+      live.spend = { ...freshSpend(session.streamCostUsd), mark: live.spend.mark };
       this.#emit(chatId, live, { type: 'status', payload: { state: 'running', detail: 'pensando' } });
       try {
         session.send(text, { images });
@@ -578,8 +591,8 @@ export class ChatService {
       // Con un turno autónomo vivo, `busy` es suyo.
       if (!live.turn) {
         live.busy = false;
-        // Ni la sesión viva sin su plazo de inactividad (p. ej. rechazada por falta de saldo).
-        this.#scheduleIdle(chatId, live);
+        // Ni la sesión viva sin su plazo de inactividad (p. ej. rechazada por falta de saldo o por el tope diario).
+        if (live.session && !live.idle) this.#scheduleIdle(chatId, live);
       }
       // Un envío fallido no deja abierta la lectura de las carpetas de sus adjuntos.
       for (const root of addedRoots) live.roots.delete(root);
@@ -731,7 +744,7 @@ export class ChatService {
         taken: (taskId) => (this.#deps.store.getTask(taskId) ? `La tarea ${taskId} ya existe en el tablero; usa otro id` : undefined),
       });
       const sessionId = this.#require(chatId).chat.sessionId;
-      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots, background: new Set() };
+      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots, background: new Set(), spend: freshSpend() };
       this.#live.set(chatId, live);
     }
     return live;
@@ -764,6 +777,8 @@ export class ChatService {
     const mind = resolveMind(settings, this.#deps.mind.agents());
     const model = settings.mind.model ?? mind.model;
     const effort = turnEffort ?? settings.mind.effort;
+    // También con la sesión viva: un mensaje no pasa con el presupuesto o el tope diario agotados.
+    const budgetUsd = this.#mindBudgetUsd(mind.id, settings);
     const roots = this.#rootsFor(chat, live);
     const plugins = await this.#pluginsOf(mind.id);
     const key = JSON.stringify({
@@ -777,10 +792,8 @@ export class ChatService {
       // Huella de la configuración y de los secretos (un token renovado recrea la sesión): solo el hash, nunca el valor.
       pluginsHash: pluginsFingerprint(plugins),
       quotaFloor: settings.quotaFloor,
+      limits: settings.mindLimits,
     });
-    // En cada envío, también con la sesión viva: otro chat o la flota pudieron gastar el saldo común.
-    const left = this.#deps.mind.budgetLeftUsd?.(mind.id);
-    if (left !== undefined && left <= 0) throw new ChatError('conflict', budgetSpent(mind.id));
     const alive = live.session && !live.session.closed ? live.session : undefined;
     if (alive) {
       const sameShape = live.key === key;
@@ -830,6 +843,7 @@ export class ChatService {
       ...(model ? { model } : {}),
       effort,
       quotaFloor: settings.quotaFloor,
+      spendLimits: settings.mindLimits,
       sessionId: chat.sessionId,
       translator: this.#deps.translator,
       ...(this.#deps.query ? { query: this.#deps.query } : {}),
@@ -837,7 +851,9 @@ export class ChatService {
       ...(Object.keys(plugins.mcpServers).length ? { mcpServers: { ...plugins.mcpServers } } : {}),
       ...(plugins.rules ? { pluginRules: plugins.rules } : {}),
       ...(port.pluginLive ? { pluginLive: (server: string) => port.pluginLive?.(mind.id, server) ?? true } : {}),
-      ...(left !== undefined ? { maxBudgetUsd: left } : {}),
+      // Respaldo en el SDK: corta solo aunque Berland no llegue a mirar (el proceso cuenta desde que arranca).
+      ...(budgetUsd !== undefined ? { maxBudgetUsd: budgetUsd } : {}),
+      maxTurns: MIND_MAX_TURNS,
       onStderr: (line) => {
         if (resume && RESUME_LOST.test(line)) resume.lost = true;
         this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`);
@@ -850,6 +866,8 @@ export class ChatService {
     // Un proceso nuevo cuenta el uso desde cero. Uno reanudado trae los acumulados que restaura Claude Code (a veces de
     // una foto vieja): se miden contra el uso propio del proceso para no guardarlos otra vez.
     live.delta = usageDeltas(sdkSessionId ? { own: () => session.ownUsage() } : {});
+    // El costo estimado del stream también arranca de cero en cada proceso.
+    live.spend = { ...live.spend, base: 0, mark: 0, shownCents: 0 };
     void this.#read(chatId, live, session, mind.id, resume);
     return session;
   }
@@ -857,6 +875,23 @@ export class ChatService {
   #pluginsOf(agentId: string): Promise<MindPlugins> {
     if (this.#deps.mind.plugins) return this.#deps.mind.plugins(agentId);
     return Promise.resolve({ mcpServers: this.#deps.mcpServersFor?.(agentId) ?? {}, env: {} });
+  }
+
+  /**
+   * Saldo de la mente: lo que queda del presupuesto del agente y del tope diario (gasto de la mente hoy, en todos los
+   * chats). Con alguno agotado, `conflict`. Devuelve el menor, que va como tope de la sesión del SDK.
+   */
+  #mindBudgetUsd(mindId: string, settings: Settings): number | undefined {
+    const left = this.#deps.mind.budgetLeftUsd?.(mindId);
+    // El saldo común de la clave (la flota y los otros chats también gastan): se mira en cada envío.
+    if (exhausted(left)) throw new ChatError('conflict', budgetSpent(mindId));
+    const { dayUsd } = settings.mindLimits;
+    if (dayUsd === null) return left;
+    const { store } = this.#deps;
+    const spentToday = store.spentUsd(CONDUCTOR_AGENT_ID, store.dayOf(this.#iso()));
+    const dayLeft = dayLeftUsd(settings.mindLimits, spentToday);
+    if (exhausted(dayLeft)) throw new ChatError('conflict', dayCapMessage(spentToday, dayUsd));
+    return sessionCapUsd(left, dayLeft);
   }
 
   /** `crear_tareas.destino`: lo guarda (o vuelve a local con `null`), lo difunde como `chat_target` y lo devuelve resuelto. */
@@ -936,7 +971,11 @@ export class ChatService {
         // La mente sigue sola (p. ej. terminó un subagente en segundo plano): es un turno más, con su respuesta
         // guardada en el historial y el chat en `running`, aunque nadie esté mirando.
         if (!live.turn && live.session === session && startsMainTurn(update.message)) this.#beginAutonomousTurn(chatId, live, session);
+        const current = live.session === session;
+        // El `result` trae el costo que se guarda: lo estimado hasta aquí deja de estar «en curso».
+        if (current && update.message.type === 'result') live.spend = { ...live.spend, mark: session.streamCostUsd, shownCents: 0 };
         for (const event of update.events) this.#emit(chatId, live, event);
+        if (current && live.session === session && update.message.type === 'assistant') this.#watchSpend(chatId, live, session);
         if (update.message.type === 'result' && live.turn?.session === session) this.#finishTurn(chatId, live, live.turn, update.message);
         const spent = session.spentUsd ?? 0;
         if (update.message.type === 'result') settled = spent;
@@ -1059,7 +1098,8 @@ export class ChatService {
     if (!stored) return;
     const result = message ? resultSchema.safeParse(message) : undefined;
     const ok = result?.success === true && result.data.subtype === 'success' && result.data.is_error !== true;
-    const final = ok && result.data.result?.trim() ? result.data.result : turn.texts.join('\n\n');
+    const answer = ok && result.data.result?.trim() ? result.data.result : turn.texts.join('\n\n');
+    const final = [answer, turn.notice ?? ''].filter((t) => t.trim()).join('\n\n');
     if (final.trim()) {
       const reply = this.#repo.addMessage({
         id: this.#newId(),
@@ -1079,11 +1119,99 @@ export class ChatService {
   /** Turno que arranca la mente sin mensaje del usuario: ocupa el chat y su respuesta se guarda como cualquier otra. */
   #beginAutonomousTurn(chatId: string, live: Live, session: ConductorSession): void {
     if (!this.#repo.get(chatId)) return;
-    live.turn = { session, texts: [], interrupted: false };
+    live.spend.autonomous++;
+    const max = this.#deps.settings().mindLimits.maxAutonomousTurns;
+    if (max !== null && live.spend.autonomous > max) {
+      // La cadena se corta con sus subagentes; el próximo mensaje del usuario la reanuda con el contador en cero.
+      live.spend.capped = true;
+      this.#recordInFlight(chatId, live);
+      this.#dropSession(chatId, live);
+      this.#notify(chatId, chainCapNotice(max));
+      return;
+    }
+    live.turn = { session, texts: [], interrupted: false, autonomous: true };
     live.busy = true;
     if (live.idle) clearTimeout(live.idle);
     live.idle = undefined;
     this.#update(chatId, { state: 'running' });
+  }
+
+  /** Costo estimado desde el último `result` de la sesión viva (aún no está en el costo guardado del chat). */
+  #inFlightUsd(live: Live, spent = live.session?.streamCostUsd ?? 0): number {
+    return live.session ? Math.max(0, spent - live.spend.mark) : 0;
+  }
+
+  /**
+   * Tras cada mensaje del asistente (también de un subagente): mueve la cabecera del chat y aplica el tope por mensaje
+   * (lo gastado desde el último mensaje del usuario, con sus subagentes y los turnos autónomos que lo siguieron).
+   */
+  #watchSpend(chatId: string, live: Live, session: ConductorSession): void {
+    // Una sola lectura por mensaje: la estimación recorre todos los mensajes de la sesión.
+    const spent = session.streamCostUsd;
+    const cents = Math.floor(this.#inFlightUsd(live, spent) * 100);
+    if (cents !== live.spend.shownCents) {
+      live.spend.shownCents = cents;
+      this.#publishLive(chatId);
+    }
+    const cap = this.#deps.settings().mindLimits.turnUsd;
+    const used = spent - live.spend.base;
+    if (cap === null || live.spend.capped || used <= cap) return;
+    live.spend.capped = true;
+    this.#stopForSpend(chatId, live, turnCapNotice(used, cap));
+  }
+
+  /**
+   * Corta a la mente por un tope de gasto. Un turno del usuario sin subagentes vivos se interrumpe (la sesión sigue y
+   * «sigue» continúa con el contexto); si hay subagentes o el turno es autónomo, se cierra la sesión, que los corta.
+   */
+  #stopForSpend(chatId: string, live: Live, notice: string): void {
+    const turn = live.turn;
+    if (turn && !turn.autonomous && live.background.size === 0) {
+      turn.notice = notice;
+      this.interrupt(chatId).catch((err: unknown) => this.#log(`chat ${chatId}: cortar el turno por el tope falló: ${oneLine(err)}`));
+      return;
+    }
+    if (turn) {
+      turn.interrupted = true;
+      turn.notice = notice;
+    }
+    this.#recordInFlight(chatId, live);
+    this.#dropSession(chatId, live);
+    // Sin turno en curso el aviso va solo; con turno, va al final de su respuesta.
+    if (!turn) this.#notify(chatId, notice);
+  }
+
+  /**
+   * Una sesión que se cierra por un tope no llega a su `result`: lo estimado desde el último se guarda como uso, para
+   * que cuente en el costo del chat y en el tope diario.
+   */
+  #recordInFlight(chatId: string, live: Live): void {
+    const stored = this.#repo.get(chatId);
+    const costUsd = Math.round(this.#inFlightUsd(live) * 1e6) / 1e6;
+    if (!stored || !live.session || costUsd <= 0) return;
+    live.spend = { ...live.spend, mark: live.session.streamCostUsd };
+    const event: AgentEvent = {
+      sessionId: stored.chat.sessionId,
+      agentId: CONDUCTOR_AGENT_ID,
+      seq: ++live.seq,
+      ts: this.#iso(),
+      type: 'usage',
+      payload: { inputTokens: 0, outputTokens: 0, costUsd, model: live.session.model },
+    };
+    try {
+      this.#deps.hub.append(event);
+    } catch (err) {
+      this.#log(`chat ${chatId}: no se pudo guardar el uso estimado: ${oneLine(err)}`);
+    }
+    this.#update(chatId, { costUsd: Math.round((stored.chat.costUsd + costUsd) * 1e9) / 1e9 });
+  }
+
+  /** Mensaje de Berland en el historial del chat (como respuesta de la mente). */
+  #notify(chatId: string, text: string): void {
+    const stored = this.#repo.get(chatId);
+    if (!stored) return;
+    const message = this.#repo.addMessage({ id: this.#newId(), chatId, role: 'assistant', text, attachments: [], mode: stored.chat.mode, at: this.#iso() });
+    this.#deps.hub.publish({ type: 'chat_message', message });
   }
 
   /** Lleva la cuenta de los subagentes de la mente que siguen trabajando y la difunde al cambiar. */

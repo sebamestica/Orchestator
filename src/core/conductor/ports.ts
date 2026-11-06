@@ -145,6 +145,11 @@ export interface SdkMessageTranslator {
   ownUsage?(): Readonly<Record<string, OwnModelUsage>>;
   /** Gasto acumulado del proceso del SDK en USD, conocido hasta el último mensaje (también a mitad de turno). */
   readonly spentUsd?: number;
+  /**
+   * Costo estimado (USD) de los mensajes vistos en este stream, también los de los subagentes. No incluye lo que un
+   * `resume` restaura: sirve para medir en vivo el gasto de un turno.
+   */
+  readonly estimatedCostUsd?: number;
 }
 
 /** Datos con los que se construye el traductor de una sesión (encaja con `TranslatorOptions` de c1). */

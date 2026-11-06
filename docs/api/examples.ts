@@ -513,6 +513,7 @@ export const memoryContext = { projectId: ids.project, taskId: ids.task, budgetC
 
 export const settings: Settings = {
   mind: { agentId: ids.agent, model: 'claude-opus-5-5', effort: 'high' },
+  mindLimits: { turnUsd: 5, dayUsd: 50, maxAutonomousTurns: 5 },
   workers: [],
   defaultMode: 'plan',
   quotaFloor: 0.2,

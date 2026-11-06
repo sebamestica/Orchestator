@@ -42,6 +42,21 @@ export type Effort = z.infer<typeof effortSchema>;
 
 export const themeSchema = z.enum(['system', 'dark', 'light']);
 
+/**
+ * Topes de gasto de la mente (US$); `null` quita el tope. Van en su propia clave de primer nivel: una fila `mind` ya
+ * guardada sigue validando y conserva mente, modelo y esfuerzo.
+ */
+export const mindLimitsSchema = z.strictObject({
+  /** Lo que puede gastar un mensaje del usuario, con sus subagentes y los turnos que la mente siga sola tras él. */
+  turnUsd: z.number().positive().max(100_000).nullable(),
+  /** Lo que puede gastar la mente (con sus subagentes) en el día, sumando todos los chats. */
+  dayUsd: z.number().positive().max(100_000).nullable(),
+  /** Turnos seguidos que la mente abre sola (sin mensaje del usuario) antes de cortarse. */
+  maxAutonomousTurns: z.number().int().min(1).max(100).nullable(),
+});
+export type MindLimits = z.infer<typeof mindLimitsSchema>;
+export const DEFAULT_MIND_LIMITS: MindLimits = { turnUsd: 5, dayUsd: 50, maxAutonomousTurns: 5 };
+
 export const settingsSchema = z.strictObject({
   mind: z.strictObject({
     /** Agente que hace de mente (orquestador). `null`: el primer agente `claude-sdk` habilitado. */
@@ -50,6 +65,7 @@ export const settingsSchema = z.strictObject({
     model: z.string().min(1).max(100).optional(),
     effort: effortSchema,
   }),
+  mindLimits: mindLimitsSchema,
   /** Agentes que la mente puede usar como subagentes de la flota. Vacío: todos los habilitados. */
   workers: z.array(idSchema).max(50),
   /** Modo con el que arranca un chat nuevo. */
@@ -68,6 +84,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 
 export const DEFAULT_SETTINGS: Settings = {
   mind: { agentId: null, effort: 'medium' },
+  mindLimits: DEFAULT_MIND_LIMITS,
   workers: [],
   defaultMode: 'plan',
   quotaFloor: 0.2,
@@ -82,6 +99,14 @@ export const settingsPatchSchema = z.strictObject({
       agentId: idSchema.nullable().optional(),
       model: z.string().min(1).max(100).nullable().optional(),
       effort: effortSchema.optional(),
+    })
+    .optional(),
+  /** `null` en un campo quita ese tope. */
+  mindLimits: z
+    .strictObject({
+      turnUsd: mindLimitsSchema.shape.turnUsd.optional(),
+      dayUsd: mindLimitsSchema.shape.dayUsd.optional(),
+      maxAutonomousTurns: mindLimitsSchema.shape.maxAutonomousTurns.optional(),
     })
     .optional(),
   workers: z.array(idSchema).max(50).optional(),

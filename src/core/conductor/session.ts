@@ -18,7 +18,7 @@ import type { AgentDefinition, EffortLevel, McpServerConfig, Options, SDKMessage
 import { z } from 'zod';
 import { idSchema, redactSecrets } from '../../shared/index.ts';
 import { CLAUDE_SUBPROCESS_SCRUB_ENV } from '../process/child-env.ts';
-import type { AgentEvent, MindMode } from '../../shared/index.ts';
+import type { AgentEvent, MindLimits, MindMode } from '../../shared/index.ts';
 import { MCP_ENV_PREFIX, bearerToken } from '../plugins/mcp.ts';
 import { createExternalContentHook } from './external-content.ts';
 import { createToolGuard } from './guard.ts';
@@ -97,6 +97,8 @@ export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {
     tools: [...READ_ONLY_TOOLS, mcpToolName('estado'), mcpToolName('cupos'), mcpToolName('leer_memoria'), mcpToolName('buscar_skills')],
     model: 'inherit',
     permissionMode: 'dontAsk',
+    // Red de seguridad del gasto: un investigador no da vueltas sin fin.
+    maxTurns: 40,
   },
 };
 
@@ -213,6 +215,8 @@ export interface ConductorSessionOptions {
   /** Tope de gasto de la conversación en USD. */
   maxBudgetUsd?: number;
   maxTurns?: number;
+  /** Topes de gasto de la mente que se le cuentan en el prompt (los aplica quien crea la sesión). */
+  spendLimits?: MindLimits;
   quotaFloor?: number;
   /** Notas del usuario para esta sesión (van al final del prompt de sistema). */
   notes?: string;
@@ -395,6 +399,7 @@ export class ConductorSession {
             date: now(),
             quotas: opts.ports.quotas.all(),
             quotaFloor: o.quotaFloor,
+            ...(opts.spendLimits ? { spendLimits: opts.spendLimits } : {}),
             notes: opts.notes,
             secrets: this.#secrets,
           }),
@@ -441,6 +446,11 @@ export class ConductorSession {
   /** Gasto del proceso del SDK hasta ahora (USD), si el traductor lo sabe: crece a mitad de turno. */
   get spentUsd(): number | undefined {
     return this.#translator?.spentUsd;
+  }
+
+  /** Costo estimado (USD) de lo visto en el stream de esta sesión, sin lo restaurado por `resume`; 0 sin dato. */
+  get streamCostUsd(): number {
+    return this.#translator?.estimatedCostUsd ?? 0;
   }
 
   /** Esfuerzo vigente: el de las opciones o el último aplicado con `setEffort`. */

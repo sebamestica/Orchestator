@@ -3,7 +3,7 @@
 - **Área:** Mente y chat (gasto)
 - **Severidad:** media
 - **Archivos:** `src/core/app/f5-chat.ts:103`, `src/core/chat/service.ts:86`, `src/core/chat/service.ts:494`, `src/core/chat/service.ts:695`, `src/core/chat/service.ts:708`, `src/core/chat/service.ts:733`, `src/core/chat/service.ts:794`, `src/core/chat/service.ts:832`, `src/core/chat/service.ts:865`, `src/core/chat/service.ts:892`, `src/core/conductor/session.ts:76`, `src/core/conductor/session.ts:189`, `src/core/conductor/session.ts:247`, `src/core/conductor/session.ts:373`, `src/core/conductor/prompt.ts:17`, `src/core/conductor/prompt.ts:149`, `src/core/conductor/ports.ts:133`, `src/core/adapters/claude-sdk/translate.ts:228`, `src/core/adapters/claude-sdk/translate.ts:406`, `src/core/adapters/claude-sdk/translate.ts:555`, `src/core/app/conductor.ts:36`, `src/core/app/cli-conversar.ts:31`, `src/core/store/store.ts:665`, `src/core/settings/store.ts:134`, `src/shared/api.ts:45`, `src/shared/api.ts:79`, `src/shared/agents.ts:32`, `src/ui/features/settings/AgentsSection.tsx:180`, `src/ui/features/settings/MindSection.tsx`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `uso-real-02` (el gasto de la mente se cuenta dos veces al reanudar), `autoeval-gasto-02` (el presupuesto no es común a la mente, la flota y los chats), `autoeval-gasto-03` (reintentos de la mente sin límite), `mente-06` y `uso-real-06` (subagentes de la mente), `agy-20` (presupuesto de los agentes por API)
 

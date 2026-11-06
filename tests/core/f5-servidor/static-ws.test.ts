@@ -197,7 +197,7 @@ describe('WebSocket desde el navegador', () => {
     expect(ws.protocol).toBe('orq');
     expect(first).toMatchObject({ type: 'hello' });
     const settings = new Promise<HubMessage>((resolve) => ws.once('message', (d) => resolve(JSON.parse(String(d)) as HubMessage)));
-    b.hub.publish({ type: 'settings', settings: { mind: { agentId: null, effort: 'high' }, workers: [], defaultMode: 'plan', quotaFloor: 0.2, concurrency: 3, appearance: { theme: 'dark', reducedEffects: false } } });
+    b.hub.publish({ type: 'settings', settings: { mind: { agentId: null, effort: 'high' }, workers: [], defaultMode: 'plan', quotaFloor: 0.2, concurrency: 3, mindLimits: { turnUsd: 5, dayUsd: 50, maxAutonomousTurns: 5 }, appearance: { theme: 'dark', reducedEffects: false } } });
     expect((await settings).type).toBe('settings');
     // El token nunca va a los registros.
     expect(b.logs.join('\n')).not.toContain(b.token);

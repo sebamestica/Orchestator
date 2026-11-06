@@ -2953,6 +2953,53 @@
                           ],
                           "additionalProperties": false
                         },
+                        "mindLimits": {
+                          "type": "object",
+                          "properties": {
+                            "turnUsd": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 100000
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "dayUsd": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 100000
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "maxAutonomousTurns": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "turnUsd",
+                            "dayUsd",
+                            "maxAutonomousTurns"
+                          ],
+                          "additionalProperties": false
+                        },
                         "workers": {
                           "maxItems": 50,
                           "type": "array",
@@ -3004,6 +3051,7 @@
                       },
                       "required": [
                         "mind",
+                        "mindLimits",
                         "workers",
                         "defaultMode",
                         "quotaFloor",
@@ -3024,6 +3072,11 @@
                       "agentId": "claude-mi-clave",
                       "model": "claude-opus-5-5",
                       "effort": "high"
+                    },
+                    "mindLimits": {
+                      "turnUsd": 5,
+                      "dayUsd": 50,
+                      "maxAutonomousTurns": 5
                     },
                     "workers": [],
                     "defaultMode": "plan",
@@ -3094,6 +3147,48 @@
                           "high",
                           "xhigh",
                           "max"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "mindLimits": {
+                    "type": "object",
+                    "properties": {
+                      "turnUsd": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 100000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "dayUsd": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 100000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "maxAutonomousTurns": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          {
+                            "type": "null"
+                          }
                         ]
                       }
                     },
@@ -3207,6 +3302,53 @@
                           ],
                           "additionalProperties": false
                         },
+                        "mindLimits": {
+                          "type": "object",
+                          "properties": {
+                            "turnUsd": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 100000
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "dayUsd": {
+                              "anyOf": [
+                                {
+                                  "type": "number",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 100000
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "maxAutonomousTurns": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 100
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "turnUsd",
+                            "dayUsd",
+                            "maxAutonomousTurns"
+                          ],
+                          "additionalProperties": false
+                        },
                         "workers": {
                           "maxItems": 50,
                           "type": "array",
@@ -3258,6 +3400,7 @@
                       },
                       "required": [
                         "mind",
+                        "mindLimits",
                         "workers",
                         "defaultMode",
                         "quotaFloor",
@@ -3278,6 +3421,11 @@
                       "agentId": "claude-mi-clave",
                       "model": "claude-opus-5-5",
                       "effort": "high"
+                    },
+                    "mindLimits": {
+                      "turnUsd": 5,
+                      "dayUsd": 50,
+                      "maxAutonomousTurns": 5
                     },
                     "workers": [
                       "claude-mi-clave",
@@ -12848,6 +12996,53 @@
                     ],
                     "additionalProperties": false
                   },
+                  "mindLimits": {
+                    "type": "object",
+                    "properties": {
+                      "turnUsd": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 100000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "dayUsd": {
+                        "anyOf": [
+                          {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 100000
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "maxAutonomousTurns": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "turnUsd",
+                      "dayUsd",
+                      "maxAutonomousTurns"
+                    ],
+                    "additionalProperties": false
+                  },
                   "workers": {
                     "maxItems": 50,
                     "type": "array",
@@ -12899,6 +13094,7 @@
                 },
                 "required": [
                   "mind",
+                  "mindLimits",
                   "workers",
                   "defaultMode",
                   "quotaFloor",

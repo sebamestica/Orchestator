@@ -1,8 +1,8 @@
-import { Chip, ListBox, ListBoxItem, Select, Spinner } from '@heroui/react';
+import { Chip, Input, ListBox, ListBoxItem, Select, Spinner } from '@heroui/react';
 import { Check, Brain } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { effortSchema, mindCandidateSchema, mindModeSchema, type MindCandidate } from '../../../shared/api.ts';
+import { effortSchema, mindCandidateSchema, mindLimitsSchema, mindModeSchema, type MindCandidate, type MindLimits, type SettingsPatch } from '../../../shared/api.ts';
 import { api } from '../../api/client.ts';
 import { EFFORT_LABELS } from '../../components/EffortSlider.tsx';
 import { useApp } from '../../store/app.ts';
@@ -129,6 +129,14 @@ export function MindSection() {
         </SettingsRow>
       </SettingsCard>
 
+      <SettingsCard title="Topes de gasto" description="Frenan a la mente aunque el presupuesto del agente sea alto. Vacío: sin tope.">
+        {LIMIT_FIELDS.map((f) => (
+          <SettingsRow key={f.key} label={f.label} description={f.description}>
+            <LimitField field={f.key} label={f.label} unit={f.unit} value={settings.mindLimits[f.key]} isDisabled={saving} onSave={(patch) => void save({ mindLimits: patch })} />
+          </SettingsRow>
+        ))}
+      </SettingsCard>
+
       <SettingsCard title="Subagentes" description="Agentes a los que la mente puede delegar tareas. Si todos están activos, también se usarán los que agregues después.">
         {enabled.length === 0 ? (
           <div className="p-4">
@@ -181,6 +189,49 @@ export function MindSection() {
         </div>
       </SettingsCard>
     </div>
+  );
+}
+
+type LimitKey = keyof MindLimits;
+
+const LIMIT_FIELDS: readonly { key: LimitKey; label: string; description: string; unit?: string }[] = [
+  { key: 'turnUsd', label: 'US$ por turno', unit: 'US$', description: 'Un mensaje tuyo con sus subagentes y los turnos que la mente siga sola. Al llegar se corta; escribe «sigue» para continuar.' },
+  { key: 'dayUsd', label: 'US$ por día', unit: 'US$', description: 'Gasto de la mente en el día, sumando todos los chats.' },
+  { key: 'maxAutonomousTurns', label: 'Turnos autónomos seguidos', description: 'Turnos que la mente abre sola, sin mensaje tuyo, antes de detenerse.' },
+];
+
+/** Campo numérico de un tope: vacío lo quita; un valor fuera del contrato no se guarda y vuelve al vigente. */
+function LimitField({ field, label, unit, value, isDisabled, onSave }: { field: LimitKey; label: string; unit?: string; value: number | null; isDisabled: boolean; onSave: (patch: NonNullable<SettingsPatch['mindLimits']>) => void }) {
+  const shown = value === null ? '' : String(value);
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const commit = () => {
+    const raw = text.trim().replace(',', '.');
+    const next = raw === '' ? null : Number(raw);
+    const parsed = mindLimitsSchema.shape[field].safeParse(next);
+    if (!parsed.success) return setText(shown);
+    if (parsed.data === value) return;
+    const patch: NonNullable<SettingsPatch['mindLimits']> = {};
+    patch[field] = parsed.data;
+    onSave(patch);
+  };
+  return (
+    <span className="flex items-center gap-1 text-[0.75rem] text-muted">
+      {unit ? <span aria-hidden="true">{unit}</span> : null}
+      <Input
+        aria-label={label}
+        inputMode={field === 'maxAutonomousTurns' ? 'numeric' : 'decimal'}
+        placeholder="sin tope"
+        value={text}
+        disabled={isDisabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+        }}
+        className="w-24 text-right"
+      />
+    </span>
   );
 }
 

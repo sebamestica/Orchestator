@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { mindCandidates, MIND_BRIDGE_NOTE, SETTINGS_TABLE, SettingsStore, settingsStoreFor } from '../../../src/core/settings/index.ts';
 import { SqliteStore, StoreError } from '../../../src/core/store/index.ts';
-import { DEFAULT_SETTINGS, mindCandidateSchema, settingsSchema, type Settings } from '../../../src/shared/index.ts';
+import { DEFAULT_MIND_LIMITS, DEFAULT_SETTINGS, mindCandidateSchema, settingsSchema, type Settings } from '../../../src/shared/index.ts';
 import { cleanupDirs, makeF5App, putAgent, tempDir } from './helpers.ts';
 
 afterEach(cleanupDirs);
@@ -40,6 +40,23 @@ describe('SettingsStore', () => {
       expect(() => settings.update(bad), JSON.stringify(bad)).toThrow(StoreError);
     }
     expect(settings.get()).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('topes de gasto de la mente: una fila mind de antes del cambio se conserva y los topes salen por defecto; null quita un tope', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE ${SETTINGS_TABLE} (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    db.prepare(`INSERT INTO ${SETTINGS_TABLE} (key, value, updated_at) VALUES ('mind', ?, 'x')`).run(JSON.stringify({ agentId: 'claude', model: 'claude-opus-5-5', effort: 'high' }));
+    const bad: string[] = [];
+    const settings = new SettingsStore(db, { onInvalidRow: (k) => bad.push(k) });
+    expect(settings.get().mind).toEqual({ agentId: 'claude', model: 'claude-opus-5-5', effort: 'high' });
+    expect(settings.get().mindLimits).toEqual(DEFAULT_MIND_LIMITS);
+    expect(bad).toEqual([]);
+    const next = settings.update({ mindLimits: { turnUsd: 0.5, dayUsd: null } });
+    expect(next.mindLimits).toEqual({ turnUsd: 0.5, dayUsd: null, maxAutonomousTurns: DEFAULT_MIND_LIMITS.maxAutonomousTurns });
+    expect(new SettingsStore(db).get().mindLimits).toEqual(next.mindLimits);
+    for (const bad of [{ mindLimits: { turnUsd: 0 } }, { mindLimits: { maxAutonomousTurns: 2.5 } }, { mindLimits: { otro: 1 } }]) {
+      expect(() => settings.update(bad)).toThrow(StoreError);
+    }
   });
 
   it('no guarda nada con forma de clave', () => {

@@ -12,12 +12,12 @@
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
 import { minRemainingFraction, redactSecrets } from '../../shared/index.ts';
-import type { MindMode, QuotaSnapshot } from '../../shared/index.ts';
+import type { MindLimits, MindMode, QuotaSnapshot } from '../../shared/index.ts';
 
 export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local de agentes de IA que programan en paralelo. Conversas con el usuario, conviertes su plan en tareas, las delegas a los agentes adecuados y vigilas su avance hasta integrarlas. Fuera de los modos bypass y chat no editas código ni ejecutas comandos: delegas. Respondes siempre en español, breve y concreto.
 
 ## La flota
-- Claude (SDK de agentes con la clave de API del usuario; sin tope de cupo, pero cada token cuesta): orquestación, tareas difíciles, integración, revisión final y continuar tareas de otros agentes.
+- Claude (SDK de agentes con la clave de API del usuario; sin cupo de suscripción, pero cada token cuesta y tu gasto tiene topes): orquestación, tareas difíciles, integración, revisión final y continuar tareas de otros agentes.
 - Codex CLI (suscripción con cupo de 5 h y semanal): módulos acotados, ejecución directa, navegador del usuario.
 - agy / Antigravity (Gemini, cupo de 5 h y semanal; también ofrece Claude con el cupo de Google): módulos acotados, investigación web y pruebas.
 
@@ -97,6 +97,24 @@ export interface ConductorPromptContext {
   secrets?: readonly string[];
   /** Cómo trabaja la flota en el proyecto: worktrees o modo local (directo en la carpeta). */
   workMode?: ConductorWorkMode;
+  /** Topes de gasto de la mente vigentes al iniciar la sesión. */
+  spendLimits?: MindLimits;
+}
+
+function usd(value: number): string {
+  return `${String(Number(value.toFixed(2))).replace('.', ',')} USD`;
+}
+
+/** Bloque del contexto con los topes de gasto: la mente planifica con ellos (la barrera la pone el chat). */
+export function spendLimitsLines(limits: MindLimits): string[] {
+  const { turnUsd, dayUsd, maxAutonomousTurns } = limits;
+  return [
+    '## Gasto',
+    `- Tope por mensaje del usuario: ${turnUsd === null ? 'sin tope' : usd(turnUsd)}. Cuenta tus subagentes y los turnos que sigas sola después; al llegar, el turno se corta y el usuario decide si sigues.`,
+    `- Tope diario de la mente: ${dayUsd === null ? 'sin tope' : usd(dayUsd)}, sumando todos los chats.`,
+    `- Turnos seguidos sin mensaje del usuario: ${maxAutonomousTurns === null ? 'sin tope' : String(maxAutonomousTurns)}.`,
+    '- Lanza solo los subagentes que hagan falta, con encargos acotados.',
+  ];
 }
 
 export type ConductorWorkMode = 'local' | 'worktrees';
@@ -133,6 +151,7 @@ export function renderSessionContext(ctx: ConductorPromptContext): string {
   if (ctx.mode === 'chat') lines.push('', '## Modo: chat', ...MODE_TEXT.chat);
   else if (ctx.projectId === null) lines.push('', ...STANDALONE_TEXT);
   else if (ctx.mode) lines.push('', `## Modo: ${ctx.mode}`, ...MODE_TEXT[ctx.mode]);
+  if (ctx.spendLimits) lines.push('', ...spendLimitsLines(ctx.spendLimits));
   if (ctx.notes?.trim()) lines.push('', '## Notas del usuario para esta sesión', ctx.notes.trim());
   return redactSecrets(lines.join('\n'), ctx.secrets ?? []);
 }

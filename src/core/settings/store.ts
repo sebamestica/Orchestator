@@ -32,6 +32,12 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     if (m.model === null) delete next.mind.model;
     else if (m.model !== undefined) next.mind.model = m.model;
   }
+  if (patch.mindLimits) {
+    const l = patch.mindLimits;
+    if (l.turnUsd !== undefined) next.mindLimits.turnUsd = l.turnUsd;
+    if (l.dayUsd !== undefined) next.mindLimits.dayUsd = l.dayUsd;
+    if (l.maxAutonomousTurns !== undefined) next.mindLimits.maxAutonomousTurns = l.maxAutonomousTurns;
+  }
   if (patch.workers !== undefined) next.workers = [...new Set(patch.workers)];
   if (patch.defaultMode !== undefined) next.defaultMode = patch.defaultMode;
   if (patch.quotaFloor !== undefined) next.quotaFloor = patch.quotaFloor;

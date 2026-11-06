@@ -4429,7 +4429,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"workers\": [],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.2,\n    \"concurrency\": 3,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
+              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"mindLimits\": {\n      \"turnUsd\": 5,\n      \"dayUsd\": 50,\n      \"maxAutonomousTurns\": 5\n    },\n    \"workers\": [],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.2,\n    \"concurrency\": 3,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
             }
           ]
         },
@@ -4503,7 +4503,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"workers\": [\n      \"claude-mi-clave\",\n      \"codex\"\n    ],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.25,\n    \"concurrency\": 2,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
+              "body": "{\n  \"settings\": {\n    \"mind\": {\n      \"agentId\": \"claude-mi-clave\",\n      \"model\": \"claude-opus-5-5\",\n      \"effort\": \"high\"\n    },\n    \"mindLimits\": {\n      \"turnUsd\": 5,\n      \"dayUsd\": 50,\n      \"maxAutonomousTurns\": 5\n    },\n    \"workers\": [\n      \"claude-mi-clave\",\n      \"codex\"\n    ],\n    \"defaultMode\": \"plan\",\n    \"quotaFloor\": 0.25,\n    \"concurrency\": 2,\n    \"appearance\": {\n      \"theme\": \"dark\",\n      \"reducedEffects\": false\n    }\n  }\n}"
             }
           ]
         },

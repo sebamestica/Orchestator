@@ -199,6 +199,8 @@ describe('ConductorSession: opciones del SDK', () => {
     const investigador = agents.investigador;
     expect(investigador?.tools).toEqual(['Read', 'Grep', 'Glob', 'mcp__orquestador__estado', 'mcp__orquestador__cupos', 'mcp__orquestador__leer_memoria', 'mcp__orquestador__buscar_skills']);
     expect(investigador?.permissionMode).toBe('dontAsk');
+    // Red de seguridad del gasto (autoeval-gasto-01): el investigador no da vueltas sin fin.
+    expect(investigador?.maxTurns).toBe(40);
     s.close();
   });
 
