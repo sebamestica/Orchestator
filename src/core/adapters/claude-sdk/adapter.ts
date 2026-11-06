@@ -394,6 +394,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       extraTools: [...(this.#opts.extraTools ?? []), ...Object.keys(configured).map((name) => `mcp__${name}__*`)],
       // Y las de los plugins, por nombre exacto de servidor.
       mcpServers: pluginNames,
+      // Lo que baja la sesión, común al hook y a `canUseTool`.
+      downloaded: new Set<string>(),
     };
     const section = pluginsSection(grant);
     const repoRules = await loadRepoRules(ctx.worktreePath);

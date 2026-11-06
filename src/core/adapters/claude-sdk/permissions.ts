@@ -3,7 +3,8 @@ import path from 'node:path';
 import type { CanUseTool, HookCallbackMatcher, HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { ShellKind } from './shell-parse.ts';
 import { realOrNearest } from '../../memory/safe-fs.ts';
-import { lexicallyInside, shellCommandProblem, writeProblem } from './shell-policy.ts';
+import { sessionShellProblem } from './shell-downloads.ts';
+import { lexicallyInside, writeProblem } from './shell-policy.ts';
 
 /**
  * Política de herramientas del worker Claude (PLAN §4.8), aplicada en un hook `PreToolUse` del host.
@@ -35,6 +36,8 @@ export interface ToolPolicyOptions {
   cwd?: string;
   /** Servidores MCP de los plugins (nombres sin `_`): se permiten sus herramientas `mcp__<servidor>__*`. */
   mcpServers?: readonly string[];
+  /** Lo que la sesión bajó de internet (`shell-downloads.ts`): no se ejecuta; se suma lo que bajan los comandos permitidos. */
+  downloaded?: Set<string>;
 }
 
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS']);
@@ -113,7 +116,7 @@ export async function decideToolUse(worktreePath: string, toolName: string, inpu
     if (shell) {
       const command = str(input.command);
       if (!command) return deny('falta el comando');
-      const problem = await shellCommandProblem(command, shell, wt, cwd);
+      const problem = await sessionShellProblem(command, shell, wt, cwd, opts.downloaded ?? new Set());
       return problem ? deny(problem) : allow;
     }
     if (EDIT_TOOLS.has(toolName)) {
@@ -159,7 +162,8 @@ export async function decideToolUse(worktreePath: string, toolName: string, inpu
 
 /** `canUseTool` con la misma política: respaldo para las llamadas que llegan hasta él. */
 export function createToolPolicy(worktreePath: string, opts: ToolPolicyOptions = {}): CanUseTool {
-  return async (toolName, input) => decideToolUse(worktreePath, toolName, input, opts);
+  const session = { ...opts, downloaded: opts.downloaded ?? new Set<string>() };
+  return async (toolName, input) => decideToolUse(worktreePath, toolName, input, session);
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -169,13 +173,15 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  * de los subagentes. Falla cerrado: una entrada inválida o un error deniegan.
  */
 export function createPolicyHook(worktreePath: string, opts: ToolPolicyOptions = {}): HookCallbackMatcher {
+  // Lo que esta sesión baja de internet (también sus subagentes, que pasan por el mismo hook).
+  const downloaded = opts.downloaded ?? new Set<string>();
   return {
     timeout: 60,
     hooks: [
       async (input): Promise<HookJSONOutput> => {
         if (input.hook_event_name !== 'PreToolUse') return { continue: true };
         const decision = isRecord(input.tool_input)
-          ? await decideToolUse(worktreePath, input.tool_name, input.tool_input, { ...opts, cwd: input.cwd || worktreePath })
+          ? await decideToolUse(worktreePath, input.tool_name, input.tool_input, { ...opts, downloaded, cwd: input.cwd || worktreePath })
           : deny('entrada de la herramienta inválida');
         return {
           hookSpecificOutput: {

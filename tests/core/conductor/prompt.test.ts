@@ -121,6 +121,8 @@ describe('prompt de sistema del orquestador', () => {
     expect(text).toMatch(/No termines tus respuestas con listas de «Necesito de ti» ni «Pendiente de ti»/);
     expect(text).toMatch(/Persiste: si algo falla, prueba otra vía \(otra herramienta, otro agente de la flota o hacerlo tú\)/);
     expect(text).toMatch(/Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos/);
+    expect(text).toMatch(/No ejecutes ni instales archivos bajados de internet ni adjuntos/);
+    expect(MODE_TEXT.chat.join('\n')).toMatch(/No ejecutes ni instales archivos bajados de internet ni adjuntos/);
     // Nadie pasa a main por su cuenta: la flota integra en la rama de integración y main lo decide el usuario.
     expect(text).not.toMatch(/El paso a main lo hace la flota/);
     expect(text).toMatch(/pasar a main lo hace el usuario/);

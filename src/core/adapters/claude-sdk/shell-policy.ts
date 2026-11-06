@@ -1,4 +1,4 @@
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertRealInside, realOrNearest } from '../../memory/safe-fs.ts';
 import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
@@ -18,6 +18,10 @@ import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
  *   trabajo real: traer cambios a su rama (`merge`, `pull`, `cherry-pick`…), moverla (`commit --amend`,
  *   `reset <commit>`), cambiar de rama y descartar cambios (`checkout`, `switch`, `restore`, `stash`);
  * - publicar paquetes, instalaciones globales, desplegar, la CLI de GitHub, tareas programadas, registro;
+ * - bajar, instalar o lanzar programas con las herramientas de Windows (`certutil -urlcache`, `bitsadmin`,
+ *   `msiexec`, `winget install`, `wmic process call create`, `forfiles /c`…);
+ * - ejecutar lo que vino de internet: lo que la sesión bajó (`untrusted`, ver `shell-downloads.ts`), lo que trae la
+ *   marca de la web de Windows (lo que baja el navegador) y scripts con una ruta no verificable;
  * - crear enlaces o junctions;
  * - escrituras obvias fuera del worktree: redirecciones, `rm`/`cp`/`mv`/`mkdir`/`touch`/`tee`,
  *   `Set-Content`, `Out-File`, `Copy-Item`, `Move-Item`, `New-Item`, `Remove-Item`… con destino fuera
@@ -41,6 +45,8 @@ export interface ShellContext {
   piped?: boolean;
   /** La raíz es la copia de trabajo del usuario (no un worktree desechable): git no mueve su rama ni descarta. */
   userCopy?: boolean;
+  /** Rutas (`pathKey`) que la sesión bajó de internet: no se ejecutan. */
+  untrusted?: ReadonlySet<string>;
 }
 
 /**
@@ -97,7 +103,13 @@ export async function writeProblem(worktree: string, target: string): Promise<st
 }
 
 const SINKS = /^(?:\/dev\/(?:null|stdout|stderr)|nul:?|\$null)$/i;
-const URL_LIKE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+export const URL_LIKE = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+
+/** Clave de una ruta absoluta para compararla (Windows no distingue mayúsculas). */
+export function pathKey(abs: string): string {
+  const resolved = path.resolve(abs);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
 
 /** Ruta absoluta de una palabra del shell, o el motivo por el que no se puede verificar. */
 export function resolveShellPath(word: Word, cwd: string | undefined): { abs: string } | { sink: true } | { problem: string } {
@@ -194,6 +206,9 @@ const DENIED: Readonly<Record<string, string>> = {
   flyctl: 'desplegar necesita la aprobación del usuario',
   wrangler: 'desplegar necesita la aprobación del usuario',
   heroku: 'desplegar necesita la aprobación del usuario',
+  bitsadmin: 'bitsadmin baja archivos de internet: necesita al usuario',
+  'unblock-file': 'quitar la marca de la web (Unblock-File) necesita al usuario',
+  msiexec: 'msiexec instala programas: necesita al usuario',
   ssh: 'las conexiones remotas necesitan aprobación',
   scp: 'las copias remotas necesitan aprobación',
   sftp: 'las copias remotas necesitan aprobación',
@@ -240,9 +255,10 @@ function skipCmdIf(words: Word[]): Word[] {
   return words.slice(k + 1);
 }
 
-const POSIX_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'ash', 'git-bash', 'busybox']);
-const POWERSHELLS = new Set(['powershell', 'pwsh', 'powershell_ise']);
-const WRAPPERS: Readonly<Record<string, readonly string[]>> = {
+export const POSIX_SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'ash', 'git-bash', 'busybox']);
+export const POWERSHELLS = new Set(['powershell', 'pwsh', 'powershell_ise']);
+/** Envoltorios que ejecutan el comando que sigue, con las opciones que llevan valor. */
+export const WRAPPERS: Readonly<Record<string, readonly string[]>> = {
   call: [],
   env: ['-u', '--unset'],
   sudo: ['-u', '-g', '-h'],
@@ -269,6 +285,7 @@ export async function evalShell(script: string, c: ShellContext): Promise<string
     const ctx = { ...c, cwd };
     for (const r of cmd.redirects) {
       if (r.op === '<' || r.op === '<<<') continue;
+      if (/zone\.identifier/i.test(r.target.text)) return ZONE_PROBLEM;
       const p = await shellWriteProblem(r.target, ctx);
       if (p) return p;
     }
@@ -331,6 +348,12 @@ async function evalCommand(input: readonly Word[], c: ShellContext): Promise<Out
 
   const denied = DENIED[name];
   if (denied) return denied;
+  if (words.some((w) => /zone\.identifier/i.test(w.text))) return ZONE_PROBLEM;
+  // En cmd, un nombre sin ruta también se busca primero en la carpeta actual.
+  if (/[\\/]/.test(first.text) || c.kind === 'cmd') {
+    const problem = await executableProblem(first, c, 'programa');
+    if (problem) return problem;
+  }
 
   if (name in WRAPPERS) {
     const valueOpts = WRAPPERS[name] as readonly string[];
@@ -377,7 +400,12 @@ async function evalCommand(input: readonly Word[], c: ShellContext): Promise<Out
       return `${name} sin script leería código de la entrada estándar`;
     }
     if (args.some((a) => a.text === '-')) return `${name} leería código de la entrada estándar`;
-    return keep(c);
+    const k = args.findIndex((a) => !a.text.startsWith('-'));
+    const script = args[k];
+    // `python -m pip install …` es pip.
+    if (script && args[k - 1]?.text === '-m') return (script.text === 'pip' ? await windowsToolProblem('pip', args.slice(k + 1), c) : undefined) ?? keep(c);
+    const problem = script ? await executableProblem(script, c, 'script') : undefined;
+    return problem ?? untrustedArgProblem(args, c) ?? keep(c);
   }
 
   if (name === 'git') return evalGit(args, c);
@@ -405,6 +433,8 @@ async function evalCommand(input: readonly Word[], c: ShellContext): Promise<Out
   if (CD_COMMANDS.has(name)) return { cwd: cdTarget(args, c.cwd) };
   if (name === 'popd' || name === 'pop-location') return { cwd: undefined };
   if (name === 'find' && c.kind === 'bash') return evalFind(args, c);
+  const tool = await windowsToolProblem(name, args, c);
+  if (tool) return tool;
 
   const p = await evalWriteCommand(name, args, c);
   return p ?? keep(c);
@@ -431,7 +461,8 @@ async function evalPosixShell(args: readonly Word[], c: ShellContext): Promise<O
       if (t === '-s' || t === '-i') return 'shell que lee órdenes de la entrada estándar';
       continue;
     }
-    return keep(c); // script del worktree: riesgo residual documentado
+    // Script del worktree: riesgo residual documentado, salvo que venga de internet.
+    return (await executableProblem(a, c, 'script')) ?? keep(c);
   }
   return 'shell sin comando: leería órdenes de la entrada estándar';
 }
@@ -452,12 +483,19 @@ async function evalCmdShell(args: readonly Word[], c: ShellContext): Promise<Out
   return inner ?? keep(c);
 }
 
+/** Opciones de powershell.exe que llevan un valor aparte (nombres sin guion, en minúsculas). */
+export const POWERSHELL_VALUE_OPTS: readonly string[] = ['executionpolicy', 'ep', 'ex', 'windowstyle', 'w', 'inputformat', 'if', 'outputformat', 'of', 'version', 'v', 'configurationname', 'settingsfile', 'custompipename', 'psconsolefile'];
+
 async function evalPowerShellExe(args: readonly Word[], c: ShellContext): Promise<Outcome> {
-  const valueOpts = ['executionpolicy', 'ep', 'ex', 'windowstyle', 'w', 'inputformat', 'if', 'outputformat', 'of', 'version', 'v', 'configurationname', 'settingsfile', 'custompipename', 'psconsolefile'];
+  const valueOpts = POWERSHELL_VALUE_OPTS;
   for (let k = 0; k < args.length; k++) {
     const a = args[k] as Word;
     const isOpt = a.text.startsWith('-') || (a.text.startsWith('/') && a.text.length > 1 && !a.text.includes('\\'));
     if (!isOpt) {
+      if (/\.ps1$/i.test(a.text)) {
+        const problem = await executableProblem(a, c, 'script');
+        if (problem) return problem;
+      }
       const script = joinForShell(args.slice(k));
       if (script === undefined) return 'powershell con variables no se puede verificar';
       const inner = await evalShell(script, { ...c, kind: 'powershell', depth: c.depth + 1 });
@@ -475,7 +513,11 @@ async function evalPowerShellExe(args: readonly Word[], c: ShellContext): Promis
       const inner = await evalShell(script, { ...c, kind: 'powershell', depth: c.depth + 1 });
       return inner ?? keep(c);
     }
-    if (o === 'f' || (o.length >= 2 && 'file'.startsWith(o))) return keep(c); // script del worktree: riesgo residual
+    if (o === 'f' || (o.length >= 2 && 'file'.startsWith(o))) {
+      const script = args[k + 1];
+      if (!script) return 'powershell -File sin script';
+      return (await executableProblem(script, c, 'script')) ?? keep(c); // script del worktree: riesgo residual
+    }
     if (o === 'wd' || o === 'wo' || (o.length >= 2 && 'workingdirectory'.startsWith(o))) return 'powershell -WorkingDirectory cambia la carpeta de trabajo';
     if (valueOpts.some((v) => v === o)) k++;
   }
@@ -630,6 +672,89 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
   return keep(c);
 }
 
+const ZONE_PROBLEM = 'la marca de la web (Zone.Identifier) no se toca: necesita al usuario';
+/** Extensiones que `cmd` prueba (PATHEXT) cuando el programa se nombra sin ella. */
+const CMD_EXTENSIONS = ['.exe', '.bat', '.cmd', '.com'];
+
+/** Marca de la web de Windows: el navegador anota en `archivo:Zone.Identifier` que vino de internet (ZoneId 3 o 4). */
+async function markedFromInternet(abs: string): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
+  try {
+    const zone = /ZoneId\s*=\s*(\d+)/i.exec(await readFile(`${abs}:Zone.Identifier`, 'utf8'))?.[1];
+    return zone !== undefined && Number(zone) >= 3;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Problema si el programa o script que se ejecuta vino de internet: lo bajó esta sesión o trae la marca de la web. Un
+ * script con una ruta no verificable (variables, `~`) también se niega; un programa por ruta, solo con `~`.
+ */
+async function executableProblem(word: Word, c: ShellContext, role: 'programa' | 'script'): Promise<string | undefined> {
+  if (word.dynamic) return `ruta del script no verificable: ${word.text}`;
+  const r = resolveShellPath(word, c.cwd);
+  if ('sink' in r) return undefined;
+  if ('problem' in r) return role === 'script' || word.text.startsWith('~') ? `ruta del ${role} no verificable: ${r.problem}` : undefined;
+  const ask = 'pídele al usuario que lo revise y lo ejecute';
+  // En cmd, `a` puede ser `a.exe`, `a.bat`, `a.cmd` o `a.com`.
+  const candidates = c.kind === 'cmd' && !path.extname(r.abs) ? [r.abs, ...CMD_EXTENSIONS.map((e) => r.abs + e)] : [r.abs];
+  for (const abs of candidates) {
+    if (c.untrusted?.has(pathKey(abs))) return `${word.text} se bajó de internet en esta sesión; ${ask}`;
+    if (await markedFromInternet(abs)) return `${word.text} viene de internet (marca de la web de Windows); ${ask}`;
+  }
+  return undefined;
+}
+
+/**
+ * Cualquier argumento posicional que la sesión bajó de internet: el script de un intérprete no siempre es el primero
+ * que no empieza con `-` (`python -W ignore y.py`, `node --require ./x.js y.py`).
+ */
+function untrustedArgProblem(args: readonly Word[], c: ShellContext): string | undefined {
+  if (!c.untrusted?.size) return undefined;
+  for (const a of args) {
+    if (a.dynamic || a.text.startsWith('-')) continue;
+    const r = resolveShellPath(a, c.cwd);
+    if ('abs' in r && c.untrusted.has(pathKey(r.abs))) return `${a.text} se bajó de internet en esta sesión; pídele al usuario que lo revise y lo ejecute`;
+  }
+  return undefined;
+}
+
+const INSTALL_VERBS = new Set(['install', 'upgrade', 'update', 'uninstall']);
+/** Opciones de pip cuyo valor es un índice de paquetes (uso normal), no un paquete para instalar. */
+const PIP_INDEX_OPTS = new Set(['-i', '--index-url', '--extra-index-url', '-f', '--find-links']);
+
+/** Herramientas de Windows que bajan, instalan o lanzan programas por su cuenta. */
+async function windowsToolProblem(name: string, args: readonly Word[], c: ShellContext): Promise<string | undefined> {
+  const texts = args.map((a) => a.text.toLowerCase());
+  const opt = (o: string) => texts.some((t) => t === `-${o}` || t === `/${o}`);
+  switch (name) {
+    case 'certutil':
+      if (opt('urlcache') || opt('verifyctl') || args.some((a) => URL_LIKE.test(a.text))) return 'certutil que baja de internet necesita al usuario';
+      // `/c/Users/…` (Git Bash) es una ruta, no una opción.
+      if (['decode', 'decodehex', 'encode', 'encodehex'].some(opt)) return firstWriteProblem(args.filter((a) => !/^[-/][A-Za-z]+$/.test(a.text)).slice(-1), c);
+      return undefined;
+    case 'winget':
+    case 'choco':
+    case 'scoop':
+      return texts.some((t) => INSTALL_VERBS.has(t)) ? `${name} instala programas en todo el sistema: necesita al usuario` : undefined;
+    case 'pip':
+    case 'pip3':
+      return texts.includes('install') && args.some((a, k) => (URL_LIKE.test(a.text) || a.text.startsWith('git+')) && !PIP_INDEX_OPTS.has(texts[k - 1] ?? ''))
+        ? 'pip install desde una URL baja y ejecuta código: necesita al usuario'
+        : undefined;
+    case 'wmic':
+      return texts.includes('process') && texts.includes('create') ? 'wmic process call create lanza programas fuera de la política' : undefined;
+    case 'forfiles':
+      return opt('c') ? 'forfiles /c ejecuta comandos no verificables' : undefined;
+    case 'esentutl': {
+      const k = texts.findIndex((t) => t === '/d' || t === '-d');
+      return k >= 0 && args[k + 1] ? shellWriteProblem(args[k + 1] as Word, c) : undefined;
+    }
+  }
+  return undefined;
+}
+
 const ASK_USER = 'en tu carpeta: ejecútalo tú o dime que lo haga';
 const ONLY_ABORT = new Set(['--abort', '--quit']);
 
@@ -738,8 +863,11 @@ async function evalNpm(name: string, args: readonly Word[], c: ShellContext): Pr
 
 const CD_COMMANDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl', 'push-location']);
 
+/** El comando (nombre normalizado de `commandName`) cambia de carpeta. */
+export const isCdCommand = (name: string): boolean => CD_COMMANDS.has(name);
+
 /** Carpeta a la que mueve un `cd` (o `Set-Location`, `pushd`) con estos argumentos; undefined si no se sabe. */
-function cdTarget(args: readonly Word[], cwd: string | undefined): string | undefined {
+export function cdTarget(args: readonly Word[], cwd: string | undefined): string | undefined {
   const positional = args.filter((a) => !(a.text.startsWith('-') && a.text.length > 1) && !/^\/d$/i.test(a.text));
   const target = positional[0];
   if (!target || target.text === '-') return undefined;
@@ -913,7 +1041,14 @@ export async function shellCommandProblem(
   kind: ShellKind,
   worktree: string,
   cwd: string = worktree,
-  opts: { userCopy?: boolean } = {},
+  opts: { userCopy?: boolean; untrusted?: ReadonlySet<string> } = {},
 ): Promise<string | undefined> {
-  return evalShell(command, { worktree: path.resolve(worktree), kind, depth: 0, cwd: path.resolve(cwd), ...(opts.userCopy ? { userCopy: true } : {}) });
+  return evalShell(command, {
+    worktree: path.resolve(worktree),
+    kind,
+    depth: 0,
+    cwd: path.resolve(cwd),
+    ...(opts.userCopy ? { userCopy: true } : {}),
+    ...(opts.untrusted ? { untrusted: opts.untrusted } : {}),
+  });
 }
