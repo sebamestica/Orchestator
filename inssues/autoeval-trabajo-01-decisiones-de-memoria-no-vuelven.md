@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** alta
 - **Archivos:** `src/core/memory/obsidian-memory.ts:9`, `src/core/memory/obsidian-memory.ts:100`, `src/core/memory/obsidian-memory.ts:394-424`, `src/core/memory/obsidian-memory.ts:541-551`, `src/core/memory/obsidian-memory.ts:558-588`, `src/core/conductor/tools.ts:343-372`, `src/core/conductor/tools.ts:374-406`, `src/core/conductor/prompt.ts:36-37`, `src/core/conductor/prompt.ts:51`, `src/core/conductor/prompt.ts:63`, `src/core/orchestrator/fleet.ts:698`, `src/core/server/app.ts:741`, `src/core/app/conductor.ts:123-128`, `tests/core/conductor/real-ports.test.ts:39-58`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmaciones 1 («no tiene memoria propia») y 3 («contexto limitado»)
 - **Relacionadas:** `datos-03` (mismo `buildContext`, visto por su costo), `datos-05` (registro de sesión a medias), `autoeval-trabajo-04` (lo que la mente hace ella misma tampoco llega a la memoria)
 

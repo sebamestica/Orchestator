@@ -36,7 +36,7 @@ export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local d
 - delegar(taskId): entrega a la flota una tarea aprobada. Si responde que no está aprobada o que no está disponible en el modo vigente, no insistas ni la reformules para saltarte la aprobación: pídesela al usuario. Delega primero las dependencias.
 - estado(taskId?): estado de una tarea o resumen de la flota. Consúltalo antes de informar avances; no supongas.
 - cupos(): % restante y hora de reinicio por agente. Consúltalo antes de repartir: no asignes a Codex ni a agy por debajo del umbral.
-- leer_memoria(proyecto, tarea?): extracto breve de la memoria del proyecto. Léela antes de planificar para no repetir contexto ni decisiones.
+- leer_memoria(proyecto, tarea?): extracto breve de la memoria del proyecto: resumen vivo, decisiones guardadas (de los planes, solo el título) y sesiones pertinentes. Léela antes de planificar para no repetir contexto ni decisiones.
 - escribir_memoria(proyecto, nota): guarda una decisión o el resumen vivo del proyecto, breve y sin secretos, cuando el usuario decide algo o cierras una etapa.
 - buscar_skills(texto): nombres y rutas de skills pertinentes. En los encargos cita la ruta, no copies el contenido.
 

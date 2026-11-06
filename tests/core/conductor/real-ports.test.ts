@@ -49,11 +49,21 @@ describe('puertos con las piezas reales de main', () => {
     const context = textOf(await tools.call('leer_memoria', { proyecto: 'demo' }));
     expect(context).toMatch(/^Memoria de demo \(máx\. 4000 caracteres\):/);
     expect(context).toContain('Fase F3: orquestador listo.');
+    expect(context).toContain('Orquestador sin Bash');
     expect(context).not.toMatch(SECRET_PATTERN);
 
     await tools.call('crear_tareas', { plan: 'plan' });
     const forTask = await tools.call('leer_memoria', { proyecto: 'demo', tarea: 'api' });
     expect(forTask.isError).toBeFalsy();
     expect(textOf(forTask)).toMatch(/para api/);
+  });
+
+  it('un proyecto sin resumen ni sesiones que guarda una decisión ya no lee «Sin memoria guardada»', async () => {
+    const memory: ConductorMemoryPort = new ObsidianMemory({ vaultPath: vault });
+    const tools = createConductorTools({ ...fakePorts(), memory }, { defaultProjectId: 'professional', now: () => NOW });
+    await tools.call('escribir_memoria', { nota: { tipo: 'decision', titulo: 'Retener T5 y T11 hasta aprobación explícita', texto: 'Publican en GitHub y LinkedIn.' } });
+    const context = textOf(await tools.call('leer_memoria', {}));
+    expect(context).not.toMatch(/Sin memoria guardada/);
+    expect(context).toContain('Retener T5 y T11 hasta aprobación explícita');
   });
 });

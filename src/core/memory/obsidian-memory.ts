@@ -16,9 +16,10 @@ import { z } from 'zod';
 import type { MemoryStore, SessionSummary, TaskBrief } from '../../shared/index.ts';
 import { idSchema, redactSecrets } from '../../shared/index.ts';
 import { BudgetWriter, measureSavings, rankSessions, truncateText, type SessionCandidate, type TokenSavings } from './context.ts';
-import { parseNote, stringifyNote, updateNote, type Frontmatter, type FrontmatterValue } from './frontmatter.ts';
+import { parseNote, stringifyNote, updateNote, type Frontmatter } from './frontmatter.ts';
 import { appendToSection, demoteHeadings, replaceSection, sectionText, stripComments, withoutHeadingLines, withoutSection } from './markdown.ts';
 import { NoteFolder } from './note-folder.ts';
+import { decisionText, forgivingData, latestDate, linksTo, numberField, slugify, stringField, stringList } from './note-fields.ts';
 import { assertRealInside, createFileExclusive, resolveInside, safeSegments, writeFileAtomic } from './safe-fs.ts';
 import { withVaultLock, type VaultLockOptions } from './vault-lock.ts';
 
@@ -89,6 +90,18 @@ export interface ObsidianMemoryOptions {
   lock?: VaultLockOptions;
 }
 
+/** Decisión leída de `Decisiones/` para el contexto. */
+interface DecisionEntry {
+  notePath: string;
+  date: string;
+  at: string;
+  title: string;
+  /** Cuerpo sin título ni enlaces. */
+  text: string;
+  /** Nota entera (para `fullHistory`). */
+  note: string;
+}
+
 export interface ContextMeasurement {
   context: string;
   savings: TokenSavings;
@@ -98,45 +111,16 @@ const SUMMARY_HEADING = '## Resumen';
 const LOG_HEADING = '## Bitácora';
 const SESSIONS_HEADING = '## Sesiones';
 const PLAN_HEADING = '## Plan';
+/** Decisiones en el contexto y largo de su extracto; de un «Plan: …» basta el título (el texto entero es largo). */
+const MAX_DECISIONS = 8;
+const DECISION_EXCERPT_CHARS = 300;
+const PLAN_TITLE = /^plan\b/i;
 const SUMMARY_PLACEHOLDER = '%% Resumen vivo del proyecto: estado, decisiones y rutas clave. Edítalo en Obsidian o con `writeProjectSummary`. %%';
 
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 /** Texto apto para ir entre comillas invertidas en Markdown. */
 const codeSpan = (text: string) => `\`${oneLine(text).replace(/`/g, "'")}\``;
-
-/**
- * Frontmatter de una nota que vamos a actualizar: nunca lanza. Una nota editada a mano con YAML que no
- * entendemos (claves repetidas, `{…}`, líneas raras o `---` sin cierre) no bloquea la memoria; lo que no
- * se entiende se ignora al leer y `updateNote` lo conserva tal cual al escribir.
- */
-function forgivingData(text: string): Frontmatter {
-  try {
-    return parseNote(text, { lenient: true, skipBadLines: true }).data;
-  } catch {
-    return {};
-  }
-}
-
-function numberField(data: Frontmatter, key: string): number {
-  const value = data[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function stringField(data: Frontmatter, key: string): string {
-  const value = data[key];
-  return typeof value === 'string' ? value : '';
-}
-
-/** `actualizado` no retrocede si llega una sesión con fecha anterior (fechas ISO: se comparan como texto). */
-function latestDate(data: Frontmatter, date: string): string {
-  const prev = stringField(data, 'actualizado');
-  return /^\d{4}-\d{2}-\d{2}$/.test(prev) && prev > date ? prev : date;
-}
-
-function stringList(value: FrontmatterValue | undefined): string[] {
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
-}
 
 /** Campos del plan en el frontmatter de la sesión (fuera del resumen: `buildContext` no crece). */
 function sessionPlanData(plan: SessionPlan | undefined): Frontmatter {
@@ -149,30 +133,6 @@ function sessionPlanData(plan: SessionPlan | undefined): Frontmatter {
   };
 }
 
-/** La sección de la nota ya tiene un enlace `[[nota|…]]` o `[[nota]]` (bitácora o historial de una sesión registrada). */
-function linksTo(text: string, heading: string, note: string): boolean {
-  let body = text;
-  try {
-    body = parseNote(text, { lenient: true, skipBadLines: true }).body;
-  } catch {
-    // `---` sin cierre: se busca en el texto entero.
-  }
-  const section = sectionText(body, heading);
-  return section.includes(`[[${note}|`) || section.includes(`[[${note}]]`);
-}
-
-function slugify(text: string): string {
-  const slug = text
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60)
-    .replace(/-+$/, '');
-  return slug.length >= 2 ? slug : 'decision';
-}
-
 export class ObsidianMemory implements MemoryStore {
   readonly vaultPath: string;
   readonly rootFolder: string;
@@ -181,8 +141,9 @@ export class ObsidianMemory implements MemoryStore {
   private readonly maxSessions: number;
   private readonly lockOptions: VaultLockOptions;
   private structureReady = false;
-  /** Notas de `Sesiones/` ya parseadas (caché por mtime y tamaño): no se reabren en cada encargo. */
+  /** Notas de `Sesiones/` y `Decisiones/` ya parseadas (caché por mtime y tamaño): no se reabren en cada encargo. */
   private readonly sessionFolder: NoteFolder;
+  private readonly decisionFolder: NoteFolder;
   /** Serializa las escrituras de esta instancia; entre procesos las protege el candado de la bóveda. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -195,6 +156,7 @@ export class ObsidianMemory implements MemoryStore {
     this.maxSessions = opts.maxSessions ?? 8;
     this.lockOptions = opts.lock ?? {};
     this.sessionFolder = new NoteFolder(this.vaultPath, this.sessionsDir());
+    this.decisionFolder = new NoteFolder(this.vaultPath, this.decisionsDir());
   }
 
   // ---------- rutas (relativas a la bóveda, con `/`, tal como las enlaza Obsidian) ----------
@@ -213,6 +175,10 @@ export class ObsidianMemory implements MemoryStore {
 
   private sessionsDir(): string {
     return `${this.rootFolder}/Sesiones`;
+  }
+
+  private decisionsDir(): string {
+    return `${this.rootFolder}/Decisiones`;
   }
 
   /** Ruta absoluta de una nota (sin `.md`) con la guardia contra `..` y rutas absolutas. */
@@ -415,7 +381,7 @@ export class ObsidianMemory implements MemoryStore {
     return await this.exclusive(async () => {
       await this.ensureStructure();
       const date = d.at.slice(0, 10);
-      const base = `${this.rootFolder}/Decisiones/${date}-${slugify(d.title)}`;
+      const base = `${this.decisionsDir()}/${date}-${slugify(d.title)}`;
       const title = this.redact(oneLine(d.title));
       const data: Frontmatter = {
         tipo: 'decision',
@@ -527,6 +493,22 @@ export class ObsidianMemory implements MemoryStore {
       }));
   }
 
+  /** Decisiones del proyecto (`Decisiones/`, también los «Plan: …»), la más reciente primero. */
+  private async readDecisions(projectId: string): Promise<DecisionEntry[]> {
+    const id = idSchema.parse(projectId);
+    return (await this.decisionFolder.list())
+      .filter(({ data }) => data.tipo === 'decision' && data.proyecto === id)
+      .map(({ name, data, body, text }) => ({
+        notePath: `${this.decisionsDir()}/${name}`,
+        date: (stringField(data, 'at') || stringField(data, 'fecha')).slice(0, 10),
+        at: stringField(data, 'at'),
+        title: stringField(data, 'titulo') || name.replace(/\.md$/, ''),
+        text: decisionText(body),
+        note: text,
+      }))
+      .sort((a, b) => (b.at > a.at ? 1 : b.at < a.at ? -1 : b.notePath.localeCompare(a.notePath)));
+  }
+
   /** Resumen del proyecto: el cuerpo de `Contexto.md` sin la bitácora ni comentarios. */
   async projectSummary(projectId: string): Promise<string> {
     const text = await this.readNote(this.projectNote(projectId));
@@ -541,9 +523,9 @@ export class ObsidianMemory implements MemoryStore {
   }
 
   /**
-   * Contexto para un encargo: primero el resumen del proyecto y luego las sesiones pertinentes
-   * (misma tarea, archivos dentro de `ownedPaths`, palabras del título; la recencia desempata),
-   * sin pasar de `budgetChars`. Determinista y tachado.
+   * Contexto para un encargo: primero el resumen del proyecto, luego sus decisiones (reglas vigentes, la más reciente
+   * primero; de los planes solo el título) y al final las sesiones pertinentes (misma tarea, archivos dentro de
+   * `ownedPaths`, palabras del título; la recencia desempata), sin pasar de `budgetChars`. Determinista y tachado.
    */
   async buildContext(projectId: string, task: TaskBrief, budgetChars: number): Promise<string> {
     const id = idSchema.parse(projectId);
@@ -556,6 +538,8 @@ export class ObsidianMemory implements MemoryStore {
       const block = `### Resumen del proyecto ${id}\n${summary}`;
       if (!writer.tryAdd(block)) writer.tryAdd(truncateText(block, writer.remaining()));
     }
+
+    this.addDecisions(writer, await this.readDecisions(id));
 
     const ranked = rankSessions(await this.listSessions(id), task).slice(0, this.maxSessions);
     let headerAdded = false;
@@ -579,11 +563,27 @@ export class ObsidianMemory implements MemoryStore {
     return truncateText(this.redact(writer.toString()), budget);
   }
 
-  /** Historial completo del proyecto (lo que habría que mandar sin memoria): Contexto.md + todas sus sesiones, tachado. */
+  /** Bloque «Decisiones del proyecto»: una línea por decisión (fecha, título, extracto y ruta), dentro del presupuesto. */
+  private addDecisions(writer: BudgetWriter, decisions: readonly DecisionEntry[]): void {
+    let headerAdded = false;
+    for (const d of decisions.slice(0, MAX_DECISIONS)) {
+      const head = `- ${d.date} · ${this.redact(oneLine(d.title))}`;
+      const ref = ` (${d.notePath})`;
+      const excerpt = PLAN_TITLE.test(d.title) ? '' : truncateText(this.redact(oneLine(d.text)), DECISION_EXCERPT_CHARS);
+      const candidates = excerpt ? [`${head}. ${excerpt}${ref}`, `${head}${ref}`] : [`${head}${ref}`];
+      for (const item of candidates) {
+        const block = headerAdded ? item : `### Decisiones del proyecto\n${item}`;
+        if (writer.tryAdd(block)) { headerAdded = true; break; }
+      }
+    }
+  }
+
+  /** Historial completo del proyecto (lo que habría que mandar sin memoria): Contexto.md + decisiones + sesiones, tachado. */
   async fullHistory(projectId: string): Promise<string> {
     const parts: string[] = [];
     const context = await this.readNote(this.projectNote(projectId));
     if (context !== null) parts.push(context);
+    for (const { note } of await this.readDecisions(projectId)) parts.push(note);
     for (const { text } of await this.readSessions(projectId)) parts.push(text);
     // Tachado también aquí: las notas pueden tener claves pegadas a mano en Obsidian.
     return this.redact(parts.join('\n'));

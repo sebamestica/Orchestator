@@ -354,7 +354,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
     ),
     define(
       'leer_memoria',
-      `Extracto de la memoria de este proyecto (resumen vivo y sesiones pertinentes), con un tope fijo de ${budget} caracteres. ` +
+      `Extracto de la memoria de este proyecto (resumen vivo, decisiones guardadas con escribir_memoria, de los planes solo el título, y sesiones pertinentes), con un tope fijo de ${budget} caracteres. ` +
         'Úsala antes de planificar para no repetir contexto. Lee siempre la del proyecto de esta sesión: la de otro proyecto, solo si el usuario la pidió explícitamente.',
       {
         proyecto: idSchema
