@@ -12,6 +12,7 @@
  * esfuerzo cambia en vivo con `setEffort` (`Query.applyFlagSettings`), sin recrear el proceso.
  */
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, EffortLevel, McpServerConfig, Options, SDKMessage, SDKUserMessage, SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
@@ -248,7 +249,7 @@ export class ConductorSession {
   readonly mode: MindMode | undefined;
   /** `allowedTools` del SDK (propias, lectura, subagentes, plugins y, en bypass y chat, edición y shell). */
   readonly allowedTools: readonly string[];
-  /** Raíces de lectura al crear la sesión (`additionalDirectories`). */
+  /** Raíces de lectura al crear la sesión (las carpetas van a `additionalDirectories`; un archivo, solo a la guardia). */
   readonly readRoots: readonly string[];
   readonly tools: ConductorTools;
   /** Avisos de configuración (p. ej. URL de la API sin cifrar). */
@@ -319,6 +320,8 @@ export class ConductorSession {
     const readRoots = (): string[] => [...extra(), ...more()];
     const extraRoots = extra();
     this.readRoots = [...new Set(readRoots())];
+    // Un archivo puede ser raíz de la guardia (una subida antigua), pero `additionalDirectories` solo admite carpetas.
+    const directories = this.readRoots.filter((r) => !isFile(r));
     const fleetTools = new Set(FLEET_TOOL_NAMES.map(mcpToolName));
     const actTools = new Set<string>(BYPASS_TOOLS);
     const pluginLive = opts.pluginLive;
@@ -391,7 +394,7 @@ export class ConductorSession {
       settingSources: [...(opts.settingSources ?? [])],
       forwardSubagentText: true,
       includePartialMessages: opts.includePartialMessages ?? false,
-      ...(this.readRoots.length ? { additionalDirectories: [...this.readRoots] } : {}),
+      ...(directories.length ? { additionalDirectories: directories } : {}),
       ...(o.maxBudgetUsd !== undefined ? { maxBudgetUsd: o.maxBudgetUsd } : {}),
       ...(o.maxTurns !== undefined ? { maxTurns: o.maxTurns } : {}),
       ...(opts.resume ? { resume: opts.resume } : {}),
@@ -525,6 +528,14 @@ export class ConductorSession {
 export function sdkSessionIdOf(message: SDKMessage): string | undefined {
   const id = (message as { session_id?: unknown }).session_id;
   return typeof id === 'string' && id.length > 0 && id.length <= 200 ? id : undefined;
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /** Una función se lee en cada llamada; una lista fija se copia al crear la sesión. */

@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AttachmentStore, isTextual, normalizeMime, sanitizeFileName, sniffImage } from '../../../src/core/chat/index.ts';
 import { SqliteStore } from '../../../src/core/store/index.ts';
@@ -52,10 +52,10 @@ describe('tipo de adjunto', () => {
 });
 
 describe('AttachmentStore: subida', () => {
-  it('guarda <dir>/<id>-<nombre saneado> con su tipo y tamaño', async () => {
+  it('guarda <dir>/<id>/<nombre saneado> (una carpeta por subida) con su tipo y tamaño', async () => {
     const a = await attachments.upload({ name: 'captura de pantalla.png', mime: 'image/png', bytes: PNG });
     expect(a).toMatchObject({ name: 'captura de pantalla.png', mime: 'image/png', size: PNG.byteLength, kind: 'image', source: 'upload', createdAt: '2026-11-04T12:00:00.000Z' });
-    expect(a.path).toBe(join(dir, 'attachments', `${a.id}-captura de pantalla.png`));
+    expect(a.path).toBe(join(dir, 'attachments', a.id, 'captura de pantalla.png'));
     expect(new Uint8Array(await readFile(a.path))).toEqual(PNG);
     expect(attachments.get(a.id)).toEqual(a);
     expect((await attachments.read(a.id)).bytes).toEqual(PNG);
@@ -77,11 +77,22 @@ describe('AttachmentStore: subida', () => {
     expect(await attachments.upload({ name: 'justo.bin', bytes: new Uint8Array(1024) })).toMatchObject({ size: 1024 });
   });
 
-  it('remove borra el registro y la copia', async () => {
+  it('remove borra el registro, la copia y su carpeta; una subida antigua de la carpeta común, solo su archivo', async () => {
     const a = await attachments.upload({ name: 'a.txt', mime: 'text/plain', bytes: enc('a') });
     await attachments.remove(a.id);
     expect(attachments.get(a.id)).toBeUndefined();
     await expect(readFile(a.path)).rejects.toThrow();
+    await expect(stat(dirname(a.path))).rejects.toThrow();
+    const old = join(dir, 'attachments', 'viejo1-b.txt');
+    const other = join(dir, 'attachments', 'viejo2-c.txt');
+    await writeFile(old, 'b');
+    await writeFile(other, 'c');
+    store.database
+      .prepare('INSERT INTO chat_attachments (id, name, mime, size, path, kind, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('viejo1', 'b.txt', 'text/plain', 1, old, 'text', 'upload', '2026-11-04T12:00:00.000Z');
+    await attachments.remove('viejo1');
+    await expect(readFile(old)).rejects.toThrow();
+    expect(await readFile(other, 'utf8')).toBe('c');
   });
 });
 

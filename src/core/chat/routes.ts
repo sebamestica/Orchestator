@@ -269,7 +269,7 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       tag: 'Adjuntos',
       summary: 'Sube un adjunto (cuerpo crudo con su Content-Type, hasta 20 MB)',
       description:
-        'Imagen pegada o archivo soltado en la web: `POST /attachments?name=<archivo>` con los bytes como cuerpo. Se guarda en `<dataDir>/attachments/<id>-<nombre saneado>`. `kind`: `image` (png, jpeg, gif o webp según sus bytes), `text` (tipos de texto y código) o `file`.',
+        'Imagen pegada o archivo soltado en la web: `POST /attachments?name=<archivo>` con los bytes como cuerpo. Se guarda en `<dataDir>/attachments/<id>/<nombre saneado>` (una carpeta por subida). `kind`: `image` (png, jpeg, gif o webp según sus bytes), `text` (tipos de texto y código) o `file`.',
       query: uploadQuery,
       response: attachmentResponse,
       status: 201,

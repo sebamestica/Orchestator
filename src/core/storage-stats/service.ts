@@ -12,7 +12,7 @@
  * Lo reciente (menos de `graceMs`, 1 h) y sin usar no se vacía: puede ser un adjunto en el compositor o la carpeta de
  * un chat que se está creando. Todo borrado pasa por `safetyProblem`.
  */
-import { stat } from 'node:fs/promises';
+import { rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
@@ -273,6 +273,9 @@ export class StorageService {
           continue;
         }
         await this.#remove(out, file.path, this.attachmentsDir, rules, file.name, 'files');
+        // La carpeta de una subida a medias queda vacía: rmdir solo borra carpetas vacías.
+        const folder = path.dirname(file.path);
+        if (folder !== this.attachmentsDir) await rmdir(folder).catch(() => undefined);
       }
       return out.value;
     });
@@ -428,14 +431,24 @@ export class StorageService {
       .map((r) => attachmentRowSchema.parse(r))
       .map((r) => ({ id: r.id, kind: r.kind, source: r.source, path: r.path, createdAt: r.created_at }));
     const files = new Map<string, DirEntryInfo>();
-    for (const e of await listDir(this.attachmentsDir)) if (e.stats.isFile()) files.set(pathKey(e.path), e);
+    for (const e of await this.#attachmentFiles()) files.set(pathKey(e.path), e);
     return { rows, files, use: this.#sdb.attachmentUse() };
   }
 
   async #attachmentBytes(): Promise<number> {
     let n = 0;
-    for (const e of await listDir(this.attachmentsDir)) if (e.stats.isFile()) n += e.stats.size;
+    for (const e of await this.#attachmentFiles()) n += e.stats.size;
     return n;
+  }
+
+  /** Archivos de adjuntos: los de cada carpeta de subida (`<id>/`) y los antiguos, sueltos en la carpeta común. */
+  async #attachmentFiles(): Promise<DirEntryInfo[]> {
+    const out: DirEntryInfo[] = [];
+    for (const e of await listDir(this.attachmentsDir)) {
+      if (e.stats.isFile()) out.push(e);
+      else if (e.stats.isDirectory()) out.push(...(await listDir(e.path)).filter((f) => f.stats.isFile()));
+    }
+    return out;
   }
 
   /** Hijas directas de la raíz de conversaciones (carpetas reales con nombre de id; nunca enlaces). */

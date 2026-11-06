@@ -1,6 +1,8 @@
 /**
  * Adjuntos del chat: imágenes pegadas y archivos soltados.
- * - Subida (`POST /attachments?name=`): bytes crudos ≤ `MAX_ATTACHMENT_BYTES`, copia en `<dataDir>/attachments/<id>-<nombre saneado>`.
+ * - Subida (`POST /attachments?name=`): bytes crudos ≤ `MAX_ATTACHMENT_BYTES`, copia en `<dataDir>/attachments/<id>/<nombre saneado>`.
+ *   Cada subida tiene su carpeta: abrirla a la mente no abre las de otros chats (`uploadRoot`). Las subidas antiguas
+ *   quedaron en la carpeta común como `<id>-<nombre>`.
  * - Por ruta (`POST /attachments/by-path`): un archivo local que existe (Electron conoce la ruta real), sin copiarlo.
  * `kind`: `image` solo si los bytes son de verdad png, jpeg, gif o webp (firma); `text` para tipos de texto y
  * extensiones de código; `file` para el resto.
@@ -9,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { MAX_ATTACHMENT_BYTES, attachmentSchema, redactSecrets } from '../../shared/index.ts';
+import { MAX_ATTACHMENT_BYTES, attachmentSchema, opaqueIdSchema, redactSecrets } from '../../shared/index.ts';
 import type { Attachment } from '../../shared/index.ts';
 import type { ImageMediaType } from '../conductor/index.ts';
 import { ChatDb, toAttachment } from './db.ts';
@@ -152,9 +154,11 @@ export class AttachmentStore {
     const declared = normalizeMime(input.mime);
     // Un tipo de imagen que no coincide con los bytes no se sirve como imagen.
     const mime = sniffed ?? (declared.startsWith('image/') ? 'application/octet-stream' : declared);
-    const id = this.#newId();
-    await mkdir(this.dir, { recursive: true });
-    const file = path.join(this.dir, `${id}-${name}`);
+    // El id es el nombre de la carpeta: se valida antes de tocar el disco.
+    const id = opaqueIdSchema.parse(this.#newId());
+    const folder = path.join(this.dir, id);
+    await mkdir(folder, { recursive: true });
+    const file = path.join(folder, name);
     await writeFile(file, input.bytes, { flag: 'wx' });
     return this.#insert({ id, name, mime, size: input.bytes.byteLength, path: file, kind: kindOf(sniffed, mime, name), source: 'upload' });
   }
@@ -205,12 +209,23 @@ export class AttachmentStore {
     return { attachment, bytes: new Uint8Array(await readFile(attachment.path)) };
   }
 
-  /** Borra el registro y, si es una copia subida, su archivo. */
+  /**
+   * Raíz de lectura de un adjunto subido: su carpeta propia, o el archivo mismo si es una subida antigua de la carpeta
+   * común (o de fuera de `dir`). Nunca la carpeta común: daría acceso a las subidas de todos los chats.
+   */
+  uploadRoot(a: Pick<Attachment, 'path'>): string {
+    const folder = path.dirname(path.resolve(a.path));
+    return path.dirname(folder) === this.dir ? folder : path.resolve(a.path);
+  }
+
+  /** Borra el registro y, si es una copia subida, su archivo (y su carpeta propia). */
   async remove(id: string): Promise<void> {
     const a = this.get(id);
     if (!a) return;
     this.#db.stmt('DELETE FROM chat_attachments WHERE id = ?').run(id);
-    if (a.source === 'upload' && isInside(this.dir, a.path)) await rm(a.path, { force: true });
+    if (a.source !== 'upload' || !isInside(this.dir, a.path)) return;
+    const root = this.uploadRoot(a);
+    await rm(root, { recursive: root !== path.resolve(a.path), force: true });
   }
 
   #insert(fields: Omit<Attachment, 'createdAt'>): Attachment {

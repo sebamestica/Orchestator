@@ -457,6 +457,43 @@ describe('ChatService: adjuntos', () => {
     }
   });
 
+  it('una subida abre solo su propio archivo, no los de otros chats ni la carpeta común', async () => {
+    const b = await bench();
+    const otherRepo = join(b.dir, 'otro');
+    await mkdir(otherRepo, { recursive: true });
+    b.store.putProject({ id: 'otro', name: 'Otro', repoPath: otherRepo });
+    const chatA = b.service.create({ projectId: 'demo' });
+    const chatB = b.service.create({ projectId: 'otro' });
+    const a = await b.attachments.upload({ name: 'a.pdf', mime: 'application/pdf', bytes: new TextEncoder().encode('%PDF-1.7 contrato') });
+    await b.service.send(chatA.id, { text: 'lee', attachmentIds: [a.id] });
+    await b.settle(chatA.id);
+    // Subida antigua, en la carpeta común (antes de una carpeta por subida).
+    const legacy = join(b.attachments.dir, 'viejo1-notas.txt');
+    await mkdir(b.attachments.dir, { recursive: true });
+    await writeFile(legacy, 'viejo');
+    b.store.database
+      .prepare('INSERT INTO chat_attachments (id, name, mime, size, path, kind, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run('viejo1', 'notas.txt', 'text/plain', 5, legacy, 'text', 'upload', '2026-11-04T12:00:00.000Z');
+    const own = await b.attachments.upload({ name: 'b.txt', mime: 'text/plain', bytes: new TextEncoder().encode('propio') });
+    await b.service.send(chatB.id, { text: 'lee', attachmentIds: [own.id, 'viejo1'] });
+    await b.settle(chatB.id);
+
+    const o = b.q.calls.at(-1)?.options;
+    if (!o) throw new Error('falta la sesión de B');
+    const allow = guardOf(o);
+    expect(await allow('Read', { file_path: own.path })).toBe(true);
+    expect(await allow('Read', { file_path: legacy })).toBe(true);
+    expect(await allow('Read', { file_path: a.path })).toBe(false);
+    expect(await allow('Glob', { path: b.attachments.dir, pattern: '*' })).toBe(false);
+    expect(await allow('Grep', { path: b.attachments.dir, pattern: 'x' })).toBe(false);
+    expect(await allow('Glob', { pattern: `${b.attachments.dir.replace(/\\/g, '/')}/**/*` })).toBe(false);
+    // additionalDirectories: solo carpetas, sin la carpeta común.
+    const dirs = o.additionalDirectories ?? [];
+    expect(dirs).not.toContain(b.attachments.dir);
+    expect(dirs).toContain(dirname(own.path));
+    expect(dirs).not.toContain(legacy);
+  });
+
   it('un envío fallido no deja legible la carpeta de su adjunto', async () => {
     let left = 0;
     const b = await bench({ budgetLeftUsd: () => left });

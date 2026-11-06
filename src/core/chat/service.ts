@@ -502,7 +502,7 @@ export class ChatService {
         images.push({ mediaType, data, name: a.name });
       }
       for (const f of files) {
-        const root = path.dirname(f.path);
+        const root = this.#rootOf(f);
         if (!live.roots.has(root)) addedRoots.push(root);
         live.roots.add(root);
       }
@@ -674,6 +674,11 @@ export class ChatService {
     }
   }
 
+  /** Lo que un adjunto abre a la mente: la carpeta de un archivo por ruta; de una subida, solo lo suyo (no la carpeta común). */
+  #rootOf(a: Attachment): string {
+    return a.source === 'upload' ? this.#deps.attachments.uploadRoot(a) : path.dirname(a.path);
+  }
+
   #liveOf(chatId: string): Live {
     let live = this.#live.get(chatId);
     if (!live) {
@@ -681,7 +686,7 @@ export class ChatService {
         this.#repo
           .attachmentsOf(chatId)
           .filter((a) => a.kind !== 'image')
-          .map((a) => path.dirname(a.path)),
+          .map((a) => this.#rootOf(a)),
       );
       const proposals = new ChatProposals(this.#db, chatId, {
         now: this.#now,
