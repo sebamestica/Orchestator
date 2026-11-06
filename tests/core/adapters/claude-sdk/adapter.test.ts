@@ -177,6 +177,13 @@ describe('ClaudeSdkAdapter.run: errores', () => {
     expect(events.at(-1)?.payload).toEqual({ ok: false });
   });
 
+  it('crash: un 429 que se resolvió al reintentar no convierte la caída posterior en cupo agotado', async () => {
+    const retry429 = { type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: 'rate_limit' };
+    const goodReply = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'sigo' }] } };
+    const events = await collect(new ClaudeSdkAdapter({ config, query: fakeQuery([retry429, goodReply], { throwAtEnd: new Error('boom') }).query }).run(task, ctx()));
+    expect(payload(events, 'error')).toEqual([{ code: 'crash', message: 'boom' }]);
+  });
+
   it('crash: el SDK termina sin mensaje de resultado', async () => {
     const events = await collect(new ClaudeSdkAdapter({ config, query: fakeQuery(subagentRun.slice(0, 1)).query }).run(task, ctx()));
     expect(payload(events, 'error')).toEqual([{ code: 'crash', message: 'El SDK terminó sin mensaje de resultado.' }]);

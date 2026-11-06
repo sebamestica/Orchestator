@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/claude-sdk/translate.ts:521`, `src/core/adapters/claude-sdk/translate.ts:526`, `src/core/adapters/claude-sdk/translate.ts:383`, `src/core/adapters/claude-sdk/translate.ts:384`, `src/core/adapters/claude-sdk/translate.ts:411`, `src/core/adapters/claude-sdk/translate.ts:582`, `src/core/adapters/claude-sdk/translate.ts:583`, `src/core/adapters/claude-sdk/adapter.ts:448`, `src/core/adapters/claude-sdk/adapter.ts:449`, `src/core/adapters/claude-sdk/errors.ts:7`, `src/core/adapters/claude-sdk/errors.ts:29`, `src/core/adapters/claude-sdk/errors.ts:31`, `src/core/orchestrator/supervisor.ts:537`, `src/core/orchestrator/supervisor.ts:567`, `src/core/orchestrator/supervisor.ts:240`, `src/core/orchestrator/supervisor.ts:418`, `src/core/orchestrator/router.ts:198`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

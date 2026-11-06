@@ -196,6 +196,28 @@ describe('clasificación de errores del resultado', () => {
     expect(tr.hint?.code).toBe('quota_exhausted');
     expect(tr.fatal).toBeUndefined();
   });
+
+  const retry429 = { type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: 'rate_limit' };
+  const rejected = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected' } };
+  const goodReply = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'sigo' }] } };
+  for (const [name, limit] of [['api_retry 429', retry429], ['rate_limit_event rejected', rejected]] as const) {
+    it(`${name} resuelto: un fallo posterior de otra causa no sale como cupo agotado`, () => {
+      const tr = translator();
+      tr.translate(limit);
+      tr.translate(goodReply);
+      const events = tr.translate(result({ subtype: 'error_during_execution', errors: ['Prompt is too long'] }));
+      const [error] = payload(events, 'error');
+      expect(error?.code).toBe('unknown');
+      expect(error?.message).toMatch(/^Prompt is too long/);
+    });
+
+    it(`${name} sin respuesta buena después: el fallo sigue siendo cupo agotado`, () => {
+      const tr = translator();
+      tr.translate(limit);
+      const events = tr.translate(result({ subtype: 'error_during_execution', errors: [] }));
+      expect(payload(events, 'error')[0]?.code).toBe('quota_exhausted');
+    });
+  }
 });
 
 describe('otros mensajes', () => {

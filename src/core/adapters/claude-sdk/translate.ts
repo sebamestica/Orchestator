@@ -427,6 +427,8 @@ export class ClaudeSdkTranslator {
     if (msg.error) {
       const code = classifyClaudeError({ httpStatus: msg.api_error_status, assistantError: msg.error }, 'unknown');
       if (code !== 'unknown') this.hint = { code, message: `El SDK informó ${msg.error}${msg.api_error_status ? ` (HTTP ${msg.api_error_status})` : ''}.` };
+    } else if (!msg.is_api_error_message) {
+      this.#clearPassingLimit();
     }
     // El texto de un error de la API llega como mensaje sintético; se informa como `error` al final.
     if (msg.is_api_error_message) return out;
@@ -561,6 +563,14 @@ export class ClaudeSdkTranslator {
     }
   }
 
+  /**
+   * La API volvió a responder bien: un 429 o un `rejected` anterior ya pasó y no explica un fallo posterior.
+   * La pista `auth` o la de saldo (`fatal`) se quedan: esas no se arreglan reintentando.
+   */
+  #clearPassingLimit(): void {
+    if (this.hint?.code === 'quota_exhausted' && this.hint !== this.fatal) this.hint = undefined;
+  }
+
   #result(message: unknown): AgentEvent[] {
     const parsed = resultMessageSchema.safeParse(message);
     if (!parsed.success) return [this.#raw('claude-sdk:result', message)];
@@ -594,12 +604,13 @@ export class ClaudeSdkTranslator {
       out.push(this.done(true, r.result));
       return out;
     }
-    const texts = [...(r.errors ?? []), r.result ?? '', this.hint?.message ?? ''].filter(Boolean);
+    // La pista solo decide el código si el resultado no lo dice; su texto no compite con el error real.
+    const texts = [...(r.errors ?? []), r.result ?? ''].filter(Boolean);
     const code = classifyClaudeError({ subtype: r.subtype, httpStatus: r.api_error_status, texts }, this.hint?.code ?? 'unknown');
     const reason =
       r.subtype === 'error_max_budget_usd'
         ? `Se alcanzó el tope de presupuesto del encargo (${r.total_cost_usd.toFixed(4)} USD gastados).`
-        : texts[0] ?? `El SDK terminó con ${r.subtype}.`;
+        : texts[0] ?? this.hint?.message ?? `El SDK terminó con ${r.subtype}.`;
     const status = r.api_error_status ? ` (HTTP ${r.api_error_status})` : '';
     out.push(this.error(code, `${reason}${status}`));
     out.push(this.done(false, r.result ?? reason));

@@ -481,8 +481,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
       yield tr.error('cancelled', 'Tarea cancelada.');
     } else {
       const message = thrown instanceof Error ? thrown.message : thrown === undefined ? 'El SDK terminó sin mensaje de resultado.' : String(thrown);
-      const texts = [message, ...stderr, tr.hint?.message ?? ''];
-      const code = classifyClaudeError({ texts }, tr.hint?.code ?? 'crash');
+      // La pista solo sirve de código por defecto: su texto no debe ganarle al error real.
+      const code = classifyClaudeError({ texts: [message, ...stderr] }, tr.hint?.code ?? 'crash');
       const tail = stderr.length ? ` | stderr: ${stderr.slice(-5).join(' / ')}` : '';
       yield tr.error(code, `${message}${tail}`);
     }
