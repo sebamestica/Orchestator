@@ -148,18 +148,28 @@ const time = (iso: string) => {
 export interface Turns {
   /** Eventos de cada mensaje de la mente guardado: los que llegaron entre el mensaje anterior y él. */
   byMessage: Map<string, AgentEvent[]>;
+  /**
+   * Turnos que terminaron sin respuesta guardada (fallaron, se cortaron o se detuvieron antes de escribir), por
+   * el id del mensaje tras el que van: sus eventos quedaron antes del siguiente mensaje del usuario.
+   */
+  orphans: Map<string, AgentEvent[]>;
   /** Eventos posteriores al último mensaje: la respuesta en curso. */
   pending: AgentEvent[];
 }
 
+const STEP_EVENTS: ReadonlySet<AgentEvent['type']> = new Set(['tool_call', 'tool_result', 'file_change', 'error']);
+
 /**
  * Parte la historia de la sesión por turnos. Cada mensaje de la mente se queda con los eventos con
  * `ts` en (mensaje anterior, mensaje]; lo que llegó después del último mensaje es el borrador en vivo.
- * Así, al llegar el `chat_message` final, el borrador se vacía solo.
+ * Así, al llegar el `chat_message` final, el borrador se vacía solo. Si lo que precede a un mensaje del
+ * usuario trae pasos, es un turno sin respuesta y se ancla al mensaje anterior (los eventos sueltos, como
+ * un `usage` tardío, se descartan).
  */
 export function splitTurns(events: readonly AgentEvent[], messages: readonly ChatMessage[]): Turns {
   const byMessage = new Map<string, AgentEvent[]>();
-  if (messages.length === 0) return { byMessage, pending: [...events] };
+  const orphans = new Map<string, AgentEvent[]>();
+  if (messages.length === 0) return { byMessage, orphans, pending: [...events] };
   const bounds = messages.map((m) => time(m.at));
   let i = 0;
   let mi = 0;
@@ -173,10 +183,12 @@ export function splitTurns(events: readonly AgentEvent[], messages: readonly Cha
       if (e) chunk.push(e);
       i++;
     }
+    const prev = messages[mi - 1];
     if (m && m.role === 'assistant' && chunk.length) byMessage.set(m.id, chunk);
+    else if (prev && chunk.some((e) => STEP_EVENTS.has(e.type))) orphans.set(prev.id, chunk);
     mi++;
   }
-  return { byMessage, pending: list.slice(i) };
+  return { byMessage, orphans, pending: list.slice(i) };
 }
 
 /**

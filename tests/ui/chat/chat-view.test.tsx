@@ -178,6 +178,38 @@ describe('respuesta en vivo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Detener' }));
     await waitFor(() => expect(posts(calls)).toContain('/chats/chat_abc123/interrupt'));
   });
+
+  it('un turno que terminó sin respuesta conserva su error y sus pasos bajo el mensaje del usuario', async () => {
+    const live = resetFakeLive();
+    const chat = makeChat({ state: 'idle' });
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', text: 'Primer intento', at: at(10) }),
+      makeMessage({ id: 'u2', role: 'user', text: 'Segundo intento', at: at(50) }),
+      makeMessage({ id: 'a2', role: 'assistant', text: 'Ahora sí', at: at(80) }),
+    ];
+    fakeCore({ chats: [chat], messages: { [chat.id]: messages } });
+    render(<ChatView projectId="demo" chatId="chat_abc123" />);
+    await screen.findByText('Ahora sí');
+    act(() =>
+      live.emit({
+        type: 'replay',
+        sessionId: 'sess_chat_1',
+        events: [ev.call(0, 12, 'c1', 'Read', 'a.ts'), ev.error(1, 15, 'Se agotó el cupo'), ev.text(2, 60, 'Ahora sí')],
+        lastSeq: 2,
+        hasMore: false,
+      }),
+    );
+    const orphan = await screen.findByTestId('orphan-turn');
+    expect(within(orphan).getByText('Este turno terminó sin respuesta')).toBeTruthy();
+    expect(within(orphan).getByText('Se agotó el cupo')).toBeTruthy();
+    expect(within(orphan).getByRole('button', { name: /1 paso/ })).toBeTruthy();
+    // Va entre los dos mensajes del usuario y no se anuncia como alerta: es historial.
+    const first = screen.getByText('Primer intento');
+    const second = screen.getByText('Segundo intento');
+    expect(first.compareDocumentPosition(orphan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(orphan.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });
 
 describe('modo de la mente', () => {

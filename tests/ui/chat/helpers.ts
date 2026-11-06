@@ -83,6 +83,7 @@ export const ev = {
     payload: { inputTokens, outputTokens, model, ...(costUsd !== undefined ? { costUsd } : {}) },
   }),
   done: (seq: number, sec: number): AgentEvent => ({ ...base(seq, sec), type: 'done', payload: { ok: true } }),
+  error: (seq: number, sec: number, message: string): AgentEvent => ({ ...base(seq, sec), type: 'error', payload: { code: 'unknown', message } }),
 };
 
 export interface Call {

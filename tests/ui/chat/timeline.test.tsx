@@ -78,6 +78,24 @@ describe('splitTurns', () => {
     expect(turns.pending.map((e) => e.seq)).toEqual([3]);
   });
 
+  it('no ancla como turno sin respuesta los eventos sueltos sin pasos (el usage tras la respuesta)', () => {
+    const events = [ev.call(0, 2, 'c1', 'Read', 'a.ts'), ev.text(1, 5, 'respuesta'), ev.usage(2, 15, 1, 1), ev.text(3, 21, 'en curso')];
+    expect(splitTurns(events, messages).orphans.size).toBe(0);
+  });
+
+  it('guarda bajo el mensaje del usuario los pasos y el error de un turno que terminó sin respuesta', () => {
+    const list = [
+      makeMessage({ id: 'u1', role: 'user', text: 'hola', at: at(10) }),
+      makeMessage({ id: 'u2', role: 'user', text: 'otra vez', at: at(50) }),
+      makeMessage({ id: 'a2', role: 'assistant', text: 'listo', at: at(80) }),
+    ];
+    const events = [ev.call(0, 12, 'c1', 'Read', 'a.ts'), ev.error(1, 15, 'Se agotó el cupo'), ev.text(2, 60, 'listo')];
+    const turns = splitTurns(events, list);
+    expect(turns.orphans.get('u1')?.map((e) => e.seq)).toEqual([0, 1]);
+    expect(turns.byMessage.get('a2')?.map((e) => e.seq)).toEqual([2]);
+    expect(turns.pending).toEqual([]);
+  });
+
   it('sin mensajes, todo es borrador', () => {
     const events = [ev.text(0, 1, 'x')];
     expect(splitTurns(events, []).pending).toEqual(events);

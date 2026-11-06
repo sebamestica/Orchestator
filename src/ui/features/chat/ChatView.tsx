@@ -297,6 +297,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
       <MessageList
         messages={messages}
         eventsByMessage={turns.byMessage}
+        orphans={turns.orphans}
         after={(id) => {
           const list = anchors.get(id);
           return list ? proposalsCard(list) : null;

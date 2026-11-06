@@ -85,8 +85,11 @@ function Detail({ label, text }: { label: string; text: string }) {
   );
 }
 
-/** Un paso de trabajo de la mente (herramienta, archivo, error o pensamiento). */
-export function ItemRow({ item, running }: { item: StepItem; running: boolean }) {
+/**
+ * Un paso de trabajo de la mente (herramienta, archivo, error o pensamiento). `announce: false` (historial)
+ * pinta el error sin `role="alert"`, para que un lector de pantalla no repita errores viejos en cada carga.
+ */
+export function ItemRow({ item, running, announce = true }: { item: StepItem; running: boolean; announce?: boolean }) {
   switch (item.kind) {
     case 'tool': {
       const status =
@@ -113,7 +116,7 @@ export function ItemRow({ item, running }: { item: StepItem; running: boolean })
       return <StepRow icon={FILE_ICON[item.change]} title={FILE_VERB[item.change]} summary={item.path} />;
     case 'error':
       return (
-        <li className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-[0.8125rem] text-danger" role="alert">
+        <li className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-[0.8125rem] text-danger" role={announce ? 'alert' : undefined}>
           <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span className="selectable min-w-0 break-words">{item.message}</span>
         </li>
@@ -206,7 +209,7 @@ export function ActivitySummary({ items }: { items: readonly StepItem[] }) {
       {open ? (
         <ul id={id} className="flex flex-col">
           {items.map((item) => (
-            <ItemRow key={item.key} item={item} running={false} />
+            <ItemRow key={item.key} item={item} running={false} announce={false} />
           ))}
         </ul>
       ) : null}

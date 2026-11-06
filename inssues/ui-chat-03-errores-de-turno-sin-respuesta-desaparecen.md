@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** media
 - **Archivos:** `src/ui/features/chat/timeline.ts:160`, `src/ui/features/chat/timeline.ts:176`, `src/ui/features/chat/components/MessageList.tsx:73`, `src/ui/features/chat/ChatView.tsx:105`, `src/ui/features/chat/ChatView.tsx:110`, `src/core/chat/service.ts:847`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
