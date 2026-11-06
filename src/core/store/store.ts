@@ -516,14 +516,17 @@ export class SqliteStore implements EventSink {
    * Cierra como `cancelled` las sesiones que quedaron abiertas (`starting`, `running` o `waiting`), p. ej. al
    * arrancar el núcleo tras un cierre: sus procesos ya no existen. `exceptAgents`: agentes cuyas sesiones raíz se
    * retoman (la mente reutiliza la sesión de cada chat); sus sesiones hijas (subagentes) no se retoman nunca y se
-   * cancelan igual. No toca `updated_at`: sigue siendo la hora del último evento.
+   * cancelan igual. `parentSessionId`: solo las hijas de esa sesión (los subagentes de un chat). No toca
+   * `updated_at`: sigue siendo la hora del último evento.
    */
-  cancelOpenSessions(opts: { exceptAgents?: readonly string[] } = {}): number {
+  cancelOpenSessions(opts: { exceptAgents?: readonly string[]; parentSessionId?: string } = {}): number {
     const except = [...new Set(opts.exceptAgents ?? [])];
     const notIn = except.length ? ` AND (agent_id NOT IN (${except.map(() => '?').join(', ')}) OR parent_session_id IS NOT NULL)` : '';
+    const parent = opts.parentSessionId === undefined ? [] : [opts.parentSessionId];
+    const ofParent = parent.length ? ' AND parent_session_id = ?' : '';
     const res = this.stmt(
-      `UPDATE sessions SET state = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE state IN ('starting', 'running', 'waiting')${notIn}`,
-    ).run(this.iso(), ...except);
+      `UPDATE sessions SET state = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE state IN ('starting', 'running', 'waiting')${ofParent}${notIn}`,
+    ).run(this.iso(), ...parent, ...except);
     return Number(res.changes);
   }
 

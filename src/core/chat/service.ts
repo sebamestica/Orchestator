@@ -83,7 +83,7 @@ export class ChatError extends Error {
 }
 
 /** Lo que el chat necesita del almacén del núcleo. */
-export type ChatStorePort = Pick<SqliteStore, 'getProject' | 'getTask' | 'putTask' | 'setTaskState' | 'getSession' | 'listTasks'>;
+export type ChatStorePort = Pick<SqliteStore, 'getProject' | 'getTask' | 'putTask' | 'setTaskState' | 'getSession' | 'listTasks' | 'cancelOpenSessions'>;
 /** Lo que el chat necesita del hub (`/ws`). */
 export type ChatHub = Pick<EventHub, 'append' | 'publish' | 'publishTask'>;
 
@@ -245,6 +245,20 @@ function titleFrom(text: string, attachments: readonly Attachment[]): string {
   return flat.length <= TITLE_MAX ? flat : `${flat.slice(0, TITLE_MAX - 1)}…`;
 }
 
+const CLOCK = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+/** Aviso del turno que cortó un reinicio del núcleo: la hora del último evento y los subagentes perdidos. */
+function cutTurnNotice(lastEventAt: string | undefined, lostSubagents: number): string {
+  const when = lastEventAt ? ` (último evento a las ${CLOCK.format(new Date(lastEventAt))})` : '';
+  const lost =
+    lostSubagents === 0
+      ? ''
+      : lostSubagents === 1
+        ? ' 1 subagente en segundo plano se perdió al reiniciar.'
+        : ` ${lostSubagents} subagentes en segundo plano se perdieron al reiniciar.`;
+  return `La respuesta se cortó porque el núcleo se cerró${when}. Vuelve a enviar tu mensaje.${lost}`;
+}
+
 function oneLine(err: unknown): string {
   return redactSecrets(err instanceof Error ? err.message : String(err)).replace(/\s+/g, ' ').slice(0, 500);
 }
@@ -298,12 +312,27 @@ export class ChatService {
   }
 
   /**
-   * Arranque del núcleo: los chats que quedaron `running` no tienen turno vivo y vuelven a `idle`. No va en el
-   * constructor: lo llama el servidor cuando ya escucha (`onStarted`), para que un segundo núcleo sin puerto no los toque.
+   * Arranque del núcleo: los chats que quedaron `running` no tienen turno vivo. Vuelven a `idle` con un aviso en el
+   * hilo, y sus subagentes en segundo plano (sin proceso) se cierran. No va en el constructor: lo llama el servidor
+   * cuando ya escucha (`onStarted`), para que un segundo núcleo sin puerto no toque la base.
    */
   recover(): void {
-    const n = this.#repo.resetRunning(this.#iso());
-    if (n) this.#log(`chat: ${n} chat(s) en curso al reiniciar vuelven a libre`);
+    const cut = this.#repo.resetRunning(this.#iso());
+    for (const chatId of cut) this.#noticeCutTurn(chatId);
+    if (cut.length) this.#log(`chat: ${cut.length} chat(s) con el turno cortado por el reinicio vuelven a libre, con aviso`);
+  }
+
+  /** Deja en el hilo que el reinicio cortó el turno y cierra las sesiones de los subagentes que se perdieron. */
+  #noticeCutTurn(chatId: string): void {
+    try {
+      const chat = this.#require(chatId).chat;
+      const lost = this.#deps.store.cancelOpenSessions({ parentSessionId: chat.sessionId });
+      const lastEventAt = this.#deps.store.getSession(chat.sessionId)?.updatedAt;
+      const text = cutTurnNotice(lastEventAt, lost);
+      this.#repo.addMessage({ id: this.#newId(), chatId: chat.id, role: 'assistant', text, attachments: [], mode: chat.mode, at: this.#iso() });
+    } catch (err) {
+      this.#log(`chat ${chatId}: no se pudo dejar el aviso del turno cortado: ${oneLine(err)}`);
+    }
   }
 
   // ---------------------------------------------------------------- chats

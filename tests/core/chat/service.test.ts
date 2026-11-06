@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import type { HookCallbackMatcher, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ChatError, ChatService, composeUserText, resolveMind } from '../../../src/core/chat/index.ts';
+import { CONDUCTOR_AGENT_ID } from '../../../src/core/conductor/index.ts';
 import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index.ts';
 import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, chromeServerSpec, pluginsSection } from '../../../src/core/plugins/index.ts';
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
@@ -244,24 +245,15 @@ describe('ChatService: persistencia y reanudación', () => {
     b.store.database.prepare(`UPDATE chat_chats SET state = 'running' WHERE id = ?`).run(chat.id);
     b.service.shutdown();
 
-    const again = new ChatService({
-      db: b.store.database,
-      store: b.store,
-      hub: b.hub,
-      settings: () => DEFAULT_SETTINGS,
-      mind: { agents: () => [claudeAgent], env: async () => ({ ANTHROPIC_API_KEY: MIND_KEY }) },
-      ports: b.ports,
-      translator: (init) => new ClaudeSdkTranslator(init),
-      attachments: b.attachments,
-      query: b.q.fn,
-    });
+    const again = restart(b);
     try {
       // Crear el servicio no toca la base: el servidor llama a `recover()` cuando ya escucha.
       expect(again.get(chat.id).state).toBe('running');
       again.recover();
-      // Un turno `running` sin proceso vivo vuelve a `idle` al arrancar.
+      // Un turno `running` sin proceso vivo vuelve a `idle` al arrancar, con un aviso de que se cortó.
       expect(again.get(chat.id).state).toBe('idle');
-      expect(again.messages(chat.id).map((m) => m.role)).toEqual(['user', 'assistant']);
+      expect(again.messages(chat.id).map((m) => m.role)).toEqual(['user', 'assistant', 'assistant']);
+      expect(again.messages(chat.id).at(-1)?.text).toMatch(/se cortó/);
       expect(again.proposals(chat.id).map((p) => [p.task.id, p.approval])).toEqual([['api', 'proposed'], ['ui', 'proposed']]);
       await again.send(chat.id, { text: 'sigo' });
       await settleChat(again, chat.id);
@@ -272,7 +264,52 @@ describe('ChatService: persistencia y reanudación', () => {
       again.shutdown();
     }
   });
+
+  it('un turno cortado por el reinicio deja un aviso en el hilo y cierra los subagentes que se perdieron', async () => {
+    const b = await bench();
+    const chat = b.service.create({ projectId: 'demo' });
+    const quiet = b.service.create({ projectId: 'demo' });
+    await turn(b, chat.id, 'hola');
+    b.store.database.prepare(`UPDATE chat_chats SET state = 'running' WHERE id = ?`).run(chat.id);
+    b.store.database
+      .prepare(`INSERT INTO chat_messages (id, chat_id, role, text, attachments_json, mode, at) VALUES ('sin-respuesta', ?, 'user', 'investiga', '[]', 'auto', ?)`)
+      .run(chat.id, new Date().toISOString());
+    for (const id of ['sub-1', 'sub-2']) {
+      b.store.append({ sessionId: id, agentId: CONDUCTOR_AGENT_ID, parentSessionId: chat.sessionId, seq: 0, ts: new Date().toISOString(), type: 'status', payload: { state: 'running' } });
+    }
+    b.service.shutdown();
+
+    const again = restart(b);
+    try {
+      again.recover();
+      expect(again.get(chat.id).state).toBe('idle');
+      const notice = again.messages(chat.id).at(-1);
+      expect(notice?.role).toBe('assistant');
+      expect(notice?.text).toMatch(/se cortó/);
+      expect(notice?.text).toMatch(/2 subagentes/);
+      expect(b.store.listSessions({ parentSessionId: chat.sessionId }).map((s) => s.state)).toEqual(['cancelled', 'cancelled']);
+      // Un chat que estaba libre no recibe aviso.
+      expect(again.messages(quiet.id)).toEqual([]);
+    } finally {
+      again.shutdown();
+    }
+  });
 });
+
+/** Otro arranque del núcleo sobre la misma base (cola y procesos nuevos). */
+function restart(b: ChatBench): ChatService {
+  return new ChatService({
+    db: b.store.database,
+    store: b.store,
+    hub: b.hub,
+    settings: () => DEFAULT_SETTINGS,
+    mind: { agents: () => [claudeAgent], env: async () => ({ ANTHROPIC_API_KEY: MIND_KEY }) },
+    ports: b.ports,
+    translator: (init) => new ClaudeSdkTranslator(init),
+    attachments: b.attachments,
+    query: b.q.fn,
+  });
+}
 
 describe('ChatService: modos', () => {
   it('plan: delegar fuera de allowedTools y bloqueada; las propuestas esperan al usuario', async () => {

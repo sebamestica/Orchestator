@@ -44,10 +44,10 @@ async function liveBase() {
   new ChatDb(store.database).db
     .prepare(
       `INSERT INTO chat_chats (id, project_id, title, cwd, extra_roots_json, mode, mind_agent_id, session_id, state, cost_usd, created_at, updated_at)
-       VALUES ('c1', NULL, 'Chat', ?, '[]', 'auto', 'claude', 'chat-c1', 'running', 0, ?, ?)`,
+       VALUES ('chat01', NULL, 'Chat', ?, '[]', 'auto', 'claude', 'chat01-sesion', 'running', 0, ?, ?)`,
     )
     .run(dir, now, now);
-  const chatState = () => (store.database.prepare(`SELECT state FROM chat_chats WHERE id = 'c1'`).get() as { state: string }).state;
+  const chatState = () => (store.database.prepare(`SELECT state FROM chat_chats WHERE id = 'chat01'`).get() as { state: string }).state;
   return { dir, store, chatState };
 }
 

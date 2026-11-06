@@ -226,9 +226,13 @@ export class ChatRepo {
     return saved;
   }
 
-  /** Al arrancar el núcleo no hay turnos vivos: los que quedaron `running` vuelven a `idle`. */
-  resetRunning(at: string): number {
-    return Number(this.#db.stmt(`UPDATE chat_chats SET state = 'idle', updated_at = ? WHERE state = 'running'`).run(at).changes);
+  /** Al arrancar el núcleo no hay turnos vivos: los que quedaron `running` vuelven a `idle`. Devuelve sus ids. */
+  resetRunning(at: string): string[] {
+    return this.#db.tx(() => {
+      const ids = this.#db.stmt(`SELECT id FROM chat_chats WHERE state = 'running'`).all().map((r) => z.object({ id: text }).parse(r).id);
+      this.#db.stmt(`UPDATE chat_chats SET state = 'idle', updated_at = ? WHERE state = 'running'`).run(at);
+      return ids;
+    });
   }
 
   delete(id: string): boolean {

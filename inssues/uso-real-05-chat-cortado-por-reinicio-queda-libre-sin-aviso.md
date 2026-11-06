@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real (chat con la mente, arranque del núcleo)
 - **Severidad:** media
 - **Archivos:** `src/core/chat/service.ts:256`, `src/core/chat/db.ts:229`, `src/core/chat/db.ts:231`, `src/core/chat/service.ts:150`, `src/core/chat/service.ts:631`, `src/core/chat/service.ts:838`, `src/core/store/store.ts:520`, `src/core/app/fleet-service.ts:258`, `src/core/conductor/session.ts:382`, `src/ui/features/agents-panel/model.ts:72`, `tests/core/chat/service.test.ts:238`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
