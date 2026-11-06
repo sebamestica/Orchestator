@@ -2,7 +2,7 @@ import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CodexCliAdapter, codexBrowserOffArgs, codexEffortArgs } from '../../../../src/core/adapters/codex-cli/index.ts';
+import { CodexCliAdapter, codexBrowserOffArgs, codexEffortArgs, codexSandboxArgs } from '../../../../src/core/adapters/codex-cli/index.ts';
 import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import { buildReviewTask } from '../../../../src/core/orchestrator/fleet.ts';
 import { resolveCodexExecutable } from '../../../../src/core/adapters/codex-cli/executable.ts';
@@ -50,8 +50,11 @@ describe('Codex CLI', () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(new Set(events.map((e) => e.sessionId)).size).toBe(1);
     const opts = run.mock.calls[0]?.[0];
-    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', ...codexBrowserOffArgs(), '-s', 'workspace-write', '-C', ctx.worktreePath,
+    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', ...codexBrowserOffArgs(), ...codexSandboxArgs(), '-C', ctx.worktreePath,
       '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), '-']);
+    // autoeval-reglas-07: el sandbox lo fija Berland, no ~/.codex/config.toml ni sus reglas globales.
+    expect(codexSandboxArgs()).toEqual(['-s', 'workspace-write', '-c', 'windows.sandbox="unelevated"', '-c', 'sandbox_workspace_write.network_access=false',
+      '-c', 'sandbox_workspace_write.writable_roots=[]', '--ignore-rules']);
     expect(opts?.stdin).toContain(task.objective);
     expect(opts?.args).not.toContain(task.objective);
     expect(opts?.signal).toBe(ctx.signal);
@@ -215,13 +218,29 @@ describe('Codex CLI', () => {
     const events = await collect(new CodexCliAdapter(config, { runner: runner([{ kind: 'stderr', line: text }, { ...exit, code: 1 }]) }), await context());
     expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: false } });
   });
+  const OK_SANDBOX = '`sandbox_mode` is `workspace-write`: The sandbox permits reading files. Network access is restricted.';
+  const probeWith = (promptInput: string, code = 0) => vi.fn(async function* (options: JsonlProcessOptions): AsyncGenerator<JsonlLine> {
+    if (options.args.includes('prompt-input')) {
+      yield { kind: 'text', line: JSON.stringify([{ type: 'message', content: [{ text: `<permissions instructions>\nFilesystem sandboxing… ${promptInput}` }] }]) };
+      yield { ...exit, code };
+      return;
+    }
+    yield { kind: 'text', line: options.args.includes('--version') ? 'codex-cli 0.165.0' : 'Logged in using ChatGPT' };
+    yield exit;
+  });
   it('probe lee versión y sesión sin inferencia', async () => {
-    const run = vi.fn(async function* (options: JsonlProcessOptions): AsyncGenerator<JsonlLine> {
-      yield { kind: 'text', line: options.args.includes('--version') ? 'codex-cli 0.165.0' : 'Logged in using ChatGPT' };
-      yield exit;
-    });
-    expect(await new CodexCliAdapter(config, { runner: run }).probe()).toMatchObject({ installed: true, authenticated: true, version: '0.165.0', quotaMethod: 'codex-ratelimits' });
-    expect(run).toHaveBeenCalledTimes(2);
+    const run = probeWith(OK_SANDBOX);
+    expect(await new CodexCliAdapter(config, { runner: run }).probe()).toMatchObject({ installed: true, authenticated: true, version: '0.165.0', quotaMethod: 'codex-ratelimits', warnings: [] });
+    expect(run).toHaveBeenCalledTimes(3);
+    const sandboxArgs = run.mock.calls[2]?.[0].args ?? [];
+    expect(sandboxArgs).toEqual(expect.arrayContaining(['debug', 'prompt-input', 'sandbox_mode="workspace-write"', 'windows.sandbox="unelevated"', 'sandbox_workspace_write.network_access=false', 'sandbox_workspace_write.writable_roots=[]']));
+  });
+  it('probe avisa si el sandbox de Codex queda en solo lectura o con la red abierta', async () => {
+    const warnings = async (text: string, code = 0) => (await new CodexCliAdapter(config, { runner: probeWith(text, code) }).probe()).warnings;
+    expect((await warnings('`sandbox_mode` is `read-only`: The sandbox only permits reading files. Network access is restricted.')).join(' ')).toMatch(/workspace-write.*\[windows\] sandbox/);
+    expect((await warnings('`sandbox_mode` is `workspace-write`: The sandbox permits reading files. Network access is enabled.')).join(' ')).toMatch(/red abierta/);
+    expect((await warnings('', 1)).join(' ')).toMatch(/No se pudo comprobar el sandbox/);
+    expect(await warnings(OK_SANDBOX)).toEqual([]);
   });
   it('probe no autentica por un mensaje con salida fallida', async () => {
     expect(await new CodexCliAdapter(config, { runner: runner([{ kind: 'text', line: 'Not logged in' }, { ...exit, code: 1 }]) }).probe()).toMatchObject({ installed: false, authenticated: false });

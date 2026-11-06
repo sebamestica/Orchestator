@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { agentConfigSchema, agentEventSchema, redactSecrets } from '../../../shared/index.ts';
@@ -117,6 +118,35 @@ export function codexBrowserOffArgs(granted: readonly string[] = []): string[] {
   return args;
 }
 
+/**
+ * Sandbox de Codex, la única barrera de Berland sobre él (issue autoeval-reglas-07). En Windows `-s workspace-write`
+ * no basta: sin `[windows] sandbox` en `~/.codex/config.toml` Codex lo rebaja a solo lectura, y ese archivo puede abrir
+ * la red o sumar raíces de escritura. Estas claves mandan sobre él (comprobado con codex-cli 0.165.0 y
+ * `codex debug prompt-input`, sin cupo). `unelevated` aísla las escrituras pero corta la red solo con variables de
+ * proxy: no cuenta como barrera contra el push.
+ */
+export const CODEX_SANDBOX_CONFIG = [
+  `windows.sandbox=${tomlString('unelevated')}`,
+  'sandbox_workspace_write.network_access=false',
+  'sandbox_workspace_write.writable_roots=[]',
+] as const;
+
+/** `-s workspace-write`, las claves de `CODEX_SANDBOX_CONFIG` y `--ignore-rules` (ninguna regla `allow` global saca órdenes del sandbox). */
+export function codexSandboxArgs(): string[] {
+  return ['-s', 'workspace-write', ...CODEX_SANDBOX_CONFIG.flatMap((c) => ['-c', c]), '--ignore-rules'];
+}
+
+/** Avisos de `probe` según la política que `codex debug prompt-input` le describe al modelo. */
+export function sandboxWarnings(promptInput: string): string[] {
+  if (!/`sandbox_mode` is `workspace-write`/.test(promptInput)) {
+    return ['El sandbox de Codex no queda en workspace-write (revisa [windows] sandbox en ~/.codex/config.toml): sin él, Codex no puede editar el worktree.'];
+  }
+  if (!/Network access is restricted/.test(promptInput)) {
+    return ['El sandbox de Codex deja la red abierta (revisa sandbox_workspace_write en ~/.codex/config.toml).'];
+  }
+  return [];
+}
+
 /** Argumentos de navegador y plugins para `codex exec`: primero lo que se apaga, luego lo que entrega Berland. */
 export function codexPluginArgs(servers: McpServerMap): { args: string[]; env: Record<string, string> } {
   const mcp = codexMcpArgs(servers);
@@ -154,7 +184,24 @@ export class CodexCliAdapter implements AgentAdapter {
       } else result.authenticated = ok && /^\s*Logged in\b/im.test(output);
       if (!ok) result.warnings.push(redactSecrets(output.trim()) || 'Codex no respondió correctamente');
     }
+    if (result.installed) result.warnings.push(...(await this.probeSandbox()));
     return result;
+  }
+
+  /** Comprueba sin modelo (`codex debug prompt-input`) que el sandbox que pide Berland queda activo. */
+  private async probeSandbox(): Promise<string[]> {
+    const args = ['debug', 'prompt-input', '-c', `sandbox_mode=${tomlString('workspace-write')}`, ...CODEX_SANDBOX_CONFIG.flatMap((c) => ['-c', c]), 'hola'];
+    let output = '';
+    let ok = false;
+    try {
+      for await (const line of this.runner({ command: this.executable.command, args: [...this.executable.args, ...args], cwd: tmpdir(), timeoutMs: 60_000 })) {
+        if (line.kind === 'exit') ok = line.code === 0 && !line.aborted && !line.timedOut;
+        else output += `${line.line}\n`;
+      }
+    } catch {
+      ok = false;
+    }
+    return ok ? sandboxWarnings(output) : ['No se pudo comprobar el sandbox de Codex (codex debug prompt-input falló).'];
   }
 
   async *run(task: TaskBrief, ctx: RunContext): AsyncGenerator<AgentEvent> {
@@ -191,7 +238,7 @@ export class CodexCliAdapter implements AgentAdapter {
         await mkdir(join(ctx.worktreePath, '.orq'), { recursive: true });
         for await (const line of this.runner({ command: this.executable.command,
           // `--skip-git-repo-check`: en modo local la carpeta puede no ser git; en un worktree no cambia nada.
-          args: [...this.executable.args, 'exec', '--json', '--skip-git-repo-check', ...codexEffortArgs(task, runHints(ctx).retries), ...plugins.args, '-s', 'workspace-write', '-C', ctx.worktreePath,
+          args: [...this.executable.args, 'exec', '--json', '--skip-git-repo-check', ...codexEffortArgs(task, runHints(ctx).retries), ...plugins.args, ...codexSandboxArgs(), '-C', ctx.worktreePath,
             '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), ...(this.config.model ? ['-m', this.config.model] : []), '-'],
           cwd: ctx.worktreePath, stdin: section ? `${brief}\n\n${section}\n` : brief,
           env: childEnv, signal: ctx.signal, timeoutMs: ctx.timeoutMs })) {

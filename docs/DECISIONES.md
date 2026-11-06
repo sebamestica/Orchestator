@@ -44,7 +44,7 @@
 
 - Un agente que ejecute `git` por su cuenta, sin pasar por la guardia del núcleo, podría hacer push con `git -c remote.origin.pushurl=<url> push …`: ninguna configuración de git lo impide. Las capas que hay hoy:
   1. Claude: el hook `PreToolUse` niega `push`, `-c`, `config` y `remote`.
-  2. Codex: su sandbox `workspace-write` sin red por defecto.
+  2. Codex: su sandbox `workspace-write`, con las claves fijadas por Berland (`codexSandboxArgs`: `windows.sandbox="unelevated"`, sin red ni raíces extra, `--ignore-rules`) y comprobado en `probe` con `codex debug prompt-input` (2026-11-05, `inssues/autoeval-reglas-07`). En `unelevated` aísla las escrituras al worktree, pero la red solo queda cortada por variables de proxy (`curl --noproxy` sale): **no cuenta como barrera contra el push**; solo la contaría `elevated`, después de comprobar que corta la red.
   3. Todos: `pushurl` inválido y `pre-push` por worktree contra el push normal.
   4. Integración solo por el núcleo y con gate.
 - agy (`--dangerously-skip-permissions`) es el más expuesto. Opciones:

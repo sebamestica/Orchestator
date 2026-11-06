@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/codex-cli/index.ts:96-116`, `src/core/adapters/codex-cli/index.ts:137-156`, `src/core/adapters/codex-cli/index.ts:190-194`, `src/core/app/commit-step.ts:99`, `docs/DECISIONES.md:45-49`, `tests/core/adapters/codex-cli/adapter.test.ts:53`, `tests/core/adapters/codex-cli/adapter.test.ts:170-180`, `C:\Users\<u>\.codex\config.toml:32-33` y `C:\Users\<u>\.codex\rules\default.rules` (fuera del repo)
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05); revisado y comprobado sin gastar cupo el mismo día
 - **Relacionadas:** `autoeval-reglas-02-worktree-alcanza-stash-y-ramas-del-repo.md`, `autoeval-reglas-03-modo-local-sin-bloqueo-de-push.md`, `autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md`, `uso-real-03-codex-falla-en-proyectos-locales-sin-git.md`
 
