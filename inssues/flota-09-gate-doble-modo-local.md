@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** baja
 - **Archivos:** `src/core/orchestrator/fleet.ts:533`, `src/core/orchestrator/fleet.ts:434`, `src/core/orchestrator/fleet.ts:563-564`, `src/core/orchestrator/fleet.ts:577-588`, `src/core/app/commit-step.ts:224-231`, `src/core/app/workspaces.ts:115-119`, `src/core/app/workspaces.ts:138-140`, `src/core/app/local-workspaces.ts:117-121`, `src/core/app/local-workspaces.ts:124-126`, `src/core/app/local-workspaces.ts:128-139`, `src/core/app/f5-servidor.ts:217-218`, `src/core/adapters/claude-sdk/translate.ts:122`, `tests/integration/local-mode.test.ts:150-166`, `docs/plan/issues/06-razonamiento-modelos.md:201-203`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Un proyecto entra en modo local cuando se registra sin `workspace`: carpeta sin git, git sin commits o sin gate

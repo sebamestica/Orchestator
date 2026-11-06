@@ -4,6 +4,7 @@ import type { IntegrationResult, TaskBrief, Workspace } from '../../shared/index
 import { idSchema, PLAN_FILES, redactSecrets } from '../../shared/index.ts';
 import { deduceGate, gateForWorkspace } from '../fs/folders.ts';
 import { createGitRunner, physicalPath, pushBlockEnv, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
+import { changedPaths, snapshotFolder, type FolderSnapshot } from './folder-snapshot.ts';
 
 /**
  * Rama ficticia de un workspace local: no hay rama, se trabaja sobre la carpeta del usuario. No es un nombre de rama
@@ -68,7 +69,8 @@ async function defaultGateFor(dir: string): Promise<CommandSpec[] | null> {
  *   en `info/exclude`. Calcula también el bloqueo de push por entorno (`agentEnv`): no hay `config.worktree` donde
  *   escribirlo y la config del usuario no se toca.
  * - `integrate` corre el gate si la carpeta tiene uno (si falla, la tarea vuelve al autor); si no, da por buena la
- *   tarea revisada. Nunca confirma nada.
+ *   tarea revisada. Nunca confirma nada. Si `verify` ya lo pasó antes de revisar y la carpeta no cambió desde
+ *   entonces (misma foto), no lo repite.
  * - `remove` borra solo `.orq/`, y solo si la creó el modo local.
  *
  * `.orq/` es una por carpeta, pero el plan (`PLAN-TAREA.md`) y el `HANDOFF.md` son de cada tarea: la marca guarda qué
@@ -84,6 +86,8 @@ export class LocalWorkspaces {
   readonly #log: (line: string) => void;
   /** Workspaces locales vivos, por ruta normalizada + tarea, con el entorno de sus agentes. */
   readonly #live = new Map<string, { project: LocalProject; env: Readonly<Record<string, string>> }>();
+  /** Último `verify` bueno de cada workspace vivo, con la foto de la carpeta justo después del gate. */
+  readonly #verified = new Map<string, { summary: string; snapshot: FolderSnapshot }>();
 
   constructor(opts: LocalWorkspacesOptions = {}) {
     this.#gateFor = opts.gateFor ?? defaultGateFor;
@@ -133,13 +137,20 @@ export class LocalWorkspaces {
     // Solo corre una tarea a la vez por carpeta: lo que quede de esta carpeta es de una tarea fallida (la flota
     // conserva su `.orq/` y no llama a `remove`). Se olvida para que no impida limpiar al terminar esta.
     const folder = LocalWorkspaces.key(project.repoPath);
-    for (const [key, live] of this.#live) if (LocalWorkspaces.key(live.project.repoPath) === folder) this.#live.delete(key);
+    for (const [key, live] of this.#live) {
+      if (LocalWorkspaces.key(live.project.repoPath) !== folder) continue;
+      this.#live.delete(key);
+      this.#verified.delete(key);
+    }
+    this.#verified.delete(liveKey(workspace));
     this.#live.set(liveKey(workspace), { project, env });
     this.#log(`${task.id}: modo local en ${project.repoPath} (sin worktree ni commits)`);
     return workspace;
   }
 
   async integrate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<IntegrationResult> {
+    const verified = await this.#takeVerified(project, workspace);
+    if (verified !== undefined) return { ok: true, conflicts: [], gateSummary: `${verified} (ya verificado antes de revisar)` };
     const check = await this.#runGate(project, workspace, signal);
     if (!check) return { ok: true, conflicts: [], gateSummary: LOCAL_NO_GATE_SUMMARY };
     return { ok: check.ok, conflicts: [], gateSummary: check.summary };
@@ -147,7 +158,24 @@ export class LocalWorkspaces {
 
   /** Gate de la carpeta antes de revisar (sin LLM). `undefined` si la carpeta no tiene verificación. */
   async verify(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
-    return this.#runGate(project, workspace, signal);
+    const key = liveKey(workspace);
+    this.#verified.delete(key);
+    const check = await this.#runGate(project, workspace, signal);
+    if (check?.ok) {
+      const snapshot = await snapshotFolder(project.repoPath);
+      if (snapshot) this.#verified.set(key, { summary: check.summary, snapshot });
+    }
+    return check;
+  }
+
+  /** Resumen del `verify` bueno del workspace si la carpeta sigue igual (se consume: sirve una sola vez). */
+  async #takeVerified(project: LocalProject, workspace: Workspace): Promise<string | undefined> {
+    const key = liveKey(workspace);
+    const entry = this.#verified.get(key);
+    this.#verified.delete(key);
+    if (!entry) return undefined;
+    const now = await snapshotFolder(project.repoPath);
+    return now && changedPaths(entry.snapshot, now).length === 0 ? entry.summary : undefined;
   }
 
   async #runGate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
@@ -169,6 +197,7 @@ export class LocalWorkspaces {
     const project = this.#live.get(key)?.project;
     if (!project) return;
     this.#live.delete(key);
+    this.#verified.delete(key);
     // Otra tarea viva de la misma carpeta aún usa `.orq/` (no debería pasar: la flota las serializa).
     const folder = LocalWorkspaces.key(project.repoPath);
     if ([...this.#live.values()].some((live) => LocalWorkspaces.key(live.project.repoPath) === folder)) return;
