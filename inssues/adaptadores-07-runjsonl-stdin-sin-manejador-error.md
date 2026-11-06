@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes (proceso hijo común: `runJsonl`, usado por el adaptador de Codex)
 - **Severidad:** baja
 - **Archivos:** `src/core/process/run-jsonl.ts:69`, `src/core/process/run-jsonl.ts:77`, `src/core/process/run-jsonl.ts:78`, `src/core/adapters/codex-cli/index.ts:190`, `src/core/adapters/codex-cli/index.ts:193`, `src/core/adapters/codex-cli/executable.ts:9`, `src/shared/tasks.ts:9`, `src/shared/api.ts:530`, `apps/desktop/src/main.ts:227`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

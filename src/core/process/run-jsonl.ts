@@ -97,6 +97,8 @@ export async function* runJsonl(opts: JsonlProcessOptions): AsyncGenerator<Jsonl
   opts.signal?.addEventListener('abort', onAbort, { once: true });
   if (opts.signal?.aborted) onAbort();
 
+  // El hijo pudo salir sin leer todo el encargo (EPIPE/EOF): lo informa 'exit'; no debe tumbar el núcleo.
+  child.stdin.on('error', (err) => { push({ kind: 'stderr', line: `stdin: ${err.message}` }); });
   if (opts.stdin !== undefined) child.stdin.end(opts.stdin);
   else child.stdin.end();
 

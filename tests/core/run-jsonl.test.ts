@@ -56,6 +56,15 @@ describe('runJsonl', () => {
     expect(items.at(-1)).toMatchObject({ kind: 'exit', timedOut: true });
   });
 
+  it('no cae si el hijo sale sin leer un stdin grande', async () => {
+    for (let i = 0; i < 5; i++) {
+      const items = await collect(runJsonl({ command: process.execPath, args: ['-e', 'process.exit(0)'], cwd: process.cwd(), stdin: 'x'.repeat(2_000_000) }));
+      expect(items.at(-1)).toMatchObject({ kind: 'exit', code: 0, timedOut: false, aborted: false });
+      const stdinError = items.findIndex((item) => item.kind === 'stderr' && item.line.startsWith('stdin:'));
+      if (stdinError !== -1) expect(stdinError).toBeLessThan(items.length - 1);
+    }
+  });
+
   describe('con un nieto que hereda stdout y sigue vivo', () => {
     it('termina poco después de que sale el hijo y conserva su código', async () => {
       const items = await collectConNieto(runJsonl({ command: process.execPath, args: ['-e', conNieto], cwd: process.cwd() }));
