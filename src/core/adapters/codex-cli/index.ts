@@ -188,7 +188,8 @@ export class CodexCliAdapter implements AgentAdapter {
       } else {
         await mkdir(join(ctx.worktreePath, '.orq'), { recursive: true });
         for await (const line of this.runner({ command: this.executable.command,
-          args: [...this.executable.args, 'exec', '--json', ...codexEffortArgs(task, runHints(ctx).retries), ...plugins.args, '-s', 'workspace-write', '-C', ctx.worktreePath,
+          // `--skip-git-repo-check`: en modo local la carpeta puede no ser git; en un worktree no cambia nada.
+          args: [...this.executable.args, 'exec', '--json', '--skip-git-repo-check', ...codexEffortArgs(task, runHints(ctx).retries), ...plugins.args, '-s', 'workspace-write', '-C', ctx.worktreePath,
             '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), ...(this.config.model ? ['-m', this.config.model] : []), '-'],
           cwd: ctx.worktreePath, stdin: section ? `${brief}\n\n${section}\n` : brief,
           env: childEnv, signal: ctx.signal, timeoutMs: ctx.timeoutMs })) {

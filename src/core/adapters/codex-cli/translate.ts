@@ -17,6 +17,8 @@ export function classifyCodexError(message: string): ErrorCode {
   if (/usage[_ -]?limit|rate[_ -]?limit|quota|limit[_ -]?(?:reached|exceeded)|too many requests|insufficient_quota/i.test(message)) return 'quota_exhausted';
   // `\b401\b`: un 401 dentro de un nombre al azar (codex-arg0a4012b) no es falta de sesión.
   if (/unauthorized|authentication|not logged in|login required|\b401\b/i.test(message)) return 'auth';
+  // Codex rechaza la carpeta antes de empezar: el motivo va en el error, no solo «código 1».
+  if (/not inside a trusted directory|skip-git-repo-check/i.test(message)) return 'crash';
   return 'unknown';
 }
 
@@ -25,7 +27,8 @@ export function classifyCodexError(message: string): ErrorCode {
  * solo o tras la marca de tiempo del log. Los avisos `WARNING:` y el resto del diagnóstico no deciden el resultado.
  */
 export function isCodexErrorLine(line: string): boolean {
-  return /^\s*(?:\d{4}-\d\d-\d\dT\S+\s+)?(?:Error:|ERROR\b)/.test(line);
+  // El rechazo de una carpeta sin git no confiable sale sin prefijo («Not inside a trusted directory…»).
+  return /^\s*(?:\d{4}-\d\d-\d\dT\S+\s+)?(?:Error:|ERROR\b)|^\s*Not inside a trusted directory\b/.test(line);
 }
 
 export interface CodexTranslateOptions {

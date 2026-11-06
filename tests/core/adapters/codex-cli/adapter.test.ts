@@ -50,7 +50,7 @@ describe('Codex CLI', () => {
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(new Set(events.map((e) => e.sessionId)).size).toBe(1);
     const opts = run.mock.calls[0]?.[0];
-    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...codexBrowserOffArgs(), '-s', 'workspace-write', '-C', ctx.worktreePath,
+    expect(opts?.args).toEqual([resolveCodexExecutable().args[0], 'exec', '--json', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', ...codexBrowserOffArgs(), '-s', 'workspace-write', '-C', ctx.worktreePath,
       '-o', join(ctx.worktreePath, '.orq', 'ultimo-mensaje.md'), '-']);
     expect(opts?.stdin).toContain(task.objective);
     expect(opts?.args).not.toContain(task.objective);
@@ -67,6 +67,15 @@ describe('Codex CLI', () => {
     expect(withLocal).toContain('## Modo local (sin worktree)');
     expect(withLocal).toContain('No hagas commits ni ramas');
     expect(await stdinOf()).not.toContain('## Modo local');
+  });
+  it('carpeta sin git (modo local): si Codex la rechaza, el motivo va en un error y no solo en raw', async () => {
+    const line = 'Not inside a trusted directory and --skip-git-repo-check was not specified.';
+    const run = runner([{ kind: 'stderr', line }, { ...exit, code: 1 }]);
+    const events = await collect(new CodexCliAdapter(config, { runner: run }), await context());
+    const errors = events.filter((e) => e.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.payload).toMatchObject({ message: line });
+    expect(events.at(-1)).toMatchObject({ type: 'done', payload: { ok: false } });
   });
   it('esfuerzo de razonamiento según rol y dificultad; cada reintento sube un nivel hasta high', async () => {
     const effortOf = async (t: TaskBrief, extra: Partial<HintedRunContext> = {}) => {

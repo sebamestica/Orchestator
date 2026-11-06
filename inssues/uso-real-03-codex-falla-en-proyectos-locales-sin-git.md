@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real (adaptador de Codex en modo local)
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/codex-cli/index.ts:191-192`, `src/core/adapters/codex-cli/index.ts:195-201`, `src/core/adapters/codex-cli/index.ts:211-213`, `src/core/adapters/codex-cli/translate.ts:16-20`, `src/core/orchestrator/supervisor.ts:21`, `src/core/orchestrator/supervisor.ts:244-254`, `src/core/orchestrator/router.ts:176`, `src/core/orchestrator/router.ts:208`, `src/core/brief/reasoning.ts:21`, `src/core/brief/reasoning.ts:28-38`, `src/core/app/local-workspaces.ts:22`, `src/core/app/local-workspaces.ts:99-113`, `src/core/app/local-workspaces.ts:155`, `src/core/app/f5-servidor.ts:217-218`, `src/core/orchestrator/fleet.ts:367`, `src/core/orchestrator/fleet.ts:542-555`, `tests/core/adapters/codex-cli/adapter.test.ts:20`, `tests/core/adapters/codex-cli/adapter.test.ts:53`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Fusiona:** `adaptadores-01-codex-local-sin-git-rechaza.md` (revisión de los adaptadores), que describía la misma
   causa leyendo el código. Ese archivo se borró. Este agrega la prueba de que ya pasó en uso real, con sesiones, horas y
   el costo que tuvo; lo que aportaba el otro está en «Lo que confirma el código» y en las pruebas.
