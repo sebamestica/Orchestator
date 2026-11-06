@@ -546,6 +546,9 @@ export class ChatService {
       if (live.idle) clearTimeout(live.idle);
       live.idle = undefined;
       const session = await this.#ensureSession(chatId, live, input.effort);
+      // En la espera la mente pudo seguir sola (terminó un subagente): su `result` cerraría este turno antes de
+      // que el SDK atienda el mensaje, así que no se pisa.
+      if (live.turn) throw new ChatError('conflict', 'La mente empezó a responder sola: espera a que termine o interrúmpela');
       const chat = this.#require(chatId).chat;
       const message = this.#repo.addMessage({
         id: this.#newId(),
@@ -572,13 +575,14 @@ export class ChatService {
       }
       return message;
     } catch (err) {
+      // Con un turno autónomo vivo, `busy` es suyo.
       if (!live.turn) {
         live.busy = false;
-        // Un envío fallido no deja abierta la lectura de las carpetas de sus adjuntos.
-        for (const root of addedRoots) live.roots.delete(root);
         // Ni la sesión viva sin su plazo de inactividad (p. ej. rechazada por falta de saldo).
         this.#scheduleIdle(chatId, live);
       }
+      // Un envío fallido no deja abierta la lectura de las carpetas de sus adjuntos.
+      for (const root of addedRoots) live.roots.delete(root);
       if (err instanceof AttachmentError) throw new ChatError(err.code, err.message);
       throw err;
     }

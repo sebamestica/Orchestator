@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** baja
 - **Archivos:** `src/core/chat/service.ts:419`, `src/core/chat/service.ts:421`, `src/core/chat/service.ts:433`, `src/core/chat/service.ts:456`, `src/core/chat/service.ts:471`, `src/core/chat/service.ts:483`, `src/core/chat/service.ts:683`, `src/core/chat/service.ts:794`, `src/core/chat/service.ts:796`, `src/core/chat/service.ts:839`, `src/core/chat/service.ts:865`, `src/core/conductor/session.ts:399`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

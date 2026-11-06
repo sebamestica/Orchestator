@@ -25,7 +25,11 @@ function taskDone(taskId: string, toolUseId: string, sid: string): SDKMessage {
  * `query` falsa que, además de responder a cada mensaje del usuario, deja **inyectar** mensajes del SDK entre turnos:
  * así se simula un subagente en segundo plano que termina y la mente que sigue sola, sin mensaje del usuario.
  */
-function injectableQuery(script: (message: SDKUserMessage, ctx: { index: number; process: number; options: Options }) => SDKMessage[]) {
+function injectableQuery(
+  script: (message: SDKUserMessage, ctx: { index: number; process: number; options: Options }) => SDKMessage[],
+  /** `Query.applyFlagSettings` de la prueba (sin él, la sesión no puede cambiar el esfuerzo en vivo). */
+  applyFlagSettings?: () => Promise<unknown>,
+) {
   const state = {
     calls: [] as { options: Options }[],
     closed: 0,
@@ -86,9 +90,21 @@ function injectableQuery(script: (message: SDKUserMessage, ctx: { index: number;
         wake?.();
       },
       interrupt: async () => undefined,
+      ...(applyFlagSettings ? { applyFlagSettings } : {}),
     });
   };
   return state;
+}
+
+/** La guardia (hook PreToolUse) de un proceso del SDK. */
+function guardOf(o: Options | undefined) {
+  const hook = (o?.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
+  if (!hook) throw new Error('falta la guardia');
+  const signal = new AbortController().signal;
+  return async (tool_name: string, tool_input: unknown): Promise<boolean> => {
+    const out = await hook({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd: '.' }, 't', { signal });
+    return !JSON.stringify(out).includes('"deny"');
+  };
 }
 
 /** Primer turno: la mente lanza un investigador en segundo plano y termina su respuesta. */
@@ -252,6 +268,53 @@ describe('ChatService: los agentes siguen en segundo plano aunque nadie mire', (
     const open = b.store.listSessions({ parentSessionId: chat.sessionId }).filter((x) => ['starting', 'running', 'waiting'].includes(x.state));
     expect(open).toEqual([]);
   });
+
+
+  it('si la mente arranca sola mientras un envío espera (esfuerzo en vivo), el envío responde conflict y no pisa el turno', async () => {
+    const received: string[] = [];
+    let release = () => {};
+    const flags = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const q = injectableQuery((message, ctx) => {
+      const text = typeof message.message.content === 'string' ? message.message.content : '';
+      received.push(text);
+      return launchScript(message, ctx);
+    }, () => flags);
+    const b = await bench({ query: q.fn });
+    const outside = await mkdtemp(join(tmpdir(), 'orq-pisado-'));
+    try {
+      const file = join(outside, 'notas.md');
+      await writeFile(file, '# notas');
+      const att = await b.attachments.registerPath(file);
+      const chat = b.service.create({ projectId: 'demo' });
+      await b.service.send(chat.id, { text: 'investiga' });
+      await b.settle(chat.id);
+      expect(b.service.get(chat.id).backgroundTasks).toBe(1);
+
+      // El envío queda esperando a que el SDK aplique el esfuerzo nuevo; en esa espera, la mente sigue sola.
+      const pending = b.service.send(chat.id, { text: 'rápido', effort: 'low', attachmentIds: [att.id] });
+      const sid = 'sdk-1';
+      q.inject([taskDone('t1', 'tu1', sid), sdkInit(sid), sdkText('A1', sid)]);
+      await waitFor(() => b.service.get(chat.id).state === 'running');
+      release();
+      await expect(pending).rejects.toMatchObject({ code: 'conflict' });
+
+      expect(received.some((t) => t.includes('rápido'))).toBe(false);
+      expect(b.service.messages(chat.id).some((m) => m.text === 'rápido')).toBe(false);
+      // El turno autónomo sigue ocupando el chat y la carpeta del adjunto rechazado no quedó legible.
+      expect(b.service.get(chat.id).state).toBe('running');
+      await expect(b.service.send(chat.id, { text: 'otra' })).rejects.toMatchObject({ code: 'conflict' });
+      expect(await guardOf(q.calls[0]?.options)('Read', { file_path: file })).toBe(false);
+
+      q.inject([sdkResult(undefined, sid, 0.01, 'error_during_execution')]);
+      await waitFor(() => b.service.get(chat.id).state !== 'running');
+      expect(b.service.messages(chat.id).at(-1)).toMatchObject({ role: 'assistant', text: 'A1' });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
 
   it('los plugins que se vuelven a leer en cada mensaje no hacen que el siguiente recree la sesión si no cambiaron', async () => {
     const fake = { type: 'stdio' as const, command: 'node', args: ['chrome-falso.mjs'] };
