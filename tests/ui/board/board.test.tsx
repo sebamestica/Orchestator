@@ -266,6 +266,52 @@ describe('BoardView', () => {
     expect(screen.queryByText('Tarea pendiente Alfa')).toBeNull();
   });
 
+  it('con más de 100 tareas en una columna muestra las más recientes y recorta las más viejas', () => {
+    const tasks: Record<string, TaskRecord> = {};
+    for (let i = 0; i <= 100; i++) {
+      const id = `t-int-${String(i).padStart(3, '0')}`;
+      const at = new Date(Date.UTC(2026, 10, 1, 0, i)).toISOString();
+      tasks[id] = { ...makeTask(id, 'proj-alpha', 'integrated', `Integrada n.º ${i}`), createdAt: at, updatedAt: at };
+    }
+    useApp.setState({ tasks });
+
+    render(<BoardView />);
+
+    const column = screen.getByRole('region', { name: 'Columna Integrada' });
+    expect(within(column).getByText('Integrada n.º 100')).toBeTruthy();
+    expect(within(column).queryByText('Integrada n.º 0')).toBeNull();
+    expect(within(column).getByText('+1 tareas más')).toBeTruthy();
+  });
+
+  it('ordena cada columna por la última actividad, no por la creación', () => {
+    // En el store quedan en orden de creación, como las entrega GET /tasks.
+    const activa = {
+      ...makeTask('t-fail-activa', 'proj-alpha', 'failed', 'Fallida más vieja con un evento hoy'),
+      createdAt: '2026-11-01T08:00:00.000Z',
+      updatedAt: '2026-11-01T09:00:00.000Z',
+      lastEventAt: '2026-11-04T12:00:00.000Z',
+    };
+    const vieja = {
+      ...makeTask('t-fail-vieja', 'proj-alpha', 'failed', 'Fallida creada antes'),
+      createdAt: '2026-11-02T08:00:00.000Z',
+      updatedAt: '2026-11-02T09:00:00.000Z',
+    };
+    const nueva = {
+      ...makeTask('t-fail-nueva', 'proj-alpha', 'failed', 'Fallida creada después'),
+      createdAt: '2026-11-03T08:00:00.000Z',
+      updatedAt: '2026-11-03T09:00:00.000Z',
+    };
+    useApp.setState({ tasks: { [activa.task.id]: activa, [vieja.task.id]: vieja, [nueva.task.id]: nueva } });
+
+    render(<BoardView />);
+
+    const column = screen.getByRole('region', { name: 'Columna Fallida' });
+    const ids = within(column)
+      .getAllByLabelText(/^Tarea t-fail-/)
+      .map((c) => c.getAttribute('aria-label')?.split(':')[0]);
+    expect(ids).toEqual(['Tarea t-fail-activa', 'Tarea t-fail-nueva', 'Tarea t-fail-vieja']);
+  });
+
   it('muestra EmptyState si no hay tareas para el filtro', () => {
     useApp.setState({ tasks: {} });
     render(<BoardView />);

@@ -1,6 +1,7 @@
 import { Button, Chip, Label, ListBox, ListBoxItem, Select } from '@heroui/react';
 import { Kanban, Plus } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { lastActivity } from '../../api/tasks.ts';
 import type { TaskRecord } from '../../api/types.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
 import { useApp } from '../../store/app.ts';
@@ -14,6 +15,11 @@ export interface BoardViewProps {
 }
 
 const MAX_TASKS_PER_COLUMN = 100;
+
+/** Lo último que se movió va arriba, así el tope de la columna recorta lo más viejo y no lo más nuevo. */
+function newestActivityFirst(a: TaskRecord, b: TaskRecord): number {
+  return Date.parse(lastActivity(b)) - Date.parse(lastActivity(a));
+}
 
 export default function BoardView({ projectId: fixedProjectId }: BoardViewProps) {
   const rawTasks = useApp((s) => s.tasks);
@@ -47,6 +53,15 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
     if (effectiveProjectId === 'all') return tasksList;
     return tasksList.filter((t) => t.task.projectId === effectiveProjectId);
   }, [tasksList, effectiveProjectId]);
+
+  const columns = useMemo(
+    () =>
+      BOARD_COLUMNS.map((col) => ({
+        col,
+        tasks: filteredTasks.filter((t) => taskMatchesColumn(t, col)).sort(newestActivityFirst),
+      })),
+    [filteredTasks],
+  );
 
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) return null;
@@ -142,8 +157,7 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
         </div>
       ) : (
         <div className="flex flex-1 gap-4 overflow-x-auto p-6 items-start min-h-0">
-          {BOARD_COLUMNS.map((col) => {
-            const columnTasks = filteredTasks.filter((t) => taskMatchesColumn(t, col));
+          {columns.map(({ col, tasks: columnTasks }) => {
             const count = columnTasks.length;
             const visibleTasks = columnTasks.slice(0, MAX_TASKS_PER_COLUMN);
             const hiddenCount = count - visibleTasks.length;

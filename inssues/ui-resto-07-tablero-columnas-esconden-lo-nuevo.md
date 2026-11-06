@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/board/BoardView.tsx:16`, `src/ui/features/board/BoardView.tsx:144-147`, `src/ui/features/board/BoardView.tsx:189-193`, `src/ui/store/app.ts:76-79`, `src/ui/store/app.ts:90`, `src/core/store/store.ts:443-451`, `src/ui/api/tasks.ts:17-22`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 El tablero (`BoardView`) arma siete columnas (`BOARD_COLUMNS` en `src/ui/features/board/types.ts:9-17`) a partir de
