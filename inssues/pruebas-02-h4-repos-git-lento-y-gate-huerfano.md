@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** media
 - **Archivos:** `tests/core/workspace/hardening.cases.ts:11`, `tests/core/workspace/hardening.cases.ts:24-29`, `tests/core/workspace/hardening.cases.ts:82-111`, `tests/core/workspace/hardening.cases.ts:114-141`, `tests/core/workspace/helpers.ts:52-58`, `tests/core/workspace/repos.test.ts:3-7`, `src/core/workspace/integrate.ts:36-55`, `src/core/workspace/integrate.ts:119`, `src/core/workspace/push-block.ts:75-101`, `src/core/workspace/manager.ts:86-138`, `src/core/workspace/manager.ts:192-227`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

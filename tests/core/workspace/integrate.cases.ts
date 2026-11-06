@@ -1,12 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { WorktreeManager } from '../../../src/core/workspace/index.ts';
 import { brief, commitFile, head, makeRepo, nodeCmd } from './helpers.ts';
 import type { TempRepo } from './helpers.ts';
-
-// Repos git reales: con la flota corriendo en paralelo el equipo va cargado.
-vi.setConfig({ testTimeout: 90_000 });
 
 let t: TempRepo | undefined;
 afterEach(() => {

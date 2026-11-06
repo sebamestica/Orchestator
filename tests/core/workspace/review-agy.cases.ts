@@ -1,12 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { GitGuardError, WorktreeManager, createGitRunner, runCommand } from '../../../src/core/workspace/index.ts';
 import { brief, commitFile, head, makeRepo, nodeCmd } from './helpers.ts';
 import type { TempRepo } from './helpers.ts';
 
 // Reproducciones de la revisión de agy (agy-revision-2, 2026-11-02): cada prueba fallaba antes de la corrección.
-vi.setConfig({ testTimeout: 90_000 });
 
 let t: TempRepo | undefined;
 afterEach(() => {

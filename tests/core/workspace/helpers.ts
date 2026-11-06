@@ -52,8 +52,9 @@ export function makeRepo(): TempRepo {
   const cleanup = () => {
     try {
       rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch {
-      /* temporal: si Windows retiene algo, se queda */
+    } catch (err) {
+      // Sin fallar la prueba (Windows a veces retiene la carpeta), pero a la vista: un resto aquí suele ser un proceso vivo.
+      console.warn(`makeRepo: no se pudo borrar ${base}: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
   return { base, repo, worktreesRoot: join(base, 'worktrees'), git: gitIn, cleanup };
