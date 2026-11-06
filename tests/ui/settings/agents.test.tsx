@@ -105,6 +105,28 @@ describe('Agentes', () => {
     ]);
   });
 
+  it('el presupuesto en US$ aparece solo donde Berland descuenta el gasto; las API sin precio lo dicen en su fila', async () => {
+    resetStore({
+      agents: [
+        agent('api-claude', { kind: 'api', provider: 'anthropic', displayName: 'Claude API' }),
+        agent('gpt', { kind: 'api', provider: 'openai', displayName: 'GPT' }),
+        agent('router', { kind: 'api', provider: 'openrouter', displayName: 'Router' }),
+        agent('agy', { kind: 'agy-cli', provider: 'antigravity', displayName: 'Antigravity' }),
+      ],
+    });
+    const calls = fakeCore({ 'PATCH /agents/api-claude': (c) => ({ body: { agent: agent('api-claude', { kind: 'api', provider: 'anthropic', displayName: 'Claude API', ...(c.body as object) }) } }) });
+    render(<SettingsView section="agentes" />);
+    for (const name of ['GPT', 'Router', 'Antigravity']) expect(screen.queryByLabelText(`Presupuesto en USD de ${name}`)).toBeNull();
+    const row = (id: string) => document.querySelector(`[data-agent="${id}"]`) as HTMLElement;
+    expect(within(row('gpt')).getByText(/no conoce el precio de este proveedor/)).toBeTruthy();
+    expect(within(row('router')).queryByText(/no conoce el precio/)).toBeNull();
+    const budget = screen.getByLabelText('Presupuesto en USD de Claude API');
+    fireEvent.change(budget, { target: { value: '4' } });
+    fireEvent.blur(budget);
+    await waitFor(() => expect(useApp.getState().agents.find((a) => a.config.id === 'api-claude')?.config.budgetUsd).toBe(4));
+    expect(calls.map((c) => [c.path, c.body])).toEqual([['/agents/api-claude', { budgetUsd: 4 }]]);
+  });
+
   it('detectar CLIs agrega los nuevos', async () => {
     const agy = agent('agy', { kind: 'agy-cli', provider: 'antigravity', displayName: 'Antigravity' });
     fakeCore({ 'POST /agents/detect': () => ({ body: { detected: [{ id: 'agy', kind: 'agy-cli', provider: 'antigravity', displayName: 'Antigravity', executable: 'agy', argsPrefix: [] }], added: [agy] } }) });

@@ -108,6 +108,19 @@ function probeSummary(agent: AgentRecord): { label: string; color: 'success' | '
   return { label: 'Funciona', color: 'success' };
 }
 
+/**
+ * Agentes cuyo gasto descuenta Berland, los únicos a los que les sirve un presupuesto en US$: Claude por SDK y la API de
+ * Anthropic (el núcleo solo conoce los precios de Claude). OpenRouter tiene su propio cupo por `/key`.
+ */
+function countsSpend(config: AgentRecord['config']): boolean {
+  return config.kind === 'claude-sdk' || (config.kind === 'api' && config.provider === 'anthropic');
+}
+
+/** Agente por API cuyo gasto no se descuenta ni tiene cupo propio: la fila lo dice en vez de ofrecer un tope que no topa. */
+function untrackedApi(config: AgentRecord['config']): boolean {
+  return config.kind === 'api' && config.provider !== 'anthropic' && config.provider !== 'openrouter';
+}
+
 function AgentRow({ agent, onDelete }: { agent: AgentRecord; onDelete: () => void }) {
   const { config } = agent;
   const [busy, setBusy] = useState<'probe' | 'enabled' | 'budget' | null>(null);
@@ -177,7 +190,8 @@ function AgentRow({ agent, onDelete }: { agent: AgentRecord; onDelete: () => voi
             {[KIND_LABEL[config.kind] ?? config.kind, config.provider, config.model ?? 'modelo por defecto'].join(' · ')}
           </div>
         </div>
-        {config.kind === 'claude-sdk' ? (
+        {/* Con un presupuesto ya guardado (CLI o API) el campo sigue, para poder quitarlo. */}
+        {countsSpend(config) || config.budgetUsd !== undefined ? (
           <span className="flex items-center gap-1 text-[0.75rem] text-muted">
             <span aria-hidden="true">US$</span>
             <Input
@@ -212,6 +226,9 @@ function AgentRow({ agent, onDelete }: { agent: AgentRecord; onDelete: () => voi
           <Trash2 className="size-4" aria-hidden="true" />
         </IconButton>
       </div>
+      {untrackedApi(config) ? (
+        <p className="text-[0.75rem] text-muted">Berland no conoce el precio de este proveedor: su gasto no se descuenta ni tiene tope en US$.</p>
+      ) : null}
       {busy === 'probe' ? <p className="text-[0.75rem] text-muted">Probando…</p> : null}
       {probeNote ? <p className="text-[0.75rem] text-muted">{probeNote}</p> : null}
       {error ? <Notice>{error}</Notice> : null}

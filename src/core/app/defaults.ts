@@ -15,13 +15,17 @@ export function anthropicCostUsd(usage: Usage): number {
   return estimateCostUsd(usage.model, { input: Math.max(0, usage.inputTokens - cached), output: usage.outputTokens, cacheRead: cached, cacheWrite: 0 });
 }
 
-/** Hueco de c6: `ApiChatAdapter` con la clave de la bóveda; el costo se estima solo para Anthropic. */
+/**
+ * Hueco de c6: `ApiChatAdapter` con la clave de la bóveda. El costo se estima solo para Anthropic (la tabla de precios
+ * es la de Claude): sin estimación, el gasto no se descuenta y el adaptador no pide `budgetUsd`. Si se suma otro
+ * proveedor, cambiar también `countsSpend` en src/ui/features/settings/AgentsSection.tsx.
+ */
 export function defaultApiAdapter(fetch?: typeof globalThis.fetch): ApiAdapterFactory {
   return (config, secrets) =>
     new ApiChatAdapter({
       config,
       getApiKey: () => secrets.apiKey,
-      estimateCostUsd: (usage, provider) => (provider === 'anthropic' ? anthropicCostUsd(usage) : undefined),
+      ...(config.provider === 'anthropic' ? { estimateCostUsd: anthropicCostUsd } : {}),
       ...(fetch ? { fetch } : {}),
     });
 }

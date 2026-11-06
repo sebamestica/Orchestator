@@ -122,9 +122,8 @@ export class ApiChatAdapter implements AgentAdapter {
     if (model && models.length > 0 && !models.includes(model)) {
       warnings.push(`El modelo configurado (${model}) no aparece en la lista del proveedor.`);
     }
-    if (this.quotaMethod === 'manual-budget' && this.config.budgetUsd === undefined) {
-      warnings.push('El proveedor no envió cabeceras de límite: el cupo será un presupuesto manual; define budgetUsd.');
-    }
+    const budgetNote = this.quotaMethod === 'manual-budget' ? manualBudgetWarning(info.label, this.#opts.estimateCostUsd !== undefined, this.config.budgetUsd !== undefined) : undefined;
+    if (budgetNote) warnings.push(budgetNote);
     const secrets = apiKey ? [apiKey] : [];
     return probeResultSchema.parse({
       agentId: this.config.id,
@@ -259,6 +258,15 @@ export class ApiChatAdapter implements AgentAdapter {
     if (cost === undefined || !Number.isFinite(cost) || cost < 0) return usage;
     return { ...usage, costUsd: Math.round(cost * 1e6) / 1e6 };
   }
+}
+
+/**
+ * Aviso del presupuesto manual. Solo se pide `budgetUsd` si Berland puede descontarlo (estima el costo del proveedor);
+ * si no lo estima, un presupuesto fijado no topa nada y se dice.
+ */
+function manualBudgetWarning(label: string, priced: boolean, hasBudget: boolean): string | undefined {
+  if (priced) return hasBudget ? undefined : 'El proveedor no envió cabeceras de límite: el cupo será un presupuesto manual; defínelo en Ajustes › Agentes (US$).';
+  return hasBudget ? `Berland no conoce el precio de este proveedor (${label}): el presupuesto (budgetUsd) no se descuenta y el cupo quedaría siempre al 100 %.` : undefined;
 }
 
 function probeWarning(err: ClassifiedError, context: string): string {

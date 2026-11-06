@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiChatAdapter } from '../../../../src/core/adapters/api/index.ts';
+import { defaultApiAdapter } from '../../../../src/core/app/defaults.ts';
 import { ResponseHeadersQuota } from '../../../../src/core/quota/response-headers.ts';
 import { probeResultSchema } from '../../../../src/shared/index.ts';
 import {
@@ -26,6 +27,7 @@ describe('ApiChatAdapter.probe con respuestas simuladas', () => {
       config: makeConfig('anthropic', { baseUrl: base, model: 'claude-opus-5-5' }),
       fetch: server.fetch,
       getApiKey: () => KEY,
+      estimateCostUsd: () => 0,
     });
     const probe = probeResultSchema.parse(await adapter.probe());
 
@@ -68,13 +70,29 @@ describe('ApiChatAdapter.probe con respuestas simuladas', () => {
     });
     const probe = await adapter.probe();
 
-    expect(probe).toMatchObject({ authenticated: true, quotaMethod: 'manual-budget', warnings: [] });
+    // Sin precio conocido el presupuesto no se descuenta: se dice, en vez de dar por bueno un tope que no topa.
+    expect(probe).toMatchObject({ authenticated: true, quotaMethod: 'manual-budget' });
+    expect(probe.warnings).toEqual([expect.stringMatching(/no conoce el precio.*Google.*no se descuenta/)]);
     expect(probe.models).toEqual(['gemini-3.5-flash', 'gemini-3.1-pro']);
     expect(server.calls).toHaveLength(2);
     for (const call of server.calls) {
       expect(call.headers.get('x-goog-api-key')).toBe(KEY);
       expect(call.url).not.toContain(KEY);
     }
+  });
+
+  it('presupuesto manual: solo se pide budgetUsd a los proveedores cuyo costo Berland estima (agy-20)', async () => {
+    const server = new FakeServer([
+      { url: 'https://api.openai.com/v1/models', respond: () => jsonResponse(json('openai/models.json')) },
+      { url: 'https://api.anthropic.com/v1/models', respond: () => jsonResponse(json('anthropic/models.real.json')) },
+    ]);
+    const factory = defaultApiAdapter(server.fetch);
+    const openai = await factory(makeConfig('openai', { model: 'gpt-5.5' }), { apiKey: KEY }).probe();
+    expect(openai).toMatchObject({ authenticated: true, quotaMethod: 'manual-budget', warnings: [] });
+    const anthropic = await factory(makeConfig('anthropic', { model: 'claude-opus-5-5' }), { apiKey: KEY }).probe();
+    expect(anthropic.warnings).toEqual([expect.stringMatching(/presupuesto manual.*Ajustes › Agentes/)]);
+    const budgeted = await factory(makeConfig('anthropic', { model: 'claude-opus-5-5', budgetUsd: 3 }), { apiKey: KEY }).probe();
+    expect(budgeted.warnings).toEqual([]);
   });
 
   it('openrouter: método openrouter-key y la clave se valida con /key (el listado es público)', async () => {
@@ -107,8 +125,9 @@ describe('ApiChatAdapter.probe con respuestas simuladas', () => {
     const probe = await adapter.probe();
 
     expect(probe).toMatchObject({ authenticated: true, quotaMethod: 'manual-budget', models: ['qwen3:8b', 'llama3.3:70b'] });
-    expect(probe.warnings).toHaveLength(1);
+    expect(probe.warnings).toHaveLength(2);
     expect(probe.warnings[0]).toContain('Conexión sin cifrar');
+    expect(probe.warnings[1]).toMatch(/no conoce el precio.*no se descuenta/);
     expect(server.calls[0]?.headers.get('authorization')).toBeNull();
   });
 

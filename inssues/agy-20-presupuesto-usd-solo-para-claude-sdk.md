@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/settings/AgentsSection.tsx:180`, `src/ui/features/settings/AgentsSection.tsx:84`, `src/ui/features/settings/AgentsSection.tsx:140`, `src/ui/features/settings/AddAgentDialog.tsx:68`, `src/core/adapters/api/adapter.ts:76`, `src/core/adapters/api/adapter.ts:125`, `src/core/app/quotas.ts:13`, `src/core/app/defaults.ts:24`, `src/core/registry/registry.ts:81`, `PLAN.md:117`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre
