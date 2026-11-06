@@ -12,6 +12,7 @@ import {
   DEFAULT_GATE_WAIT_MS,
   NO_BROWSER_NOTE,
   PluginService,
+  defaultChromeLauncher,
   type McpStdioSpec,
   type StdioProbeResult,
 } from '../../../src/core/plugins/index.ts';
@@ -202,6 +203,10 @@ describe('plugin Chrome: Probar conexión (MCP falso por stdio)', () => {
 });
 
 describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
+  it('el lanzador pide al MCP tachar los encabezados sensibles (cookies, authorization) de la red', () => {
+    expect(defaultChromeLauncher('C:\\x').args).toEqual(['/c', 'C:\\x\\chrome-personal.cmd', '--redact-network-headers']);
+  });
+
   it('servidor `chrome-personal` = la puerta delante de `cmd.exe /c <lanzador>`, con la nota de usar solo este navegador', async () => {
     const dir = await tempDir();
     const h = await pluginHarness({ chrome: { toolsDir: dir, probe: async () => ({ ok: true, tools: ['list_pages', 'new_page'], stderr: [] }) } });
@@ -213,7 +218,7 @@ describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
     expect(spec).toMatchObject({ type: 'stdio', command: process.execPath, toolTimeoutSec: DEFAULT_GATE_WAIT_MS / 1000 + 120 });
     expect(spec.args).toEqual([
       CHROME_GATE_SCRIPT, '--lock', 'chrome-personal', '--agent', 'claude-main', '--task', 'sesion', '--locks-root', h.locksRoot,
-      '--wait-ms', String(DEFAULT_GATE_WAIT_MS), '--idle-ms', String(DEFAULT_GATE_IDLE_MS), '--', systemExe('cmd.exe'), '/c', join(dir, 'chrome-personal.cmd'),
+      '--wait-ms', String(DEFAULT_GATE_WAIT_MS), '--idle-ms', String(DEFAULT_GATE_IDLE_MS), '--', systemExe('cmd.exe'), '/c', join(dir, 'chrome-personal.cmd'), '--redact-network-headers',
     ]);
     expect(spec.instructions).toContain(CHROME_ONLY_NOTE);
     expect(spec.instructions).toContain(CHROME_TAB_NOTE);

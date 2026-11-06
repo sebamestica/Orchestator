@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** alta
 - **Archivos:** `src/core/plugins/chrome.ts:55`, `src/core/plugins/chrome.ts:101`, `src/core/conductor/session.ts:298`, `src/core/conductor/session.ts:314`, `src/core/conductor/guard.ts:184`, `src/core/chat/service.ts:448`, `src/core/adapters/claude-sdk/translate.ts:38`, `src/core/adapters/claude-sdk/translate.ts:69`, `src/core/adapters/claude-sdk/translate.ts:467`, `src/shared/redact.ts:6`, `src/shared/redact.ts:13`, `src/core/conductor/prompt.ts:28`, `C:\dev\agent-hub\tools\browser\chrome-personal.cmd:3` (fuera del repo), `C:\dev\agent-hub\tools\browser\node_modules\chrome-devtools-mcp\build\src\config\mcp-options.js:170`, `…\ToolHandler.js:270`, `…\formatters\NetworkFormatter.js:102`, `…\formatters\NetworkFormatter.js:128`, `…\formatters\NetworkFormatter.js:188`, `…\tools\network.js:78`, `…\tools\network.js:79`, `…\config\ConfigLocator.js:28`, `…\third_party\index.js:64892`, `…\third_party\index.js:65738`, `…\third_party\index.js:65113`, `…\third_party\index.js:165492`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `mente-01` (otra opción que falta en el mismo lanzador: `--no-file-navigations`), `codex-04` (tachado de secretos de los plugins en la mente), `autoeval-navegador-01` (inyección), `autoeval-navegador-04` (pestañas del usuario)
 

@@ -11,6 +11,12 @@ const PATTERNS: readonly RegExp[] = [
   /(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{30,}/g, // GitHub
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWT / tokens OAuth
   /(?<=(?:api[_-]?key|authorization|x-api-key|bearer)["']?\s*[:=]?\s*["']?(?:Bearer\s+)?)[A-Za-z0-9._~+/=-]{16,}/gi,
+  // Valor de `cookie`/`set-cookie`. Exige `nombre=` para no tocar frases ni el `<redacted>` de chrome-devtools-mcp.
+  // Blancos y nombre acotados: sin tope, `'cookie:'.repeat(n)` o un tramo largo de blancos serían O(n²) o peor.
+  // Como encabezado (`- cookie:a=b`, `Set-Cookie: a=b`), hasta el fin de línea: un valor puede llevar comillas.
+  /(?<=(?<![A-Za-z0-9_-])(?:set-)?cookie[ \t]{0,4}:[ \t]{0,4})[^\s"'=;]{1,256}=[^\r\n]*/gi,
+  // Entre comillas (`"cookie": "a=b"`), hasta la comilla de cierre.
+  /(?<=(?<![A-Za-z0-9_-])(?:set-)?cookie["']?[ \t]{0,4}:[ \t]{0,4}["'])[^\s"'=;]{1,256}=[^"'\r\n]*/gi,
 ];
 
 export const REDACTED = '[REDACTADO]';

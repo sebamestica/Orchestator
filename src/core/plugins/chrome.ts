@@ -51,9 +51,16 @@ export function chromeLauncherPath(toolsDir = DEFAULT_BROWSER_TOOLS_DIR): string
   return win32.join(toolsDir, 'chrome-personal.cmd');
 }
 
+/**
+ * Opciones de `chrome-devtools-mcp` que Berland agrega al lanzador del hub (su `.cmd` las reenvía con `%*`).
+ * `--redact-network-headers`: `get_network_request` devuelve la cabecera `cookie` real (con las HttpOnly),
+ * `set-cookie` y `authorization` de las sesiones del usuario; con esto vuelven como `<redacted>`.
+ */
+const LAUNCHER_FLAGS = ['--redact-network-headers'];
+
 /** `cmd.exe /c <lanzador>` con la ruta absoluta de `cmd.exe` (un `cmd.exe` del worktree no se ejecuta en su lugar). */
 export function defaultChromeLauncher(toolsDir = DEFAULT_BROWSER_TOOLS_DIR): ChromeLauncher {
-  return { command: systemExe('cmd.exe'), args: ['/c', chromeLauncherPath(toolsDir)] };
+  return { command: systemExe('cmd.exe'), args: ['/c', chromeLauncherPath(toolsDir), ...LAUNCHER_FLAGS] };
 }
 
 /** Nota para los agentes: el Chrome se comparte (con el usuario y con otros agentes). */
