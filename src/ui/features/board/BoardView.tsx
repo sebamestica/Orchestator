@@ -21,7 +21,9 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
   const agents = useApp((s) => s.agents);
   const refreshTasks = useApp((s) => s.refreshTasks);
 
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => fixedProjectId ?? 'all');
+  // Filtro libre del Tablero general. No se siembra con la prop: si lo hiciera, al pasar de #/tablero/<id> a
+  // #/tablero (misma instancia) el general quedaría filtrado por el proyecto anterior.
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [tasksList, setTasksList] = useState<TaskRecord[]>(() => Object.values(rawTasks));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [manualDialogOpen, setManualDialogOpen] = useState(false);

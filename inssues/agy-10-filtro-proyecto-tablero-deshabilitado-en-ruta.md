@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/board/BoardView.tsx:24`, `src/ui/features/board/BoardView.tsx:42-47`, `src/ui/features/board/BoardView.tsx:76-79`, `src/ui/features/board/BoardView.tsx:124-126`, `src/ui/app/App.tsx:29-30`, `src/ui/app/Sidebar.tsx:37`, `src/ui/app/Sidebar.tsx:57`, `src/ui/app/routes.ts:30-33`, `tests/ui/board/board.test.tsx:191`, `tests/ui/board/board.test.tsx:206`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 - **Fusiona:** `ui-resto-06-tablero-global-hereda-filtro-proyecto.md` (revisión de la interfaz: tablero, panel, ajustes),
   que describía el mismo fallo. Ese archivo se borró; sus aportes (el caso A → B → Tablero, cuándo no ocurre y el hueco

@@ -224,6 +224,48 @@ describe('BoardView', () => {
     expect(screen.queryByText('Tarea pendiente Alfa')).toBeNull();
   });
 
+  it('el tablero general muestra todos al llegar desde el de un proyecto', () => {
+    const { rerender } = render(<BoardView projectId="proj-alpha" />);
+    expect(screen.queryByText('Tarea pendiente Beta')).toBeNull();
+
+    rerender(<BoardView />);
+
+    expect(screen.getByText('Tarea pendiente Alfa')).toBeTruthy();
+    expect(screen.getByText('Tarea pendiente Beta')).toBeTruthy();
+    const trigger = screen.getByRole('button', { name: /elegir proyecto para filtrar/i });
+    expect(trigger.textContent).toContain('Todos los proyectos');
+  });
+
+  it('pasar de un proyecto a otro y luego al general muestra todos', () => {
+    const { rerender } = render(<BoardView projectId="proj-alpha" />);
+    rerender(<BoardView projectId="proj-beta" />);
+    expect(screen.getByText('Tarea pendiente Beta')).toBeTruthy();
+    expect(screen.queryByText('Tarea pendiente Alfa')).toBeNull();
+
+    rerender(<BoardView />);
+
+    expect(screen.getByText('Tarea pendiente Alfa')).toBeTruthy();
+    expect(screen.getByText('Tarea pendiente Beta')).toBeTruthy();
+    const trigger = screen.getByRole('button', { name: /elegir proyecto para filtrar/i });
+    expect(trigger.textContent).toContain('Todos los proyectos');
+  });
+
+  it('el general conserva el filtro elegido tras visitar el tablero de un proyecto', () => {
+    const { rerender } = render(<BoardView />);
+    fireEvent.click(screen.getByRole('button', { name: /elegir proyecto para filtrar/i }));
+    fireEvent.click(screen.getByRole('option', { name: 'Proyecto Beta' }));
+    expect(screen.queryByText('Tarea pendiente Alfa')).toBeNull();
+
+    rerender(<BoardView projectId="proj-alpha" />);
+    expect(screen.getByText('Tarea pendiente Alfa')).toBeTruthy();
+    expect(screen.queryByText('Tarea pendiente Beta')).toBeNull();
+
+    rerender(<BoardView />);
+
+    expect(screen.getByText('Tarea pendiente Beta')).toBeTruthy();
+    expect(screen.queryByText('Tarea pendiente Alfa')).toBeNull();
+  });
+
   it('muestra EmptyState si no hay tareas para el filtro', () => {
     useApp.setState({ tasks: {} });
     render(<BoardView />);
