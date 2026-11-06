@@ -101,6 +101,25 @@ describe('bloqueo de push a nivel de git en los worktrees', () => {
     expect(t.git(ws.path, 'config', '--get-regexp', 'pushinsteadof').trim()).toBe(`url.${BLOCKED_PUSH_URL}.pushinsteadof`);
   });
 
+  // RIESGO RESIDUAL documentado (inssues/autoeval-reglas-04): con el git real, estas vías publican pese al bloqueo del
+  // worktree. Para agy las corta el `git` de Berland (tests/core/adapters/agy-cli/git-shim.test.ts); si una barrera de
+  // git las cierra para todos, esta prueba pasa a exigir lo contrario.
+  it('el git real aún publica con -c pushurl= vacío, con pushInsteadOf propio y desde la copia principal', async () => {
+    const { t, mgr, bare } = setup();
+    const ws = await mgr.create('demo', brief('tarea-via'));
+    commitFile(t, ws.path, 'b.txt', 'nuevo\n');
+    const vias: string[][] = [
+      ['-c', 'remote.origin.pushurl=', '-c', `remote.origin.pushurl=${bare}`, 'push', '--no-verify', 'origin', 'HEAD:refs/heads/b'],
+      ['-c', `url.${bare}.pushInsteadOf=${bare}`, 'push', '--no-verify', bare, 'HEAD:refs/heads/c'],
+      ['-C', t.repo, 'push', 'origin', 'orq/tarea-via:refs/heads/d'],
+    ];
+    for (const args of vias) {
+      const r = rawGit(ws.path, args);
+      expect(r.code, `git ${args.join(' ')}: ${r.out}`).toBe(0);
+    }
+    expect(rawGit(bare, ['for-each-ref', '--format=%(refname)']).out.trim().split(/\r?\n/)).toEqual(['refs/heads/b', 'refs/heads/c', 'refs/heads/d']);
+  });
+
   it('la copia principal del usuario conserva su config y puede hacer push', async () => {
     const { t, mgr, bare } = setup();
     const before = localConfig(t);

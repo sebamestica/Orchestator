@@ -20,7 +20,11 @@ import { briefHints } from '../../brief/reasoning.ts';
 import { runJsonl } from '../../process/run-jsonl.ts';
 import { relativizeChange } from '../common/paths.ts';
 import { resolveAgyExecutable, type AgyExecutable } from './executable.ts';
+import { withGitShim } from './git-shim.ts';
 import { classifyAgyError, translateAgyEvent, type EventBody } from './translate.ts';
+
+/** Nota del encargo de agy: su git pasa por un `.cmd` (ver git-shim.ts) y cmd se come los `^`. */
+export const AGY_GIT_NOTE = '\n\n## git en esta tarea\n\n- En las revisiones de git usa HEAD~1, no ^ (el git de Berland pasa por cmd, que se come los ^).\n';
 
 export interface AgyAdapterOptions {
   executable?: string | AgyExecutable;
@@ -203,7 +207,7 @@ export class AgyCliAdapter implements AgentAdapter {
         const briefFullPath = join(ctx.worktreePath, '.orq', briefFileName);
 
         await mkdir(join(ctx.worktreePath, '.orq'), { recursive: true });
-        await writeFile(briefFullPath, renderBrief(task, ctx.handoff, briefHints(ctx)), 'utf8');
+        await writeFile(briefFullPath, `${renderBrief(task, ctx.handoff, briefHints(ctx))}${AGY_GIT_NOTE}`, 'utf8');
 
         const args: string[] = [
           ...this.executable.args,
@@ -219,11 +223,15 @@ export class AgyCliAdapter implements AgentAdapter {
           args.push('--model', this.config.model);
         }
 
+        // `--dangerously-skip-permissions` ignora las reglas `deny` de `command(...)` (comprobado 2026-11-05): su git
+        // pasa por el `git` de Berland, primero en el PATH (ver git-shim.ts).
+        const env = await withGitShim(ctx.worktreePath, ctx.env);
+
         for await (const line of this.runner({
           command: this.executable.command,
           args,
           cwd: ctx.worktreePath,
-          env: ctx.env,
+          env,
           signal: ctx.signal,
           timeoutMs: ctx.timeoutMs,
         })) {

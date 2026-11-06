@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AgyCliAdapter, agyBrowserOffArgs } from '../../../../src/core/adapters/agy-cli/index.ts';
+import { pathValue } from '../../../../src/core/adapters/agy-cli/git-shim.ts';
 import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../../src/core/process/run-jsonl.ts';
 import type { AgentConfig, AgentEvent, RunContext, TaskBrief } from '../../../../src/shared/index.ts';
@@ -131,6 +132,8 @@ describe('AgyCliAdapter.run', () => {
       // Verificó creación del archivo de brief
       const briefContent = await readFile(path.join(tmp, '.orq', 'BRIEF-tarea-test.md'), 'utf8');
       expect(briefContent).toContain('# Tarea tarea-test: Probar agy adapter');
+      // El git de Berland pasa por un .cmd y cmd se come los ^.
+      expect(briefContent).toContain('usa HEAD~1, no ^');
 
       // Verificó argumentos del CLI
       expect(capturedOpts).toBeDefined();
@@ -145,6 +148,13 @@ describe('AgyCliAdapter.run', () => {
         'gemini-3.8-flash-high',
       ]);
       expect(capturedOpts?.cwd).toBe(tmp);
+      // autoeval-reglas-04: su git pasa por el `git` de Berland, primero en el PATH (en Windows, con git.exe instalado).
+      if (process.platform === 'win32') {
+        const shimDir = path.join(tmp, '.orq', 'bin');
+        expect(pathValue(capturedOpts?.env ?? {})?.split(path.delimiter)[0]).toBe(shimDir);
+        expect(await readFile(path.join(shimDir, 'git.cmd'), 'utf8')).toContain('git-shim.ts');
+        expect(capturedOpts?.env?.SECRET_TOKEN).toBe('secreto-ultra');
+      }
 
       // Verificó eventos
       expect(events[0]?.type).toBe('status');

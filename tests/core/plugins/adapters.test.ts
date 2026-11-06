@@ -260,7 +260,8 @@ describe('agy y la fábrica de adaptadores', () => {
     expect(AGY_BROWSER_DENY).toContain('mcp(chrome-agente/*)');
     expect(args.join(' ')).not.toMatch(/mcpServers|mcp_config|mcp add/i);
     const { readdir } = await import('node:fs/promises');
-    expect(await readdir(join(wt, '.orq'))).toEqual(['BRIEF-tarea-agy.md']);
+    // `bin` solo trae el `git.cmd` de Berland (autoeval-reglas-04), no configuración MCP.
+    expect((await readdir(join(wt, '.orq'))).filter((f) => f !== 'bin')).toEqual(['BRIEF-tarea-agy.md']);
   });
 
   it('createAdapterFactory pasa la fuente de plugins a Claude y a Codex (no a agy)', () => {

@@ -1052,3 +1052,13 @@ export async function shellCommandProblem(
     ...(opts.untrusted ? { untrusted: opts.untrusted } : {}),
   });
 }
+
+/**
+ * Motivo de denegación de una llamada a git con los argumentos ya separados (sin shell), ejecutada en `cwd`; undefined
+ * si se permite. Es la misma regla de git que los workers Claude; la usa el `git` de Berland para agy (`git-shim.ts`).
+ */
+export async function gitArgvProblem(argv: readonly string[], worktree: string, cwd: string = worktree): Promise<string | undefined> {
+  const words = argv.map((text): Word => ({ text, dynamic: false, quoted: false, glob: false }));
+  const outcome = await evalGit(words, { worktree: path.resolve(worktree), kind: 'cmd', depth: 0, cwd: path.resolve(cwd) });
+  return typeof outcome === 'string' ? outcome : undefined;
+}

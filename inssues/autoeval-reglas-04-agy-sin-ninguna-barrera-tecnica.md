@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/agy-cli/index.ts:39-53`, `src/core/adapters/agy-cli/index.ts:60-68`, `src/core/adapters/agy-cli/index.ts:205-225`, `src/core/process/run-jsonl.ts:32`, `src/core/process/child-env.ts:21-31`, `src/core/workspace/push-block.ts:7`, `src/core/workspace/push-block.ts:88-116`, `tests/core/workspace/push-block.cases.ts:43-58`, `src/core/app/commit-step.ts:101-106`, `src/core/adapters/claude-sdk/permissions.ts:73-125`, `src/core/adapters/claude-sdk/shell-policy.ts:20-23`, `docs/DECISIONES.md:38-41`, `docs/DECISIONES.md:43-53`, `docs/plan/issues/11-chrome-personal.md:57-60`, `docs/plan/issues/11-chrome-personal.md:148`, `%LOCALAPPDATA%\agy\bin\agy.exe` (fuera del repo)
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `autoeval-reglas-02-worktree-alcanza-stash-y-ramas-del-repo.md`, `autoeval-reglas-03-modo-local-sin-bloqueo-de-push.md`, `flota-01-modo-local-reglas-fuera-del-prompt.md`
 
