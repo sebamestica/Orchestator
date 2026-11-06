@@ -19,7 +19,7 @@ import { MemoryVault } from '../../../src/core/vault/index.ts';
 import { projectWorkspaceSchema, type ProjectStorage } from '../../../src/core/workspace/index.ts';
 import { changesTargetSchema, chatTargetResponse, DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { ChangesTarget, Chat } from '../../../src/shared/index.ts';
-import { brief, fakePorts, jsonOf, SECRET_PATTERN } from '../conductor/fakes.ts';
+import { brief, fakePorts, jsonOf, promptBlocks, SECRET_PATTERN } from '../conductor/fakes.ts';
 import { bench, chatQuery, claudeAgent, closeBenches, echoTurn, MIND_KEY, settleChat, type ChatBench } from './helpers.ts';
 
 // Repos git reales.
@@ -99,7 +99,7 @@ describe('crear_tareas con destino', () => {
     git(b.repo, 'init', '-q', '-b', 'main');
     git(b.repo, 'remote', 'add', 'origin', `https://${GH_TOKEN}@github.com/sebamestica/Orchestator`);
     const chat = await openChat(b);
-    expect(b.q.calls[0]?.options.systemPrompt).toEqual(expect.arrayContaining([DESTINATION_PROMPT_TEXT]));
+    expect(promptBlocks(b.q.calls[0]?.options)).toEqual(expect.arrayContaining([DESTINATION_PROMPT_TEXT]));
 
     const result = await crearTareas(b, chat.id, { destino: { remoto: 'origin' } }, 'api-destino');
     expect(result.isError).toBeFalsy();
@@ -195,7 +195,7 @@ describe('crear_tareas con destino', () => {
     const solo = b.service.create({ projectId: null, cwd: b.repo });
     await b.service.send(solo.id, { text: 'hola' });
     await b.settle(solo.id);
-    expect(b.q.calls.at(-1)?.options.systemPrompt).not.toEqual(expect.arrayContaining([DESTINATION_PROMPT_TEXT]));
+    expect(promptBlocks(b.q.calls.at(-1)?.options)).not.toEqual(expect.arrayContaining([DESTINATION_PROMPT_TEXT]));
   });
 });
 

@@ -258,3 +258,12 @@ export function userText(message: SDKUserMessage): string {
   const content = message.message.content;
   return typeof content === 'string' ? content : JSON.stringify(content);
 }
+
+/** Bloques del prompt de sistema de la mente: `{ type: 'custom', prompt: string[], snapshot: false }`. */
+export function promptBlocks(options: Options | undefined): string[] {
+  const prompt = options?.systemPrompt;
+  if (typeof prompt !== 'object' || Array.isArray(prompt) || prompt.type !== 'custom' || !Array.isArray(prompt.prompt)) {
+    throw new Error('systemPrompt no es un prompt propio en bloques');
+  }
+  return prompt.prompt;
+}

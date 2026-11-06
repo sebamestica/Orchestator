@@ -1,9 +1,9 @@
 /**
- * Prueba en vivo opcional del chat con la mente (gasta saldo: dos turnos cortos, esfuerzo bajo y tope de 0,50 USD).
+ * Prueba en vivo opcional del chat con la mente (gasta saldo: dos casos de dos turnos cortos, esfuerzo bajo y tope de 0,50 USD cada uno).
  * Solo con ORQ_LIVE=1 y la clave en el entorno. Desde WSL:
  *   WSLENV=ANTHROPIC_API_KEY/w:ANTHROPIC_BASE_URL/w scripts/win.sh "set ORQ_LIVE=1&& npx vitest run tests/live/chat.live.test.ts"
  * Comprueba la sesión real del SDK por el `ChatService`: imagen como bloque, respuesta por el hub, cierre por ocio y
- * reanudación con `resume` (la mente recuerda la palabra del primer turno).
+ * reanudación con `resume` (la mente recuerda la palabra del primer turno y, tras cambiar de modo, conoce el nuevo).
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,7 +37,8 @@ describe.skipIf(!live)('chat con la mente en vivo', () => {
     }
   });
 
-  it('responde, se cierra por ocio y reanuda recordando el primer turno', async () => {
+  /** Servicio de chat real con la clave del entorno, esfuerzo bajo y tope de 0,50 USD. */
+  const openService = () => {
     const apiKey = process.env.ANTHROPIC_API_KEY ?? '';
     const env: Record<string, string> = { ANTHROPIC_API_KEY: apiKey };
     if (process.env.ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL;
@@ -60,6 +61,11 @@ describe.skipIf(!live)('chat con la mente en vivo', () => {
     const wait = async (chatId: string) => {
       for (let i = 0; i < 1200 && service.get(chatId).state === 'running'; i++) await new Promise((r) => setTimeout(r, 100));
     };
+    return { apiKey, store, attachments, service, wait };
+  };
+
+  it('responde, se cierra por ocio y reanuda recordando el primer turno', async () => {
+    const { apiKey, store, attachments, service, wait } = openService();
     try {
       const chat = service.create({ projectId: 'demo', mode: 'plan' });
       const image = await attachments.upload({ name: 'punto.png', mime: 'image/png', bytes: new Uint8Array(PNG_1X1) });
@@ -73,6 +79,26 @@ describe.skipIf(!live)('chat con la mente en vivo', () => {
       console.warn(redactSecrets(JSON.stringify({ mensajes: messages.map((m) => [m.role, m.text]), costoUsd: service.get(chat.id).costUsd }), [apiKey]));
       expect(messages.at(-1)?.text.toLowerCase()).toContain('girasol');
       expect(store.eventsSince(chat.sessionId, -1, 5000).length).toBeGreaterThan(0);
+    } finally {
+      service.shutdown();
+      store.close();
+    }
+  });
+
+  it('al cambiar de modo, la mente reanudada conoce el modo nuevo', async () => {
+    const { apiKey, store, service, wait } = openService();
+    const ask = 'Según tu contexto de sesión, ¿en qué modo estás? Responde solo con la palabra.';
+    try {
+      const chat = service.create({ projectId: 'demo', mode: 'plan' });
+      await service.send(chat.id, { text: ask });
+      await wait(chat.id);
+      expect(service.messages(chat.id).at(-1)?.text).toMatch(/plan/i);
+      service.patch(chat.id, { mode: 'chat' });
+      await service.send(chat.id, { text: ask });
+      await wait(chat.id);
+      const messages = service.messages(chat.id);
+      console.warn(redactSecrets(JSON.stringify({ mensajes: messages.map((m) => [m.role, m.text]), costoUsd: service.get(chat.id).costUsd }), [apiKey]));
+      expect(messages.at(-1)?.text).toMatch(/chat/i);
     } finally {
       service.shutdown();
       store.close();

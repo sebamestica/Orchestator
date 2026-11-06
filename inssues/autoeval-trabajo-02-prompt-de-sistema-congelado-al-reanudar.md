@@ -5,7 +5,7 @@
   chat cae en esto; en el uso real de 2026-11-04 y 2026-11-05 le pasó a 4 de los 6 chats, ver «Evidencia en uso real»).
   La guardia sigue el modo vigente, así que no abre permisos de más: lo que falla es lo que la mente cree, dice y planea.
 - **Archivos:** `src/core/conductor/session.ts:148-153`, `src/core/conductor/session.ts:342-357`, `src/core/conductor/session.ts:375`, `src/core/conductor/prompt.ts:4-7`, `src/core/conductor/prompt.ts:54`, `src/core/conductor/prompt.ts:103-129`, `src/core/conductor/prompt.ts:176-181`, `src/core/chat/service.ts:6-9`, `src/core/chat/service.ts:665-676`, `src/core/chat/service.ts:693`, `src/core/chat/service.ts:708-735`, `src/shared/api.ts:72`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:2404-2431`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:2447-2458`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:4578-4580`, `tests/core/chat/service.test.ts:308-318`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmaciones 2 («da por hecho un estado que no existe») y 3 («contexto limitado»)
 - **Relacionadas:** `codex-03` (quitar una carpeta extra no revoca la sesión viva), `plugins-03` y `autoeval-navegador-01` (proponen más texto en el prompt, que también quedaría congelado en los chats existentes), `ui-resto-05` (textos de los modos)
 

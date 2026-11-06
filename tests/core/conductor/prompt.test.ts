@@ -12,7 +12,7 @@ import {
 } from '../../../src/core/conductor/index.ts';
 import type { ConductorQueryFn } from '../../../src/core/conductor/index.ts';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
-import { FAKE_API_KEY, FakeQuotas, SECRET_PATTERN, fakePorts, fixtureQuotas } from './fakes.ts';
+import { FAKE_API_KEY, FakeQuotas, SECRET_PATTERN, fakePorts, fixtureQuotas, promptBlocks } from './fakes.ts';
 
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -194,10 +194,7 @@ describe('prompt de sistema del orquestador', () => {
     const two = new ConductorSession({ ports: fakePorts(), projectId: 'orquestador', cwd: 'C:\\dev\\orquestador', query, now: () => new Date('2026-12-24T20:00:00Z'), notes: 'otra nota' });
     one.send('hola');
     two.send('hola');
-    const [p1, p2] = captured.map((o) => o.systemPrompt);
-    expect(Array.isArray(p1) && Array.isArray(p2)).toBe(true);
-    const s1 = p1 as string[];
-    const s2 = p2 as string[];
+    const [s1 = [], s2 = []] = captured.map(promptBlocks);
     expect(s1[0]).toBe(s2[0]);
     expect(s1[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     expect(s1[2]).not.toBe(s2[2]);

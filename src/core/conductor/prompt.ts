@@ -5,6 +5,9 @@
  * las sesiones y proyectos: no lleva fechas, rutas, ids ni cupos. Lo variable va **después** de
  * `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` (el SDK solo cachea entre sesiones lo que está antes del marcador).
  * Si editas el prefijo, la caché se invalida una vez: hazlo a propósito, no por datos de la sesión.
+ *
+ * El contexto dinámico rige al reanudar porque la sesión pasa el prompt con `snapshot: false` (`session.ts`): sin eso,
+ * el SDK reusaría el prompt grabado en la primera sesión (modo, carpetas, fecha y cupos viejos).
  */
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';

@@ -161,8 +161,9 @@ export interface ConductorSessionOptions {
   cwd: string;
   /**
    * Modo de la mente. Con una función, la guardia y las herramientas la leen en cada llamada; `allowedTools` y el
-   * texto del prompt salen del valor al crear la sesión (un cambio rige desde la sesión siguiente). Sin modo: terminal
-   * antigua (el usuario aprueba y el orquestador delega).
+   * texto del prompt salen del valor al crear la sesión (un cambio rige desde la sesión siguiente, también al reanudar:
+   * el prompt va con `snapshot: false` y el SDK no reusa el grabado). Sin modo: terminal antigua (el usuario aprueba y
+   * el orquestador delega).
    */
   mode?: MindMode | (() => MindMode);
   /** Aprobación automática de `auto`/`bypass` (ver `ConductorToolsOptions.autoApprove`). */
@@ -378,23 +379,30 @@ export class ConductorSession {
       cwd: o.cwd,
       env,
       abortController: this.#abort,
-      systemPrompt: [
-        ...buildConductorSystemPrompt({
-          projectId: o.projectId,
-          projectDir: o.cwd,
-          ...(this.mode ? { mode: this.mode } : {}),
-          ...(extraRoots.length ? { extraRoots } : {}),
-          ...(opts.workMode ? { workMode: opts.workMode } : {}),
-          date: now(),
-          quotas: opts.ports.quotas.all(),
-          quotaFloor: o.quotaFloor,
-          notes: opts.notes,
-          secrets: this.#secrets,
-        }),
-        // En chat no hay crear_tareas: el destino no se anota.
-        ...(opts.recordDestination && !standalone && this.mode !== 'chat' ? [DESTINATION_PROMPT_TEXT] : []),
-        ...(opts.pluginRules?.trim() ? [redactSecrets(opts.pluginRules, this.#secrets)] : []),
-      ],
+      // `snapshot: false`: el SDK no graba el prompt, así que una sesión reanudada (cambio de modo, carpetas o plugins,
+      // o tras el cierre por ocio) recibe el contexto vigente y no el de la primera sesión. Dentro de una sesión el
+      // texto no cambia (se arma aquí una vez); el prefijo sigue igual y en caché. No lo quites por ahorrar caché.
+      systemPrompt: {
+        type: 'custom',
+        snapshot: false,
+        prompt: [
+          ...buildConductorSystemPrompt({
+            projectId: o.projectId,
+            projectDir: o.cwd,
+            ...(this.mode ? { mode: this.mode } : {}),
+            ...(extraRoots.length ? { extraRoots } : {}),
+            ...(opts.workMode ? { workMode: opts.workMode } : {}),
+            date: now(),
+            quotas: opts.ports.quotas.all(),
+            quotaFloor: o.quotaFloor,
+            notes: opts.notes,
+            secrets: this.#secrets,
+          }),
+          // En chat no hay crear_tareas: el destino no se anota.
+          ...(opts.recordDestination && !standalone && this.mode !== 'chat' ? [DESTINATION_PROMPT_TEXT] : []),
+          ...(opts.pluginRules?.trim() ? [redactSecrets(opts.pluginRules, this.#secrets)] : []),
+        ],
+      },
       mcpServers: { ...Object.fromEntries(plugins), [this.tools.serverName]: this.tools.server },
       strictMcpConfig: true,
       tools: builtins,

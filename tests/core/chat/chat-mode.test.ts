@@ -3,6 +3,7 @@ import type { HookCallbackMatcher, Options } from '@anthropic-ai/claude-agent-sd
 import { afterEach, describe, expect, it } from 'vitest';
 import { BYPASS_TOOLS } from '../../../src/core/conductor/index.ts';
 import { sendMessageBody } from '../../../src/shared/index.ts';
+import { promptBlocks } from '../conductor/fakes.ts';
 import { bench, closeBenches, type ChatBench } from './helpers.ts';
 
 afterEach(closeBenches);
@@ -46,7 +47,7 @@ describe('ChatService: modo chat (como Claude Code)', () => {
       expect(o.allowedTools).not.toContain(`mcp__orquestador__${t}`);
       expect(o.disallowedTools).toContain(`mcp__orquestador__${t}`);
     }
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: chat/);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: chat/);
     const pre = guardOf(o, b.repo);
     expect(await pre('Write', { file_path: join(b.repo, 'README.md'), content: '# Demo' })).toBe(true);
     expect(await pre('Write', { file_path: join(b.dir, 'fuera.md'), content: 'x' })).toBe(false);
@@ -65,7 +66,7 @@ describe('ChatService: modo chat (como Claude Code)', () => {
     expect(o.cwd).toBe(b.repo);
     for (const t of BYPASS_TOOLS) expect(o.allowedTools).toContain(t);
     expect(o.allowedTools).not.toContain('mcp__orquestador__crear_tareas');
-    expect((o.systemPrompt as string[])[2]).toMatch(/conversación: sin proyecto ni flota[\s\S]*## Modo: chat/);
+    expect(promptBlocks(o)[2]).toMatch(/conversación: sin proyecto ni flota[\s\S]*## Modo: chat/);
     const pre = guardOf(o, b.repo);
     expect(await pre('Write', { file_path: join(b.repo, 'notas.md'), content: 'x' })).toBe(true);
     expect(await pre('Bash', { command: 'git status' })).toBe(true);

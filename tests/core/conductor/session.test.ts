@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BUILTIN_TOOL_NAMES, LEGACY_TOOL_NAME_ALIASES } from '@anthropic-ai/claude-agent-sdk';
+import { BUILTIN_TOOL_NAMES, LEGACY_TOOL_NAME_ALIASES, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, HookCallbackMatcher, Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../../../src/core/conductor/index.ts';
 import type { ConductorSessionOptions, SdkMessageTranslator, TranslatorInit } from '../../../src/core/conductor/index.ts';
 import type { AgentEvent } from '../../../src/shared/index.ts';
-import { FAKE_API_KEY, SECRET_PATTERN, assistantText, fakePorts, readTurn, resultMessage, scriptedQuery, toolResultMessage, userText } from './fakes.ts';
+import { FAKE_API_KEY, SECRET_PATTERN, assistantText, fakePorts, promptBlocks, readTurn, resultMessage, scriptedQuery, toolResultMessage, userText } from './fakes.ts';
 
 const PROXY_KEY = 'clave-del-proxy-0123456789';
 const BASE_ENV = { PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\yo', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ANTHROPIC_AUTH_TOKEN: 'token-heredado-abcdef' };
@@ -49,11 +49,11 @@ describe('ConductorSession: reglas de los plugins', () => {
   it('pluginRules va como un bloque aparte al final del prompt de sistema; sin la opción, el prompt no cambia', () => {
     const plain = session();
     plain.s.send('hola');
-    const before = optionsOf(plain.q).systemPrompt as string[];
+    const before = promptBlocks(optionsOf(plain.q));
     const rules = '## Plugins del orquestador\n- Regla X de los plugins';
     const { s, q } = session({ pluginRules: rules });
     s.send('hola');
-    const prompt = optionsOf(q).systemPrompt as string[];
+    const prompt = promptBlocks(optionsOf(q));
     expect(prompt).toHaveLength(before.length + 1);
     expect(prompt.at(-1)).toBe(rules);
     expect(prompt[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
@@ -102,12 +102,32 @@ describe('ConductorSession: opciones del SDK', () => {
     expect(DEFAULT_CONDUCTOR_MODEL).toBe('claude-opus-5-5');
     expect(o.effort).toBe('high');
     expect(o.abortController).toBeInstanceOf(AbortController);
-    expect((o.systemPrompt as string[])[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect(promptBlocks(o)[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     expect(o.maxBudgetUsd).toBeUndefined();
     expect(o.forwardSubagentText).toBe(true);
     s.close();
     expect(o.abortController?.signal.aborted).toBe(true);
     expect(q.closed).toBe(1);
+  });
+
+  it('el prompt de sistema no se graba: al reanudar con otro modo, el SDK manda el contexto nuevo', () => {
+    const first = session({ mode: 'plan' });
+    first.s.send('hola');
+    expect(optionsOf(first.q).systemPrompt).toEqual({
+      type: 'custom',
+      snapshot: false,
+      prompt: [CONDUCTOR_PROMPT_PREFIX, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, expect.stringMatching(/## Modo: plan/)],
+    });
+    first.s.close();
+    // La sesión recreada (cambio de modo) reanuda la misma conversación con el contexto del modo nuevo.
+    const resumed = session({ mode: 'chat', resume: 'sdk-1' });
+    resumed.s.send('¿en qué modo estás?');
+    const o = optionsOf(resumed.q);
+    expect(o.resume).toBe('sdk-1');
+    expect(o.systemPrompt).toMatchObject({ type: 'custom', snapshot: false });
+    expect(promptBlocks(o)[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: chat/);
+    resumed.s.close();
   });
 
   it('modelo, esfuerzo, tope de gasto y turnos configurables', () => {
@@ -314,8 +334,8 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     expect(o.allowedTools).toContain('mcp__orquestador__crear_tareas');
     // La definición MCP no cambia (mismo prefijo de herramientas en caché en los tres modos).
     expect(o.mcpServers?.orquestador).toBe(s.tools.server);
-    expect((o.systemPrompt as string[])[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: plan/);
+    expect(promptBlocks(o)[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: plan/);
     const pre = hookOf(o);
     expect(await pre('mcp__orquestador__delegar', { taskId: 'api' })).toMatch(/"permissionDecision":"deny"/);
     mode = 'auto';
@@ -330,7 +350,7 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     s.send('hola');
     const o = optionsOf(q);
     expect(o.allowedTools).toContain('mcp__orquestador__delegar');
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: auto/);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: auto/);
     const pre = hookOf(o);
     expect(await pre('mcp__orquestador__delegar', { taskId: 'api' })).toBe('{}');
     mode = 'plan';
@@ -345,7 +365,7 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     expect(s.projectId).toBeNull();
     for (const name of ['crear_tareas', 'delegar', 'estado', 'escribir_memoria']) expect(o.allowedTools).not.toContain(`mcp__orquestador__${name}`);
     expect(o.allowedTools).toEqual(['mcp__orquestador__cupos', 'mcp__orquestador__leer_memoria', 'mcp__orquestador__buscar_skills', 'Read', 'Grep', 'Glob', 'Agent']);
-    expect((o.systemPrompt as string[])[2]).toMatch(/Proyecto: ninguno \(conversación/);
+    expect(promptBlocks(o)[2]).toMatch(/Proyecto: ninguno \(conversación/);
     expect(await hookOf(o)('mcp__orquestador__crear_tareas', { plan: 'x' })).toMatch(/"permissionDecision":"deny"/);
     s.close();
   });
@@ -394,7 +414,7 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     s.send('hola');
     const o = optionsOf(q);
     expect(o.additionalDirectories).toEqual(['D:\\datos', 'C:\\dev\\agent-hub\\skills']);
-    expect((o.systemPrompt as string[])[2]).toMatch(/Carpetas extra de lectura: D:\\datos/);
+    expect(promptBlocks(o)[2]).toMatch(/Carpetas extra de lectura: D:\\datos/);
     const pre = hookOf(o);
     expect(await pre('Read', { file_path: 'E:\\x\\a.md' })).toMatch(/deny/);
     roots.push('E:\\x');
@@ -411,7 +431,7 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
       s.send('hola');
       const o = optionsOf(q);
       expect(o.additionalDirectories).toEqual([dir]);
-      expect((o.systemPrompt as string[])[2]).toContain(`Carpetas extra de lectura: ${dir}`);
+      expect(promptBlocks(o)[2]).toContain(`Carpetas extra de lectura: ${dir}`);
       const pre = hookOf(o);
       const read = { file_path: join(dir, 'a.txt') };
       const write = { file_path: join(dir, 'b.txt'), content: 'x' };
@@ -524,8 +544,8 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
     // El shell vuelve a la carpeta del proyecto tras cada comando: un cd fuera no deja la sesión afuera.
     expect(o.env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe('1');
     expect(o.env?.ANTHROPIC_API_KEY).toBe(PROXY_KEY);
-    expect((o.systemPrompt as string[])[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: bypass[\s\S]*Hazlo tú mismo[\s\S]*No preguntes/);
+    expect(promptBlocks(o)[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: bypass[\s\S]*Hazlo tú mismo[\s\S]*No preguntes/);
     // El investigador sigue siendo de solo lectura.
     expect((o.agents as Record<string, AgentDefinition>).investigador?.tools).not.toContain('Bash');
     s.close();
@@ -643,7 +663,7 @@ describe('ConductorSession: modo chat (como Claude Code, sin flota)', () => {
     for (const t of BYPASS_TOOLS) expect(o.disallowedTools).not.toContain(t);
     expect(o.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1');
     expect(o.env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe('1');
-    const prompt = o.systemPrompt as string[];
+    const prompt = promptBlocks(o);
     expect(prompt[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
     expect(prompt[2]).toMatch(/## Modo: chat[\s\S]*como Claude Code[\s\S]*No creas tareas ni delegas a la flota/);
     // Sin crear_tareas, el texto del destino no va.
@@ -656,7 +676,7 @@ describe('ConductorSession: modo chat (como Claude Code, sin flota)', () => {
     s.send('hola');
     const o = optionsOf(q);
     expect(o.allowedTools).toEqual(['mcp__orquestador__cupos', 'mcp__orquestador__leer_memoria', 'mcp__orquestador__buscar_skills', 'Read', 'Grep', 'Glob', 'Agent', ...BYPASS_TOOLS]);
-    const prompt = (o.systemPrompt as string[])[2] ?? '';
+    const prompt = promptBlocks(o)[2] ?? '';
     expect(prompt).toMatch(/Proyecto: ninguno \(conversación/);
     expect(prompt).toMatch(/## Modo: chat/);
     expect(prompt).not.toMatch(/## Conversación\n/);

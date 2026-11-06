@@ -10,6 +10,7 @@ import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, chromeServerSpec, pluginsSection } fr
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { LiveSpend } from '../../../src/core/quota/live-spend.ts';
+import { promptBlocks } from '../conductor/fakes.ts';
 import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, meteredTurn, sdkInit, sdkResult, sdkSpent, sdkText, settleChat, tick, usageCost, type ChatBench, type TurnFn } from './helpers.ts';
 
 afterEach(closeBenches);
@@ -401,7 +402,7 @@ describe('ChatService: modos', () => {
     const o = optionsOf(b);
     expect(o.allowedTools).not.toContain('mcp__orquestador__delegar');
     expect(o.allowedTools).toContain('mcp__orquestador__crear_tareas');
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: plan/);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: plan/);
     expect(await guardOf(o)('mcp__orquestador__delegar', { taskId: 'api' })).toBe(false);
     const tools = b.service.sessionOf(chat.id)?.tools;
     await tools?.call('crear_tareas', { plan: 'plan' });
@@ -416,7 +417,7 @@ describe('ChatService: modos', () => {
     await turn(b, chat.id, 'hola');
     const o = optionsOf(b);
     expect(o.allowedTools).toContain('mcp__orquestador__delegar');
-    expect((o.systemPrompt as string[])[2]).toMatch(/## Modo: auto[\s\S]*quedan aprobadas al instante/);
+    expect(promptBlocks(o)[2]).toMatch(/## Modo: auto[\s\S]*quedan aprobadas al instante/);
     expect(await guardOf(o)('mcp__orquestador__delegar', { taskId: 'api' })).toBe(true);
     const tools = b.service.sessionOf(chat.id)?.tools;
     const created = await tools?.call('crear_tareas', { plan: 'plan' });
@@ -435,10 +436,12 @@ describe('ChatService: modos', () => {
     await turn(b, chat.id, 'sigue');
     expect(b.q.calls).toHaveLength(2);
     expect(optionsOf(b, 1).resume).toBe('sdk-1');
+    // Sin grabar el prompt: el SDK reanudado manda este contexto (modo plan), no el de la primera sesión.
+    expect(optionsOf(b, 1).systemPrompt).toMatchObject({ type: 'custom', snapshot: false });
     expect(optionsOf(b, 1).allowedTools).not.toContain('mcp__orquestador__delegar');
-    expect((optionsOf(b, 1).systemPrompt as string[])[2]).toMatch(/## Modo: plan/);
+    expect(promptBlocks(optionsOf(b, 1))[2]).toMatch(/## Modo: plan/);
     // El prefijo en caché es el mismo en los dos modos.
-    expect((optionsOf(b, 1).systemPrompt as string[])[0]).toBe((o.systemPrompt as string[])[0]);
+    expect(promptBlocks(optionsOf(b, 1))[0]).toBe(promptBlocks(o)[0]);
     expect(b.service.messages(chat.id).map((m) => m.mode)).toEqual(['auto', 'auto', 'plan', 'plan']);
   });
 
@@ -459,7 +462,7 @@ describe('ChatService: modos', () => {
       const bypass = optionsOf(b, 1);
       expect(bypass.additionalDirectories).toEqual(expect.arrayContaining([extra, 'C:\\', 'D:\\']));
       expect(bypass.allowedTools).toContain('mcp__orquestador__delegar');
-      expect((bypass.systemPrompt as string[])[2]).toMatch(/## Modo: bypass/);
+      expect(promptBlocks(bypass)[2]).toMatch(/## Modo: bypass/);
       // Issue 8: en bypass la mente edita y ejecuta (la guardia niega una llamada sin ruta ni comando); en auto, no.
       for (const t of ['Bash', 'PowerShell', 'Edit', 'Write']) {
         expect(bypass.allowedTools).toContain(t);
@@ -479,7 +482,7 @@ describe('ChatService: modos', () => {
     const o = optionsOf(b);
     expect(o.cwd).toBe(b.dir);
     for (const t of ['crear_tareas', 'delegar', 'estado', 'escribir_memoria']) expect(o.allowedTools).not.toContain(`mcp__orquestador__${t}`);
-    expect((o.systemPrompt as string[])[2]).toMatch(/Proyecto: ninguno \(conversación/);
+    expect(promptBlocks(o)[2]).toMatch(/Proyecto: ninguno \(conversación/);
     const res = await b.service.sessionOf(chat.id)?.tools.call('crear_tareas', { plan: 'x', proyecto: 'demo' });
     expect(res?.isError).toBe(true);
     expect(b.service.proposals(chat.id)).toEqual([]);
@@ -758,7 +761,7 @@ describe('ChatService: plugins para la mente', () => {
     const b = await bench({ plugins: async () => ({ mcpServers, env: {}, rules }) });
     const chat = b.service.create({ projectId: 'demo' });
     await turn(b, chat.id, 'navega');
-    const first = (optionsOf(b).systemPrompt as string[]).join('\n');
+    const first = promptBlocks(optionsOf(b)).join('\n');
     expect(first).toContain(CHROME_TAB_NOTE);
     expect(first).toContain('no escribas contraseñas');
     // Chrome desconectado: sin servidores, pero con la nota de que no hay navegador.
@@ -766,14 +769,14 @@ describe('ChatService: plugins para la mente', () => {
     rules = pluginsSection({ servers: {}, notes: [NO_BROWSER_NOTE] });
     await turn(b, chat.id, 'abre una página');
     expect(b.q.calls).toHaveLength(2);
-    const second = (optionsOf(b, 1).systemPrompt as string[]).join('\n');
+    const second = promptBlocks(optionsOf(b, 1)).join('\n');
     expect(second).toContain(NO_BROWSER_NOTE);
     expect(second).not.toContain(CHROME_TAB_NOTE);
     // Solo cambia el texto de las reglas: cambia la forma y la sesión se recrea.
     rules = pluginsSection({ servers: {}, notes: [NO_BROWSER_NOTE, 'Canva no está disponible en esta sesión.'] });
     await turn(b, chat.id, 'tres');
     expect(b.q.calls).toHaveLength(3);
-    expect((optionsOf(b, 2).systemPrompt as string[]).join('\n')).toContain('Canva no está disponible');
+    expect(promptBlocks(optionsOf(b, 2)).join('\n')).toContain('Canva no está disponible');
   });
 
   it('pluginLive: la guardia de la sesión viva niega en el acto un plugin que se desconectó', async () => {

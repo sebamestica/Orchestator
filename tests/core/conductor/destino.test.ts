@@ -12,7 +12,7 @@ import {
   type DestinationRequest,
 } from '../../../src/core/conductor/index.ts';
 import type { ChangesTarget } from '../../../src/shared/index.ts';
-import { FAKE_API_KEY, FakePlanner, NOW, SECRET_PATTERN, SESSION_SECRET, brief, fakePorts, jsonOf, textOf } from './fakes.ts';
+import { FAKE_API_KEY, FakePlanner, NOW, SECRET_PATTERN, promptBlocks, SESSION_SECRET, brief, fakePorts, jsonOf, textOf } from './fakes.ts';
 
 const REMOTE: ChangesTarget = { kind: 'remote', path: 'C:\\dev\\demo', remote: { name: 'origin', url: 'https://github.com/a/b' }, branch: 'main', configured: true };
 
@@ -147,8 +147,8 @@ describe('sesión: texto del prompt sobre destino', () => {
   }
 
   it('con recordDestination va como bloque propio al final; el prefijo y el contexto no cambian', () => {
-    const plain = optionsOf({}).systemPrompt as string[];
-    const withTarget = optionsOf({ recordDestination: () => REMOTE }).systemPrompt as string[];
+    const plain = promptBlocks(optionsOf({}));
+    const withTarget = promptBlocks(optionsOf({ recordDestination: () => REMOTE }));
     expect(plain).toHaveLength(3);
     expect(withTarget).toHaveLength(4);
     expect(withTarget[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
@@ -164,7 +164,7 @@ describe('sesión: texto del prompt sobre destino', () => {
       calls.push(1);
       return REMOTE;
     };
-    expect(optionsOf({ projectId: null, recordDestination: record }).systemPrompt).toHaveLength(3);
+    expect(promptBlocks(optionsOf({ projectId: null, recordDestination: record }))).toHaveLength(3);
     const s = new ConductorSession({ ports: fakePorts(), projectId: null, cwd: 'C:\\dev\\demo', recordDestination: record, query: () => (async function* () {})() });
     expect((await s.tools.call('crear_tareas', { plan: 'plan', destino: { remoto: 'origin' } })).isError).toBe(true);
     expect(calls).toEqual([]);
