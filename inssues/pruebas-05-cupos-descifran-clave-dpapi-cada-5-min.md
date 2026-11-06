@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** baja
 - **Archivos:** `src/core/registry/quotas.ts:61`, `src/core/registry/quotas.ts:62`, `src/core/registry/registry.ts:26`, `src/core/registry/registry.ts:266`, `src/core/app/quotas.ts:31`, `src/core/app/quotas.ts:37`, `src/core/app/quotas.ts:39`, `src/core/app/quotas.ts:41`, `src/core/main.ts:68`, `src/core/main.ts:109`, `src/core/config/config.ts:10`, `src/core/vault/vault.ts:90`, `src/core/vault/dpapi.ts:76`, `src/core/app/fleet-service.ts:361`, `src/core/app/conductor.ts:133`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

@@ -18,16 +18,19 @@ describe('revisión: cupo con clave opaca (hallazgo 1)', () => {
     const published: QuotaSnapshot[] = [];
     const refresher = new QuotaRefresher({
       registry,
-      factory: (agent, secrets) => ({
+      factory: (agent, getSecrets) => ({
         agentId: agent.config.id,
-        read: async () => ({
-          agentId: agent.config.id,
-          method: 'response-headers',
-          takenAt: '2026-11-01T20:00:00.000Z',
-          buckets: [{ groupId: 'g', groupName: `grupo ${secrets.apiKey ?? ''}`, window: 'daily', remainingFraction: 0.5 }],
-          stale: false,
-          error: `el proveedor repitió la clave ${secrets.apiKey ?? ''}`,
-        }),
+        read: async () => {
+          const { apiKey = '' } = await getSecrets();
+          return {
+            agentId: agent.config.id,
+            method: 'response-headers',
+            takenAt: '2026-11-01T20:00:00.000Z',
+            buckets: [{ groupId: 'g', groupName: `grupo ${apiKey}`, window: 'daily', remainingFraction: 0.5 }],
+            stale: false,
+            error: `el proveedor repitió la clave ${apiKey}`,
+          };
+        },
       }),
       publish: (s) => {
         published.push(s);

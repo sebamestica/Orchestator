@@ -1,6 +1,6 @@
 import { quotaSnapshotSchema, redactSecrets, type QuotaSnapshot } from '../../shared/index.ts';
 import { redactDeep, type AgentRecord } from '../store/index.ts';
-import type { AgentRegistry, QuotaProviderFactory } from './registry.ts';
+import { lazySecrets, type AgentRegistry, type QuotaProviderFactory } from './registry.ts';
 
 export interface QuotaRefreshError {
   agentId: string;
@@ -55,11 +55,12 @@ export class QuotaRefresher<R> {
 
   private async readOne(agent: AgentRecord): Promise<{ quota: R } | { error: QuotaRefreshError } | undefined> {
     const timeoutMs = this.opts.timeoutMs ?? 30_000;
+    // Se guarda la clave si el lector llegó a pedirla: hace falta para tachar la foto y los errores.
     let secrets: { apiKey?: string } = {};
+    const getSecrets = lazySecrets(async () => (secrets = await this.opts.registry.secretsFor(agent.config)));
     let timer: NodeJS.Timeout | undefined;
     try {
-      secrets = await this.opts.registry.secretsFor(agent.config);
-      const provider = await this.opts.factory(agent, secrets);
+      const provider = await this.opts.factory(agent, getSecrets);
       if (!provider) return undefined;
       const raw = await Promise.race([
         provider.read(),

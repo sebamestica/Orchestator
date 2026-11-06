@@ -48,10 +48,10 @@ export function fakeAdapterFactory(validKey: string, log: FakeAdapterLog = { pro
 }
 
 export function fakeQuotaFactory(): QuotaProviderFactory {
-  return (agent, secrets) => ({
+  return (agent, getSecrets) => ({
     agentId: agent.config.id,
     async read(): Promise<QuotaSnapshot> {
-      if (agent.config.id.startsWith('roto')) throw new Error(`lector caído; clave ${secrets.apiKey ?? ''}`);
+      if (agent.config.id.startsWith('roto')) throw new Error(`lector caído; clave ${(await getSecrets()).apiKey ?? ''}`);
       return {
         agentId: agent.config.id,
         method: agent.quotaMethod ?? 'none',

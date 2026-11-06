@@ -16,6 +16,7 @@ import {
   type TaskStateChange,
   type VerifyWorkspace,
 } from '../orchestrator/index.ts';
+import { lazySecrets } from '../registry/index.ts';
 import type { TaskHooks } from '../server/index.ts';
 import type { TaskRecord } from '../store/index.ts';
 import type { CommittingWorkspaces } from './commit-step.ts';
@@ -365,7 +366,7 @@ export class FleetService {
     const adapters: AgentAdapter[] = await d.loadAdapters();
     const quotas: QuotaProvider[] = [];
     for (const agent of d.registry.list().filter((a) => a.config.enabled)) {
-      const provider = await d.quotaProviderFactory(agent, await d.registry.secretsFor(agent.config));
+      const provider = await d.quotaProviderFactory(agent, lazySecrets(() => d.registry.secretsFor(agent.config)));
       if (provider) quotas.push(provider);
     }
     const router = new Router({ agents: adapters.map((a) => a.config), quotas, settings: () => this.#readSettings() });

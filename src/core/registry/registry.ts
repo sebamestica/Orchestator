@@ -22,11 +22,20 @@ export interface AgentSecrets {
 /** Crea el adaptador de un agente (los implementan otros módulos: claude-sdk, codex-cli, agy-cli, api). */
 export type AdapterFactory = (config: AgentConfig, secrets: AgentSecrets) => AgentAdapter | Promise<AgentAdapter>;
 
-/** Crea el lector de cupo de un agente según su método; `undefined` si no tiene. */
+/**
+ * Crea el lector de cupo de un agente según su método; `undefined` si no tiene. La clave se pide con `getSecrets`
+ * solo si el método la usa: en Windows cada lectura de la bóveda es un PowerShell (DPAPI).
+ */
 export type QuotaProviderFactory = (
   agent: AgentRecord,
-  secrets: AgentSecrets,
+  getSecrets: () => Promise<AgentSecrets>,
 ) => QuotaProvider | undefined | Promise<QuotaProvider | undefined>;
+
+/** Getter que va a la bóveda la primera vez que se le pide la clave; si falla, el siguiente pedido reintenta. */
+export function lazySecrets(load: () => Promise<AgentSecrets>): () => Promise<AgentSecrets> {
+  let pending: Promise<AgentSecrets> | undefined;
+  return () => (pending ??= load().catch((err: unknown) => { pending = undefined; throw err; }));
+}
 
 /** Parte del almacén que usa el registro. */
 export type AgentStore = Pick<SqliteStore, 'putAgent' | 'createAgent' | 'getAgent' | 'listAgents' | 'deleteAgent'>;

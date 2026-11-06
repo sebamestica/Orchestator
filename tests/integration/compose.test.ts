@@ -186,7 +186,7 @@ describe('compose: planificador', () => {
 
     // El servidor falso responde como Opus 5.5: 1200 de entrada × 4 USD/M + 300 de salida × 20 USD/M (precio del modelo que respondió).
     expect(comp.spentUsd('claude')).toBeCloseTo(0.0108, 6);
-    const quota = await comp.quotaProviderFactory(comp.registry.require('claude'), { apiKey: key });
+    const quota = await comp.quotaProviderFactory(comp.registry.require('claude'), () => Promise.resolve({ apiKey: key }));
     const snap = await quota?.read();
     expect(snap?.buckets[0]?.remainingUnits).toEqual({ amount: 0.9892, unit: 'usd' });
     expect(JSON.stringify([snap, comp.store.listSessions({})])).not.toContain(key);

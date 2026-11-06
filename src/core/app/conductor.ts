@@ -17,6 +17,7 @@ import {
 } from '../conductor/index.ts';
 import { planToTasks } from '../orchestrator/index.ts';
 import { QuotaMonitor } from '../quota/monitor.ts';
+import { lazySecrets } from '../registry/index.ts';
 import { SkillHub } from '../skills/index.ts';
 import type { AgentRecord } from '../store/index.ts';
 import type { Composition } from './compose.ts';
@@ -129,7 +130,7 @@ export function mindDenyPaths(comp: Pick<Composition, 'config' | 'memory'>): str
 async function quotaProviders(comp: Composition): Promise<QuotaProvider[]> {
   const out: QuotaProvider[] = [];
   for (const agent of comp.registry.list().filter((a) => a.config.enabled)) {
-    const provider = await comp.quotaProviderFactory(agent, await comp.registry.secretsFor(agent.config));
+    const provider = await comp.quotaProviderFactory(agent, lazySecrets(() => comp.registry.secretsFor(agent.config)));
     if (provider) out.push(provider);
   }
   return out;

@@ -25,7 +25,7 @@ export interface QuotaFactoryOptions {
  * `response-headers` lo alimenta el adaptador de API (c6) y `none` no tiene lector.
  */
 export function createQuotaProviderFactory(opts: QuotaFactoryOptions): QuotaProviderFactory {
-  return (agent, secrets): QuotaProvider | undefined => {
+  return (agent, getSecrets): QuotaProvider | undefined => {
     const { config } = agent;
     const agentId = config.id;
     const method = agent.quotaMethod ?? defaultQuotaMethod(config);
@@ -35,7 +35,7 @@ export function createQuotaProviderFactory(opts: QuotaFactoryOptions): QuotaProv
       case 'codex-ratelimits':
         return new CodexQuotaProvider(agentId);
       case 'openrouter-key':
-        return new OpenRouterQuota({ agentId, getApiKey: () => secrets.apiKey, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+        return new OpenRouterQuota({ agentId, getApiKey: async () => (await getSecrets()).apiKey, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
       case 'manual-budget':
         return config.budgetUsd === undefined ? undefined : new ManualBudgetQuota({ agentId, budgetUsd: config.budgetUsd, spentUsd: opts.spentUsd(agentId) });
       case 'response-headers':
