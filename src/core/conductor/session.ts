@@ -20,7 +20,7 @@ import { idSchema, redactSecrets } from '../../shared/index.ts';
 import type { AgentEvent, MindMode } from '../../shared/index.ts';
 import { MCP_ENV_PREFIX, bearerToken } from '../plugins/mcp.ts';
 import { createToolGuard } from './guard.ts';
-import type { Awaitable, ConductorPorts, ProposedTask, SdkMessageTranslator, TranslatorInit } from './ports.ts';
+import type { Awaitable, ConductorPorts, OwnModelUsage, ProposedTask, SdkMessageTranslator, TranslatorInit } from './ports.ts';
 import { buildConductorSystemPrompt, type ConductorWorkMode } from './prompt.ts';
 import { redactDeep } from './redact.ts';
 import { CONDUCTOR_SERVER_NAME, CONDUCTOR_TOOL_NAMES, FLEET_TOOL_NAMES, createConductorTools, mcpToolName } from './tools.ts';
@@ -494,6 +494,11 @@ export class ConductorSession {
     return (async function* () {
       for await (const message of messages) yield { message, events: translator.translate(message).map((e) => redactDeep(e, secrets)) };
     })();
+  }
+
+  /** Uso propio de este proceso del SDK por modelo, según el traductor (vacío si no lo informa). */
+  ownUsage(): Readonly<Record<string, OwnModelUsage>> {
+    return this.#translator?.ownUsage?.() ?? {};
   }
 
   /** Mensajes del SDK pasados por el traductor inyectado, con la clave tachada. */

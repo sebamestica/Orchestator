@@ -239,6 +239,14 @@ export class ClaudeSdkTranslator {
   }
 
   /**
+   * Uso propio de este proceso por modelo (el estimado de sus mensajes, ver `#estimate`). A diferencia de `modelUsage`,
+   * no incluye los acumulados que restaura el SDK al reanudar una sesión.
+   */
+  ownUsage(): Record<string, TokenUsage & { cost: number }> {
+    return Object.fromEntries(this.#estimate());
+  }
+
+  /**
    * Uso para registrar si la ejecución termina sin `result` (cancelada, tiempo agotado, tope):
    * el último desglose del SDK si lo hubo; si no, la estimación por modelo.
    */

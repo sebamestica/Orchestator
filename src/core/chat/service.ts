@@ -805,8 +805,9 @@ export class ChatService {
     live.key = key;
     // Los subagentes de un proceso anterior ya no existen.
     this.#stopBackground(chatId, live);
-    // Un proceso del SDK nuevo cuenta el uso desde cero.
-    live.delta = usageDeltas();
+    // Un proceso nuevo cuenta el uso desde cero. Uno reanudado trae los acumulados que restaura Claude Code (a veces de
+    // una foto vieja): se miden contra el uso propio del proceso para no guardarlos otra vez.
+    live.delta = usageDeltas(sdkSessionId ? { own: () => session.ownUsage() } : {});
     void this.#read(chatId, live, session);
     return session;
   }

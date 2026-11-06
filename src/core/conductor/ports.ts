@@ -129,9 +129,20 @@ export interface SkillCatalogPort {
 
 // ---------- traductor de mensajes del SDK ----------
 
+/** Uso propio de un proceso del SDK en un modelo: tokens de sus mensajes (`input` sin caché) y su costo con pricing.ts. */
+export interface OwnModelUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+}
+
 /** Traduce cada mensaje del SDK a eventos normalizados (c1: `ClaudeSdkTranslator.translate`). */
 export interface SdkMessageTranslator {
   translate(message: SDKMessage): readonly AgentEvent[];
+  /** Uso propio de este proceso por modelo, sin lo que restaure una sesión reanudada (c1: `ClaudeSdkTranslator.ownUsage`). */
+  ownUsage?(): Readonly<Record<string, OwnModelUsage>>;
 }
 
 /** Datos con los que se construye el traductor de una sesión (encaja con `TranslatorOptions` de c1). */

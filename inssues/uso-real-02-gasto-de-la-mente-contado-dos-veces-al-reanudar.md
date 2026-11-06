@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real (uso, costo y presupuesto de la mente)
 - **Severidad:** alta
 - **Archivos:** `src/core/conductor/usage.ts:3`, `src/core/conductor/usage.ts:8`, `src/core/conductor/usage.ts:10`, `src/core/chat/service.ts:693`, `src/core/chat/service.ts:744`, `src/core/chat/service.ts:821`, `src/core/chat/service.ts:832`, `src/core/adapters/claude-sdk/translate.ts:556`, `src/core/adapters/claude-sdk/translate.ts:561`, `src/core/store/store.ts:665`, `src/core/app/f5-chat.ts:105`, `tests/core/chat/service.test.ts:231`, `tests/core/chat/helpers.ts:116`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 La mente de cada chat es una `ConductorSession` sobre el Claude Agent SDK con entrada en streaming. El SDK manda en

@@ -9,7 +9,7 @@ import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index
 import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, chromeServerSpec, pluginsSection } from '../../../src/core/plugins/index.ts';
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
-import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, sdkInit, sdkResult, sdkText, settleChat, tick, type ChatBench, type TurnFn } from './helpers.ts';
+import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, meteredTurn, sdkInit, sdkResult, sdkText, settleChat, tick, usageCost, type ChatBench, type TurnFn } from './helpers.ts';
 
 afterEach(closeBenches);
 
@@ -219,7 +219,8 @@ describe('ChatService: mensajes, eventos y costo', () => {
 
 describe('ChatService: persistencia y reanudación', () => {
   it('cierra la sesión ociosa y la reanuda con resume y seq continuo', async () => {
-    const b = await bench({ idleMs: 50 });
+    const used = { input: 40, cached: 60, output: 10 };
+    const b = await bench({ idleMs: 50, turn: meteredTurn([{ turns: [used] }, { restored: used, turns: [used] }]) });
     const chat = b.service.create({ projectId: 'demo' });
     await turn(b, chat.id, 'primero');
     // (Con la CPU cargada, el temporizador puede vencer antes de esta línea: no se comprueba la sesión viva aquí.)
@@ -230,8 +231,8 @@ describe('ChatService: persistencia y reanudación', () => {
     await turn(b, chat.id, 'segundo');
     expect(b.q.calls).toHaveLength(2);
     expect(optionsOf(b, 1).resume).toBe('sdk-1');
-    // El costo acumulado del proceso nuevo empieza de cero: se cuenta entero (0,01 + 0,01), no se pierde.
-    expect(b.service.get(chat.id).costUsd).toBeCloseTo(0.02, 9);
+    // El proceso reanudado trae el acumulado que restaura Claude Code más lo suyo: solo se cuenta lo suyo (c + c, no 3·c).
+    expect(b.service.get(chat.id).costUsd).toBeCloseTo(2 * usageCost(used), 9);
     const events = b.events(chat.sessionId);
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(events.filter((e) => e.type === 'done')).toHaveLength(2);

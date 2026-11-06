@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Options, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index.ts';
+import { ClaudeSdkTranslator, estimateCostUsd } from '../../../src/core/adapters/claude-sdk/index.ts';
 import { AttachmentStore, ChatService, type ChatServiceDeps, type MindPort } from '../../../src/core/chat/index.ts';
 import type { ConductorQueryFn } from '../../../src/core/conductor/index.ts';
 import { EventHub, type HubMessage } from '../../../src/core/server/index.ts';
@@ -117,6 +117,58 @@ export const echoTurn: TurnFn = (message, ctx) => {
   const text = typeof content === 'string' ? content : JSON.stringify(content);
   return [...(ctx.index === 0 ? [sdkInit(sid)] : []), sdkText(`eco: ${text}`, sid), sdkResult(`eco: ${text}`, sid, 0.01 * (ctx.index + 1))];
 };
+
+/** Uso de un turno con la caché repartida (como la API directa): el traductor lo toma tal cual, sin estimarlo. */
+export interface TurnUsage {
+  input: number;
+  cached: number;
+  output: number;
+}
+
+export const NO_USAGE: TurnUsage = { input: 0, cached: 0, output: 0 };
+
+export function addUsage(...all: readonly TurnUsage[]): TurnUsage {
+  return all.reduce((a, u) => ({ input: a.input + u.input, cached: a.cached + u.cached, output: a.output + u.output }), NO_USAGE);
+}
+
+/** Costo de un uso con los precios de pricing.ts, con el modelo de la mente de prueba. */
+export function usageCost(u: TurnUsage): number {
+  return estimateCostUsd('claude-opus-5-5', { input: u.input, output: u.output, cacheRead: u.cached, cacheWrite: 0 });
+}
+
+/** Guion de un proceso del SDK: lo que restaura Claude Code al reanudar y lo que gasta cada turno (`null`: no llama a la API). */
+export interface MeteredProcess {
+  restored?: TurnUsage;
+  turns: readonly (TurnUsage | null)[];
+}
+
+/**
+ * Turnos con uso coherente, como el SDK real: cada `result` trae el acumulado de la sesión. Al reanudar, Claude Code
+ * restaura un acumulado anterior (una foto que puede ser vieja) y le suma el `usage` de los mensajes del proceso.
+ */
+export function meteredTurn(plan: readonly MeteredProcess[]): TurnFn {
+  return (_message, ctx) => {
+    const step = plan[ctx.process - 1];
+    if (!step) throw new Error(`proceso ${ctx.process} sin guion`);
+    const sid = typeof ctx.options.resume === 'string' ? ctx.options.resume : `sdk-${ctx.process}`;
+    const own = step.turns[ctx.index] ?? null;
+    const total = addUsage(step.restored ?? NO_USAGE, ...step.turns.slice(0, ctx.index + 1).filter((u): u is TurnUsage => u !== null));
+    const out: SDKMessage[] = ctx.index === 0 ? [sdkInit(sid)] : [];
+    if (own) {
+      out.push({
+        type: 'assistant',
+        message: { id: `msg_${++n}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'eco' }], stop_reason: 'end_turn', usage: { input_tokens: own.input, cache_read_input_tokens: own.cached, output_tokens: own.output } },
+        parent_tool_use_id: null,
+        uuid: uuid(),
+        session_id: sid,
+      } as unknown as SDKMessage);
+    }
+    const cost = usageCost(total);
+    const modelUsage = { 'claude-opus-5-5': { inputTokens: total.input, cacheReadInputTokens: total.cached, outputTokens: total.output, costUSD: cost } };
+    out.push({ ...sdkResult(own ? 'eco' : '', sid, cost), modelUsage } as unknown as SDKMessage);
+    return out;
+  };
+}
 
 export interface ChatBench {
   dir: string;
