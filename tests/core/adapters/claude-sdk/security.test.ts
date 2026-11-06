@@ -223,6 +223,30 @@ describe('hallazgo 5 (ALTA): junctions y enlaces dentro del worktree', () => {
     expect(await read({ file_path: join(wt, 'otro', 'pkg', 'index.js') })).toBe('deny');
   });
 
+  it('una junction interna hacia .git o .claude no deja escribir en ellas', async () => {
+    const wt = join(root, 'wt-protegido');
+    for (const dir of ['.git', '.claude', 'src']) mkdirSync(join(wt, dir), { recursive: true });
+    symlinkSync(join(wt, '.git'), join(wt, 'alias-git'), 'junction');
+    symlinkSync(join(wt, '.claude'), join(wt, 'sub-alias-claude'), 'junction');
+    symlinkSync(join(wt, '.git'), join(wt, 'src', 'alias-git'), 'junction');
+    const at = async (tool: string, input: Record<string, unknown>) => (await decideToolUse(wt, tool, input)).behavior;
+    expect(await at('Write', { file_path: join(wt, 'alias-git', 'config'), content: '' })).toBe('deny');
+    expect(await at('Edit', { file_path: 'sub-alias-claude/settings.json', old_string: 'a', new_string: 'b' })).toBe('deny');
+    expect(await at('Write', { file_path: 'src/alias-git/hooks/nuevo/x', content: '' })).toBe('deny');
+    expect(await at('Bash', { command: 'echo x >> alias-git/config' })).toBe('deny');
+    expect(await at('PowerShell', { command: 'Add-Content alias-git\\config x' })).toBe('deny');
+    expect(await at('Write', { file_path: 'src/nuevo.ts', content: '' })).toBe('allow');
+  });
+
+  it('niega crear enlaces con New-Item -Type (alias de -ItemType)', async () => {
+    expect(await ps('New-Item -Type Junction -Path alias -Value .git')).toBe('deny');
+    expect(await ps('ni -Type SymbolicLink -Path a -Value b')).toBe('deny');
+    expect(await ps('New-Item -Type HardLink -Path h -Value a.txt')).toBe('deny');
+    expect(await ps('New-Item -t Junction -Path alias -Value .git')).toBe('deny');
+    expect(await ps('New-Item -Type $t -Path h -Value a.txt')).toBe('deny');
+    expect(await ps('New-Item -Type Directory -Path src\\nueva')).toBe('allow');
+  });
+
   it('permite archivos nuevos en carpetas nuevas del worktree', async () => {
     expect(await decision('Write', { file_path: join(WT, 'src', 'nueva', 'b.ts'), content: '' })).toBe('allow');
     expect(await decision('Edit', { file_path: 'a.txt', old_string: 'a', new_string: 'b' })).toBe('allow');

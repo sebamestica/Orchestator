@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { assertRealInside } from '../../memory/safe-fs.ts';
+import { assertRealInside, realOrNearest } from '../../memory/safe-fs.ts';
 import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
 
 /**
@@ -70,13 +70,22 @@ export async function insideProblem(worktree: string, target: string): Promise<s
   return undefined;
 }
 
-/** Como `insideProblem`, y además protege `.git`, `.claude/` y `.mcp.json` (configuración ejecutable). */
+/** Primer segmento de `target` bajo `root` si es `.git`, `.claude` o `.mcp.json`. */
+function protectedSegment(root: string, target: string): string | undefined {
+  const first = path.relative(root, target).split(/[\\/]/)[0]?.toLowerCase();
+  return first && PROTECTED.has(first) ? first : undefined;
+}
+
+/**
+ * Como `insideProblem`, y además protege `.git`, `.claude/` y `.mcp.json` (configuración ejecutable), con la ruta escrita
+ * y con la real: una junction interna (`alias` → `.git`) no abre una puerta a ellas.
+ */
 export async function writeProblem(worktree: string, target: string): Promise<string | undefined> {
   const outside = await insideProblem(worktree, target);
   if (outside) return `escritura fuera del worktree: ${outside}`;
-  const first = path.relative(path.resolve(worktree), path.resolve(target)).split(/[\\/]/)[0]?.toLowerCase();
-  if (first && PROTECTED.has(first)) return `ruta protegida del worktree (${first}): ${target}`;
-  return undefined;
+  const hit = protectedSegment(path.resolve(worktree), path.resolve(target))
+    ?? protectedSegment(await realOrNearest(worktree), await realOrNearest(target));
+  return hit ? `ruta protegida del worktree (${hit}): ${target}` : undefined;
 }
 
 const SINKS = /^(?:\/dev\/(?:null|stdout|stderr)|nul:?|\$null)$/i;
@@ -725,8 +734,10 @@ async function evalWriteCommand(name: string, args: readonly Word[], c: ShellCon
   if (!mode) return undefined;
   if (mode === 'ps' || mode === 'ps-copy') {
     const ps = parsePsArgs(args);
-    const itemType = ps.params.find((p) => 'itemtype'.startsWith(p.name) && p.kind === 'value')?.value?.text ?? '';
-    if (/symbolic|junction|hard/i.test(itemType)) return 'crear enlaces o junctions permite salir del worktree';
+    // -ItemType, su alias -Type y cualquier abreviatura (-t, -it…); con una variable no se sabe qué crea.
+    const itemTypes = ps.params.filter((p) => ['itemtype', 'type'].some((n) => n.startsWith(p.name))).map((p) => p.value);
+    if (itemTypes.some((t) => t?.dynamic)) return 'tipo de elemento con variables, no verificable (podría crear un enlace)';
+    if (itemTypes.some((t) => /symbolic|junction|hard/i.test(t?.text ?? ''))) return 'crear enlaces o junctions permite salir del worktree';
     const targets: Word[] = [];
     if (mode === 'ps') {
       targets.push(...ps.positional);

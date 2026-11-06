@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex)
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/claude-sdk/shell-policy.ts:74-80`, `src/core/adapters/claude-sdk/shell-policy.ts:63-71`, `src/core/memory/safe-fs.ts:58-73`, `src/core/adapters/claude-sdk/shell-policy.ts:688`, `src/core/adapters/claude-sdk/shell-policy.ts:728-729`, `src/core/adapters/claude-sdk/permissions.ts:89`, `src/core/conductor/guard.ts:206`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

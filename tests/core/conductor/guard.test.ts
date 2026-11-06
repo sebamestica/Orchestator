@@ -161,6 +161,9 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     // Como «Configuración local» → AppData\Local: otro nombre para la carpeta de datos del núcleo.
     symlinkSync(data, path.join(root, 'datos'), 'junction');
     symlinkSync(path.join(root, 'src'), path.join(root, 'alias'), 'junction');
+    mkdirSync(path.join(root, '.claude'));
+    symlinkSync(path.join(root, '.git'), path.join(root, 'alias-git'), 'junction');
+    symlinkSync(path.join(root, '.claude'), path.join(root, 'alias-claude'), 'junction');
     guard = createToolGuard({
       allowedTools: tools,
       cwd: root,
@@ -214,6 +217,15 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await read('Read', { file_path: 'src/a.ts' })).toBe('');
     expect(await read('Grep', { pattern: 'x' })).toBe('');
     expect(await allowed('Read', { file_path: path.join(outside, 'doc.txt') })).toBe(true);
+  });
+
+  it('una junction interna hacia .git o .claude no deja escribir en ellas', async () => {
+    expect(await reason('Write', { file_path: path.join(root, 'alias-git', 'config'), content: 'x' })).toMatch(/protegida/);
+    expect(await reason('Edit', { file_path: 'alias-claude/settings.json', old_string: 'a', new_string: 'b' })).toMatch(/protegida/);
+    expect(await reason('Write', { file_path: path.join(root, 'alias-git', 'hooks', 'nuevo', 'x'), content: 'x' })).toMatch(/protegida/);
+    expect(await reason('PowerShell', { command: 'Add-Content alias-git\\config x' })).toMatch(/protegida/);
+    expect(await reason('Bash', { command: 'echo x >> alias-git/config' })).toMatch(/protegida/);
+    expect(await allowed('Write', { file_path: path.join(root, 'alias', 'nuevo.ts'), content: 'x' })).toBe(true);
   });
 
   it('el shell pasa por la política de los workers con el proyecto como raíz', async () => {
