@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/app/TitleBar.tsx:24`, `src/ui/app/App.tsx:105`, `src/ui/app/App.tsx:132`, `src/ui/features/agents-panel/AgentsPanel.tsx:80`, `src/ui/store/app.ts:44`, `apps/desktop/src/lib/window-state.ts:24`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

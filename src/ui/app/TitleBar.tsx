@@ -2,12 +2,15 @@ import { ArrowLeft, ArrowRight, Minus, PanelLeft, PanelRight, Square, X } from '
 import { desktop } from '../api/bridge.ts';
 import { IconButton } from '../components/IconButton.tsx';
 import { useApp } from '../store/app.ts';
+import type { Route } from './routes.ts';
+import { useAgentsPanel } from './use-agents-panel.ts';
+
+const PANEL_LABEL = 'Mostrar u ocultar los agentes en vivo';
 
 /** Barra de título propia: arrastra la ventana en Electron; en la web es una barra fina. */
-export function TitleBar() {
+export function TitleBar({ route }: { route: Route }) {
   const toggleSidebar = useApp((s) => s.toggleSidebar);
-  const togglePanel = useApp((s) => s.togglePanel);
-  const panelOpen = useApp((s) => s.panelOpen);
+  const panel = useAgentsPanel(route);
   const win = desktop?.window;
   return (
     <div className="titlebar flex shrink-0 items-center gap-0.5 pl-2 text-muted">
@@ -21,7 +24,8 @@ export function TitleBar() {
         <ArrowRight className="size-4" aria-hidden="true" />
       </IconButton>
       <div className="flex-1" />
-      <IconButton label="Mostrar u ocultar los agentes en vivo" size="sm" active={panelOpen} onClick={() => togglePanel()}>
+      <IconButton label={PANEL_LABEL} size="sm" active={panel.shown} aria-pressed={panel.shown} disabled={!panel.available}
+        title={panel.available ? PANEL_LABEL : 'Los agentes en vivo se ven en los chats y en el tablero'} onClick={() => panel.toggle()}>
         <PanelRight className="size-4" aria-hidden="true" />
       </IconButton>
       {win ? (

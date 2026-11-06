@@ -10,6 +10,7 @@ import { useApp } from '../store/app.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { TitleBar } from './TitleBar.tsx';
 import type { Route } from './routes.ts';
+import { useAgentsPanel } from './use-agents-panel.ts';
 import { useRoute } from './use-route.ts';
 import { BootScreen } from '../components/BootScreen.tsx';
 
@@ -102,15 +103,14 @@ export function App() {
   const route = useRoute();
   const core = useApp((s) => s.core);
   const coreError = useApp((s) => s.coreError);
-  const panelOpen = useApp((s) => s.panelOpen);
-  const showPanel = panelOpen && (route.name === 'project' || route.name === 'standalone' || route.name === 'board');
+  const panel = useAgentsPanel(route);
 
   return (
     <div className="flex h-full flex-col bg-canvas text-foreground">
-      <TitleBar />
+      <TitleBar route={route} />
       <div className="flex min-h-0 flex-1">
         <Sidebar route={route} />
-        <div className="chrome-frame flex min-w-0 flex-1 gap-2">
+        <div className="chrome-frame relative flex min-w-0 flex-1 gap-2">
           <main className="chrome-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
             {core === 'ready' ? (
               <Suspense fallback={null}>
@@ -132,7 +132,7 @@ export function App() {
               </div>
             )}
           </main>
-          {showPanel && core === 'ready' ? <AgentsPanel /> : null}
+          {panel.shown ? <AgentsPanel overlay={!panel.inline} onClose={() => panel.toggle(false)} /> : null}
         </div>
       </div>
     </div>

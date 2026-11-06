@@ -15,8 +15,10 @@ interface AppState {
   coreError: string | null;
   live: LiveStatus;
   sidebarCollapsed: boolean;
-  /** Panel derecho de agentes en vivo. */
+  /** Panel derecho de agentes en vivo, cuando cabe en línea. */
   panelOpen: boolean;
+  /** El mismo panel superpuesto, en ventanas angostas (empieza cerrado). */
+  panelOverlayOpen: boolean;
   projects: ProjectRecord[];
   agents: AgentRecord[];
   settings: Settings;
@@ -27,6 +29,7 @@ interface AppState {
   setLive(live: LiveStatus): void;
   toggleSidebar(): void;
   togglePanel(open?: boolean): void;
+  togglePanelOverlay(open?: boolean): void;
   loadAll(): Promise<void>;
   /** `loadAll` sin errores y de a una: si se pide con otra en vuelo, se repite una vez al terminar. */
   resync(): Promise<void>;
@@ -74,6 +77,7 @@ export const useApp = create<AppState>((set, get) => ({
   live: 'closed',
   sidebarCollapsed: false,
   panelOpen: true,
+  panelOverlayOpen: false,
   projects: [],
   agents: [],
   settings: DEFAULT_SETTINGS,
@@ -86,6 +90,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   togglePanel: (open) => set((s) => ({ panelOpen: open ?? !s.panelOpen })),
+  togglePanelOverlay: (open) => set((s) => ({ panelOverlayOpen: open ?? !s.panelOverlayOpen })),
   async loadAll() {
     const s = get();
     await Promise.all([

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { api } from '../../api/client.ts';
 import { getLive } from '../../api/live.ts';
 import { useApp } from '../../store/app.ts';
@@ -7,7 +7,14 @@ import { upsertChat, useChat } from '../chat/store.ts';
 import { ActivityRowView } from './ActivityRowView.tsx';
 import { applyEvents, chatsSchema, initialView, isActive, mindRow, selectChat, sessionResponseSchema, sessionsSchema, workerRow, type SessionView } from './model.ts';
 
-export function AgentsPanel() {
+const PLACEMENT = {
+  inline: 'flex shrink-0',
+  // Ventana angosta: encima del contenido, sin encogerlo. `chrome-frame` deja 0.5rem a la derecha y abajo.
+  overlay: 'absolute top-0 right-2 bottom-2 z-30 flex max-w-[calc(100%-1rem)] shadow-xl',
+};
+
+/** Panel de agentes en vivo. `overlay`: superpuesto (ventana angosta); Escape lo cierra con `onClose`. */
+export function AgentsPanel({ overlay = false, onClose }: { overlay?: boolean; onClose?: () => void }) {
   const core = useApp((s) => s.core);
   const connection = useApp((s) => s.live);
   const agents = useApp((s) => s.agents);
@@ -89,7 +96,14 @@ export function AgentsPanel() {
     return () => { stopped = true; };
   }, [core, connection, taskIds, chat?.sessionId, chat?.state, chat?.backgroundTasks]);
 
-  return <aside aria-label="Agentes en vivo" className="chrome-surface hidden w-[var(--panel-width)] shrink-0 flex-col overflow-hidden lg:flex">
+  function onKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!overlay || event.key !== 'Escape') return;
+    event.preventDefault(); // Que el composer no lo tome como «detener la mente».
+    onClose?.();
+  }
+
+  return <aside aria-label="Agentes en vivo" data-overlay={overlay ? '' : undefined} onKeyDown={onKeyDown}
+    className={`chrome-surface ${overlay ? PLACEMENT.overlay : PLACEMENT.inline} w-[var(--panel-width)] flex-col overflow-hidden`}>
     <header className="border-b border-foreground/[0.06] px-4 py-3"><h2 className="text-sm font-medium">Agentes</h2></header>
     <div className="flex-1 space-y-2 overflow-y-auto p-3">
       <ActivityRowView name="Mente" row={mindRow(chat, views, events)} />

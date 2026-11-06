@@ -15,6 +15,11 @@ export type Route =
   | { name: 'settings'; section: SettingsSection }
   | { name: 'plugins' };
 
+/** Rutas que muestran el panel de agentes en vivo: los chats y el tablero. */
+export function panelRoute(route: Route): boolean {
+  return route.name === 'project' || route.name === 'standalone' || route.name === 'board';
+}
+
 const seg = (s: string | undefined) => (s ? decodeURIComponent(s) : undefined);
 
 export function parseRoute(hash: string): Route {
