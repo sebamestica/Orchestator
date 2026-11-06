@@ -193,9 +193,27 @@ export function fakeCore(init: Partial<CoreState> = {}, extra?: Handler): { stat
     if ((m = /^\/chats\/([^/]+)\/messages$/.exec(p))) {
       const id = decodeURIComponent(m[1] ?? '');
       if (method === 'GET') return { body: { messages: state.messages[id] ?? [] } };
+      // Como el núcleo: con un turno en curso, `after-turn` deja el mensaje en la cola del chat (201).
+      const running = state.chats.findIndex((c) => c.id === id && c.state === 'running');
+      if (b.delivery === 'after-turn' && running >= 0) {
+        const queued = { id: `queued_${++seq}`, text: String(b.text ?? ''), attachments: [], at: at(300 + seq) };
+        const next = { ...(state.chats[running] as Chat), queued: [...(state.chats[running]?.queued ?? []), queued] };
+        state.chats[running] = next;
+        return { status: 201, body: { queued, chat: next } };
+      }
       const message = makeMessage({ id: `msg_user_${++seq}`, chatId: id, role: 'user', text: String(b.text ?? ''), at: at(200 + seq) });
       state.messages[id] = [...(state.messages[id] ?? []), message];
       return { body: { message } };
+    }
+    if ((m = /^\/chats\/([^/]+)\/queue\/([^/]+)$/.exec(p)) && method === 'DELETE') {
+      const id = decodeURIComponent(m[1] ?? '');
+      const queuedId = decodeURIComponent(m[2] ?? '');
+      const i = state.chats.findIndex((c) => c.id === id);
+      const chat = state.chats[i];
+      if (!chat?.queued?.some((q) => q.id === queuedId)) return { status: 404, body: { error: { code: 'not_found', message: 'El mensaje ya no está en la cola' } } };
+      const next = { ...chat, queued: chat.queued.filter((q) => q.id !== queuedId) };
+      state.chats[i] = next;
+      return { body: { chat: next } };
     }
     if ((m = /^\/chats\/([^/]+)\/interrupt$/.exec(p))) return { body: { ok: true } };
     if ((m = /^\/chats\/([^/]+)\/proposals$/.exec(p))) return { body: { proposals: state.proposals[decodeURIComponent(m[1] ?? '')] ?? [] } };

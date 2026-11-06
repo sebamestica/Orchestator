@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import { create } from 'zustand';
 import type { AgentEvent, Attachment, Chat, ChatMessage, MindMode, Proposal } from '../../../shared/index.ts';
-import { effortSchema, opaqueIdSchema, type Effort, type SendMessageBody } from '../../../shared/api.ts';
+import { effortSchema, opaqueIdSchema, type Effort, type MessageDelivery, type QueuedChatMessage, type SendMessageBody } from '../../../shared/api.ts';
 import { api, ApiError } from '../../api/client.ts';
 import type { LiveMessage } from '../../api/live.ts';
 import { mergeEvents, upsertMessage } from './timeline.ts';
@@ -163,6 +163,27 @@ function withEffort(efforts: Efforts, chatId: string, effort: Effort | null): Re
   return Object.fromEntries((effort ? [...rest, [chatId, effort] as const] : rest).slice(-MAX_REMEMBERED_EFFORTS));
 }
 
+// ── Mensajes «Más tarde» ─────────────────────────────────────────────────────────────────────
+
+/** Mensaje que el usuario guardó para mandar después: vive solo en la interfaz, sin enviarse. */
+export interface LaterMessage {
+  /** Id local (no es el de ningún mensaje del núcleo). */
+  id: string;
+  text: string;
+  attachments: Attachment[];
+}
+
+type Laters = Readonly<Record<string, readonly LaterMessage[]>>;
+
+const NO_LATER: readonly LaterMessage[] = [];
+
+/** Pendientes de un chat (solo propiedades propias: un id no puede leer `Object.prototype`). */
+export function laterIn(later: Laters, chatId: string | null): readonly LaterMessage[] {
+  return chatId !== null && Object.hasOwn(later, chatId) ? (later[chatId] ?? NO_LATER) : NO_LATER;
+}
+
+let laterSeq = 0;
+
 interface ChatData {
   projectId: string | null;
   status: ChatStatus;
@@ -194,6 +215,8 @@ interface ChatData {
   drafts: Drafts;
   /** Texto escrito antes de crear el chat: pasa al chat nuevo al crearlo. */
   draftText: string;
+  /** Mensajes guardados con «Más tarde» en cada chat (id → lista). Solo en memoria; sobrevive a `open`. */
+  later: Laters;
 }
 
 type Drafts = Readonly<Record<string, string>>;
@@ -239,7 +262,16 @@ interface ChatActions {
   setEffort(effort: Effort): void;
   /** Guarda el texto sin enviar del chat del próximo mensaje (o del borrador, si aún no hay chat). */
   setDraft(text: string): void;
-  send(chatId: string, text: string, attachments: Attachment[], effort?: Effort): Promise<boolean>;
+  /**
+   * Manda un mensaje. Con un turno en curso, `delivery` dice cuándo: `now` entra al turno; `after-turn` queda en la
+   * cola del chat (no se agrega al hilo hasta que se envíe). Devuelve si el núcleo lo aceptó.
+   */
+  send(chatId: string, text: string, attachments: Attachment[], effort?: Effort, delivery?: MessageDelivery): Promise<boolean>;
+  /** Quita un mensaje de la cola del chat abierto (`queued`). */
+  unqueue(queuedId: string): Promise<void>;
+  /** Guarda un mensaje «Más tarde» del chat. */
+  saveLater(chatId: string, message: { text: string; attachments: Attachment[] }): void;
+  dropLater(chatId: string, id: string): void;
   interrupt(): Promise<void>;
   decide(taskId: string, decision: Decision): Promise<void>;
   approveAll(): Promise<void>;
@@ -250,8 +282,8 @@ interface ChatActions {
 
 export type ChatStore = ChatData & ChatActions;
 
-/** Estado de una apertura nueva. `efforts` no está: se recuerda entre aperturas. */
-const INITIAL: Omit<ChatData, 'efforts'> = {
+/** Estado de una apertura nueva. `efforts` y `later` no están: se recuerdan entre aperturas. */
+const INITIAL: Omit<ChatData, 'efforts' | 'later'> = {
   projectId: null,
   status: 'idle',
   error: null,
@@ -340,9 +372,16 @@ export const useChat = create<ChatStore>((set, get) => {
     }));
   }
 
+  /** Olvida los pendientes «Más tarde» de un chat. */
+  function forgetLater(chatId: string): void {
+    if (!Object.hasOwn(get().later, chatId)) return;
+    set((s) => ({ later: Object.fromEntries(Object.entries(s.later).filter(([id]) => id !== chatId)) }));
+  }
+
   return {
     ...INITIAL,
     efforts: readEfforts(),
+    later: {},
 
     reset() {
       generation++;
@@ -441,6 +480,7 @@ export const useChat = create<ChatStore>((set, get) => {
         return;
       }
       rememberEffort(chatId, null);
+      forgetLater(chatId);
       const rest = get().chats.filter((c) => c.id !== chatId);
       set((s) => ({ chats: rest, drafts: withDraft(s.drafts, chatId, '') }));
       if (get().activeId !== chatId) return;
@@ -499,10 +539,21 @@ export const useChat = create<ChatStore>((set, get) => {
       else set({ draftText: text });
     },
 
-    async send(chatId, text, attachments, effort) {
-      const body: SendMessageBody = { text, attachmentIds: attachments.map((a) => a.id), ...(effort ? { effort } : {}) };
+    async send(chatId, text, attachments, effort, delivery) {
+      const body: SendMessageBody = {
+        text,
+        attachmentIds: attachments.map((a) => a.id),
+        ...(effort ? { effort } : {}),
+        ...(delivery ? { delivery } : {}),
+      };
       try {
-        const r = await api.post<{ message?: ChatMessage; chat?: Chat }>(`/chats/${enc(chatId)}/messages`, body);
+        const r = await api.post<{ message?: ChatMessage; queued?: QueuedChatMessage; chat?: Chat }>(`/chats/${enc(chatId)}/messages`, body);
+        if (r?.queued) {
+          // En cola: aún no está en el hilo ni el turno cambia de estado; el chat trae la cola al día.
+          const queuedIn = r.chat;
+          if (queuedIn) set((s) => ({ chats: upsertChat(s.chats, queuedIn), chat: s.activeId === queuedIn.id ? queuedIn : s.chat, notice: null }));
+          return true;
+        }
         if (get().activeId !== chatId) return true;
         set((s) => ({
           messages: r?.message ? upsertMessage(s.messages, r.message) : s.messages,
@@ -514,6 +565,26 @@ export const useChat = create<ChatStore>((set, get) => {
         set({ notice: `No se pudo enviar: ${errorText(err)}` });
         return false;
       }
+    },
+
+    async unqueue(queuedId) {
+      const chat = get().chat;
+      if (!chat) return;
+      try {
+        const r = await api.del<{ chat: Chat }>(`/chats/${enc(chat.id)}/queue/${enc(queuedId)}`);
+        set((s) => ({ chats: upsertChat(s.chats, r.chat), chat: s.activeId === r.chat.id ? r.chat : s.chat }));
+      } catch (err) {
+        set({ notice: `No se pudo quitar de la cola: ${errorText(err)}` });
+      }
+    },
+
+    saveLater(chatId, message) {
+      const entry: LaterMessage = { id: `later_${++laterSeq}`, text: message.text, attachments: message.attachments };
+      set((s) => ({ later: { ...s.later, [chatId]: [...laterIn(s.later, chatId), entry] } }));
+    },
+
+    dropLater(chatId, id) {
+      set((s) => ({ later: { ...s.later, [chatId]: laterIn(s.later, chatId).filter((m) => m.id !== id) } }));
     },
 
     async interrupt() {
@@ -601,6 +672,7 @@ export const useChat = create<ChatStore>((set, get) => {
           return;
         case 'chat_deleted':
           rememberEffort(message.chatId, null);
+          forgetLater(message.chatId);
           set((st) => ({ chats: st.chats.filter((c) => c.id !== message.chatId) }));
           if (message.chatId === s.activeId) set({ status: 'missing', chat: null, messages: [], proposals: [], undelivered: {}, events: [], lastSeq: -1 });
           return;

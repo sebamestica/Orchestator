@@ -390,9 +390,9 @@ describe('docs/api: openapi.json coincide con createApp(...).routes', () => {
   const byKey = new Map(operations().map((o) => [routeKey(o.method, o.path), o.op]));
 
   it('mismas rutas, ni una más ni una menos', () => {
-    // 51 base y de c14, c29 y c34 (con las skills en cuarentena y la elección de carpeta o zip), más 17 de chats y
-    // adjuntos (c15) y 4 de plugins (c16).
-    expect(server.length).toBe(72);
+    // 51 base y de c14, c29 y c34 (con las skills en cuarentena y la elección de carpeta o zip), más 18 de chats y
+    // adjuntos (c15 y la cola de ui-chat-08) y 4 de plugins (c16).
+    expect(server.length).toBe(73);
     expect([...byKey.keys()].sort()).toEqual(server.map((r) => routeKey(r.method, r.path)).sort());
   });
 

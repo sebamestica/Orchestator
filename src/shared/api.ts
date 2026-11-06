@@ -159,6 +159,15 @@ export const attachmentByPathBody = z.strictObject({ path: z.string().min(1).max
 
 export const chatStateSchema = z.enum(['idle', 'running', 'error', 'closed']);
 
+/** Mensaje del usuario que espera a que termine el turno en curso para enviarse (aún no está en el hilo). */
+export const queuedChatMessageSchema = z.strictObject({
+  id: opaqueIdSchema,
+  text: z.string(),
+  attachments: z.array(attachmentSchema),
+  at: isoSchema,
+});
+export type QueuedChatMessage = z.infer<typeof queuedChatMessageSchema>;
+
 export const chatSchema = z.strictObject({
   id: opaqueIdSchema,
   /** `null`: conversación sin proyecto (no delega a la flota). */
@@ -182,6 +191,11 @@ export const chatSchema = z.strictObject({
    */
   backgroundTasks: z.number().int().nonnegative().optional(),
   /**
+   * Mensajes que esperan a que termine el turno en curso (`delivery: 'after-turn'`), en el orden en que se enviarán.
+   * Solo en memoria: falta si no hay ninguno.
+   */
+  queued: z.array(queuedChatMessageSchema).optional(),
+  /**
    * La carpeta de trabajo es interna de Berland: una conversación sin proyecto que no eligió carpeta. La interfaz no la
    * muestra. Se calcula al leer; no se guarda.
    */
@@ -200,6 +214,13 @@ export const chatMessageSchema = z.strictObject({
   at: isoSchema,
 });
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+/**
+ * Cuándo entregar un mensaje si la mente está en un turno: `now` entra al turno en curso; `after-turn` espera en la
+ * cola del chat a que el turno termine. Sin turno en curso, los dos se envían como siempre.
+ */
+export const messageDeliverySchema = z.enum(['now', 'after-turn']);
+export type MessageDelivery = z.infer<typeof messageDeliverySchema>;
 
 export const createChatBody = z.strictObject({
   projectId: idSchema.nullable(),
@@ -223,6 +244,8 @@ export const sendMessageBody = z
     text: z.string().max(100_000),
     attachmentIds: z.array(opaqueIdSchema).max(20).default([]),
     effort: effortSchema.optional(),
+    /** Con un turno en curso: sin `delivery`, 409 (como siempre); con él, el mensaje entra al turno o espera en cola. */
+    delivery: messageDeliverySchema.optional(),
   })
   .refine((b) => b.text.trim().length > 0 || b.attachmentIds.length > 0, { message: 'Mensaje vacío' });
 export type SendMessageBody = z.input<typeof sendMessageBody>;

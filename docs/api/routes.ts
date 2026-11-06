@@ -26,6 +26,7 @@ export const collectionVariables = {
   skillName: { value: ex.ids.skill, description: 'Skill en cuarentena para /skills/:name/approve y /reject.' },
   chatId: { value: chats.chatIds.chat, description: 'Chat para /chats/:id (POST /chats la actualiza).' },
   attachmentId: { value: chats.chatIds.attachment, description: 'Adjunto para GET /attachments/:id (POST /attachments la actualiza).' },
+  queuedId: { value: chats.chatIds.queued, description: 'Mensaje en la cola de un chat para DELETE /chats/:id/queue/:queuedId (POST /chats/:id/messages con `delivery: \'after-turn\'` lo devuelve en `queued`).' },
   pluginId: { value: chats.chatIds.plugin, description: 'Plugin para /plugins/:id/connect y /disconnect: `chrome` o `canva`.' },
 } as const;
 export type CollectionVariable = keyof typeof collectionVariables;
@@ -78,6 +79,7 @@ const sessionId = { id: 'sessionId' } as const;
 const skillName = { name: 'skillName' } as const;
 const chatId = { id: 'chatId' } as const;
 const proposalIds = { id: 'chatId', taskId: 'taskId' } as const;
+const queuedIds = { id: 'chatId', queuedId: 'queuedId' } as const;
 
 /** Lo que agrega la documentación a cada ruta del servidor (una entrada por ruta, ni más ni menos). */
 export const docExtras: Readonly<Record<string, DocExtras>> = {
@@ -164,6 +166,7 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'POST /chats/:id/close': { paramVars: chatId, responseExample: { chat: chats.chatClosed } },
   'GET /chats/:id/messages': { paramVars: chatId, responseExample: { messages: [chats.userMessage, chats.assistantMessage] } },
   'POST /chats/:id/messages': { paramVars: chatId, responseExample: { message: chats.userMessage } },
+  'DELETE /chats/:id/queue/:queuedId': { paramVars: queuedIds, responseExample: { chat: chats.chat } },
   'POST /chats/:id/interrupt': { paramVars: chatId, responseExample: { chat: chats.chat } },
   'GET /chats/:id/proposals': { paramVars: chatId, responseExample: { proposals: chats.proposals } },
   'POST /chats/:id/proposals/approve-all': { paramVars: chatId, responseExample: chats.approvedAll },

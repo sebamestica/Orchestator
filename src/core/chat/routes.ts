@@ -16,6 +16,7 @@ import {
   opaqueIdSchema,
   patchChatBody,
   proposalSchema,
+  queuedChatMessageSchema,
   sendMessageBody,
 } from '../../shared/index.ts';
 import { ApiError, type RouteModuleContext } from '../server/index.ts';
@@ -25,6 +26,7 @@ import { ChatError, type ChatService } from './service.ts';
 export const chatIdParam = opaqueIdSchema;
 export const attachmentIdParam = opaqueIdSchema;
 export const proposalTaskIdParam = idSchema;
+export const queuedIdParam = opaqueIdSchema;
 /** `projectId` vacío: conversaciones sin proyecto; ausente: todos los chats. */
 export const chatsQuery = z.strictObject({ projectId: z.union([idSchema, z.literal('')]).optional() });
 export const messagesQuery = z.strictObject({ limit: z.coerce.number().int().min(1).max(5000).optional() });
@@ -33,6 +35,8 @@ export const uploadQuery = z.strictObject({ name: z.string().min(1).max(255) });
 export const chatResponse = z.strictObject({ chat: chatSchema });
 export const chatsResponse = z.strictObject({ chats: z.array(chatSchema) });
 export const messageResponse = z.strictObject({ message: chatMessageSchema });
+/** `message`: ya está en el hilo; `queued`: espera en la cola del chat el fin del turno (`delivery: 'after-turn'`). */
+export const sendMessageResponse = z.union([messageResponse, z.strictObject({ queued: queuedChatMessageSchema, chat: chatSchema })]);
 export const messagesResponse = z.strictObject({ messages: z.array(chatMessageSchema) });
 export const proposalsResponse = z.strictObject({ proposals: z.array(proposalSchema) });
 export const approvalResponse = z.strictObject({
@@ -201,15 +205,28 @@ export function registerChatRoutes(ctx: RouteModuleContext, deps: ChatRoutesDeps
       tag: 'Chats',
       summary: 'Envía un mensaje a la mente',
       description:
-        'Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.',
+        'Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409 si no trae `delivery`; con `delivery: \'now\'` el mensaje entra al turno en curso y con `\'after-turn\'` queda en la cola del chat (`queued` en la respuesta y en `chat.queued`) y se envía solo al terminar el turno. Sin turno en curso, `delivery` no cambia nada. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.',
       params: chatId,
       body: sendMessageBody,
-      response: messageResponse,
+      response: sendMessageResponse,
       status: 201,
       errors: [400, 404, 409, 413, 415],
       example: { text: 'Separa la API y la interfaz del tablero', attachmentIds: [], effort: 'high' },
     },
-    ({ params, body }) => run(async () => ({ message: await service.send(params.id ?? '', body) })),
+    ({ params, body }) => run(() => service.submit(params.id ?? '', body)),
+  );
+  r.add(
+    {
+      method: 'delete',
+      path: '/chats/:id/queue/:queuedId',
+      tag: 'Chats',
+      summary: 'Quita un mensaje de la cola del chat antes de que se envíe',
+      description: 'La cola son los mensajes enviados con `delivery: \'after-turn\'` que esperan el fin del turno. 404 si ya no está (por ejemplo, ya se envió).',
+      params: { id: chatIdParam, queuedId: queuedIdParam },
+      response: chatResponse,
+      errors: [400, 404],
+    },
+    ({ params }) => run(() => ({ chat: service.unqueue(params.id ?? '', params.queuedId ?? '') })),
   );
   r.add(
     { method: 'post', path: '/chats/:id/interrupt', tag: 'Chats', summary: 'Corta el turno en curso (la conversación sigue)', params: chatId, response: chatResponse, errors: [400, 404] },

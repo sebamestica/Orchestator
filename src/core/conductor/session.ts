@@ -135,6 +135,11 @@ export interface ImageInput {
 
 export interface SendOptions {
   images?: readonly ImageInput[];
+  /**
+   * `next`: el mensaje llega con un turno en curso y el SDK lo incorpora a ese turno entre dos rondas de herramientas
+   * (si el turno termina antes, lo corre como turno propio). Sin ella, el SDK decide (un mensaje abre turno).
+   */
+  priority?: 'next';
 }
 
 /** Un mensaje del SDK y los eventos que salieron de él (ya tachados). */
@@ -517,7 +522,7 @@ export class ConductorSession {
       message = { role: 'user', content: userTextSchema.parse(text) };
     }
     this.#start();
-    this.#input.push({ type: 'user', message, parent_tool_use_id: null });
+    this.#input.push({ type: 'user', message, parent_tool_use_id: null, ...(opts.priority ? { priority: opts.priority } : {}) });
   }
 
   /** Tacha la clave de la sesión y los patrones de `redactSecrets` (texto de la respuesta antes de guardarlo). */

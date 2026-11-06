@@ -29,9 +29,11 @@ import type {
   ChatMessage,
   CreateChatBody,
   Effort,
+  MessageDelivery,
   MindMode,
   PatchChatBody,
   Proposal,
+  QueuedChatMessage,
   Settings,
   TaskBrief,
 } from '../../shared/index.ts';
@@ -208,6 +210,14 @@ interface Live {
   background: Set<string>;
   /** Gasto en vivo desde el último mensaje del usuario (topes por mensaje y de turnos autónomos). */
   spend: MindSpend;
+  /** Mensajes que esperan el fin del turno (`delivery: 'after-turn'`), en orden. Solo en memoria. */
+  queued: Queued[];
+}
+
+/** Un mensaje en cola: lo que ve la interfaz y lo que se enviará. */
+interface Queued {
+  message: QueuedChatMessage;
+  input: SendInput;
 }
 
 export interface SendInput {
@@ -215,13 +225,20 @@ export interface SendInput {
   attachmentIds?: readonly string[];
   /** Esfuerzo de este turno (barra de esfuerzo); sin él, el de los ajustes de la mente. */
   effort?: Effort;
+  /** Con un turno en curso: `now` entra a ese turno; `after-turn` espera en la cola. Sin ella, `conflict`. */
+  delivery?: MessageDelivery;
 }
+
+/** Lo que devuelve `submit`: el mensaje ya en el hilo, o el que quedó en cola esperando el fin del turno. */
+export type SubmitOutcome = { message: ChatMessage } | { queued: QueuedChatMessage; chat: Chat };
 
 export interface ApprovalOutcome extends DeliveryReport {
   proposals: Proposal[];
 }
 
-const resultSchema = z.object({ type: z.literal('result'), subtype: z.string(), is_error: z.boolean().optional(), result: z.string().optional() }).loose();
+const resultSchema = z
+  .object({ type: z.literal('result'), subtype: z.string(), is_error: z.boolean().optional(), result: z.string().optional(), queued_turn_count: z.number().optional() })
+  .loose();
 
 /**
  * Mensaje del SDK que abre un turno de la mente: el `init` de cada turno o un mensaje suyo (no de un subagente). Los
@@ -396,6 +413,7 @@ export class ChatService {
     // Lo gastado desde el último `result` todavía no está guardado: la cabecera lo muestra mientras corre.
     const inFlight = live ? this.#inFlightUsd(live) : 0;
     if (inFlight > 0) out = { ...out, costUsd: Math.round((chat.costUsd + inFlight) * 1e9) / 1e9 };
+    if (live?.queued.length) out = { ...out, queued: live.queued.map((q) => q.message) };
     if (this.#isInternalFolder(chat.cwd)) out = { ...out, internalFolder: true };
     return out;
   }
@@ -469,6 +487,8 @@ export class ChatService {
     const live = this.#live.get(chatId);
     if (live) {
       if (live.turn) live.turn.interrupted = true;
+      // Cerrar descarta lo que esperaba el fin del turno: no reabre la conversación por su cuenta.
+      live.queued = [];
       this.#dropSession(chatId, live);
     }
     return this.#update(chatId, { state: 'closed' });
@@ -517,8 +537,38 @@ export class ChatService {
   // ------------------------------------------------------------- mensajes
 
   /**
+   * Lo que pide la ruta de mensajes. Con un turno en curso, `delivery` decide: `after-turn` deja el mensaje en la cola
+   * del chat (se envía solo al terminar el turno) y `now` lo mete al turno (o a la cola si el turno ya se está cortando o
+   * todavía no arrancó). Sin turno en curso, o sin `delivery`, es `send`.
+   */
+  async submit(chatId: string, input: SendInput): Promise<SubmitOutcome> {
+    this.#require(chatId);
+    if (input.effort !== undefined && !effortSchema.safeParse(input.effort).success) throw new ChatError('invalid', `Esfuerzo inválido: ${String(input.effort)}`);
+    const live = this.#liveOf(chatId);
+    if (!live.busy || !input.delivery) return { message: await this.send(chatId, input) };
+    const turn = live.turn;
+    if (input.delivery === 'now' && turn && !turn.interrupted) {
+      const message = await this.#joinTurn(chatId, live, turn, input);
+      // El turno terminó o se cortó mientras se leían los adjuntos: se vuelve a decidir con el estado de ahora.
+      return message ? { message } : this.submit(chatId, input);
+    }
+    return { queued: this.#enqueue(chatId, live, input), chat: this.get(chatId) };
+  }
+
+  /** Quita un mensaje de la cola del chat antes de que se envíe. */
+  unqueue(chatId: string, queuedId: string): Chat {
+    this.#require(chatId);
+    const live = this.#live.get(chatId);
+    const i = live?.queued.findIndex((q) => q.message.id === queuedId) ?? -1;
+    if (!live || i < 0) throw new ChatError('not_found', 'Ese mensaje ya no está en la cola (puede que ya se haya enviado)');
+    live.queued.splice(i, 1);
+    this.#publishLive(chatId);
+    return this.get(chatId);
+  }
+
+  /**
    * Guarda el mensaje del usuario y lo entrega a la mente. Vuelve en cuanto el mensaje está guardado: la respuesta
-   * llega por `/ws`. Con un turno en curso, `conflict`.
+   * llega por `/ws`. Con un turno en curso, `conflict` (`submit` es quien atiende `delivery`).
    */
   async send(chatId: string, input: SendInput): Promise<ChatMessage> {
     const stored = this.#require(chatId);
@@ -529,33 +579,7 @@ export class ChatService {
     live.busy = true;
     const addedRoots: string[] = [];
     try {
-      const attachments = (input.attachmentIds ?? []).map((id) => this.#attachment(id));
-      const images: ImageInput[] = [];
-      const files: Attachment[] = [];
-      for (const a of attachments) {
-        if (a.kind !== 'image') {
-          files.push(a);
-          continue;
-        }
-        const { bytes } = await this.#readAttachment(a.id);
-        // Un archivo por ruta pudo cambiar desde que se registró: el tipo sale otra vez de sus bytes.
-        const mediaType = sniffImage(bytes);
-        if (!mediaType) {
-          files.push(a);
-          continue;
-        }
-        const data = Buffer.from(bytes).toString('base64');
-        if (data.length > MAX_IMAGE_BASE64_BYTES) throw new ChatError('too_large', imageTooLarge(a.name, data.length));
-        images.push({ mediaType, data, name: a.name });
-      }
-      for (const f of files) {
-        const root = this.#rootOf(f);
-        if (!live.roots.has(root)) addedRoots.push(root);
-        live.roots.add(root);
-      }
-      // Tachado también hacia la mente: el SDK guarda la transcripción de la sesión en disco.
-      const composed = redactSecrets(composeUserText(input.text, files));
-      if (!composed.trim() && !images.length) throw new ChatError('invalid', 'Mensaje vacío');
+      const { attachments, images, composed } = await this.#compose(live, input, addedRoots);
       // Con esfuerzo propio, la mente lo sabe por una línea al inicio (el historial guarda el texto sin ella).
       const text = input.effort ? [effortNote(input.effort), composed].filter((t) => t.trim()).join('\n') : composed;
 
@@ -598,12 +622,112 @@ export class ChatService {
         live.busy = false;
         // Ni la sesión viva sin su plazo de inactividad (p. ej. rechazada por falta de saldo o por el tope diario).
         if (live.session && !live.idle) this.#scheduleIdle(chatId, live);
+        // Lo que se encoló mientras este envío arrancaba no queda esperando un turno que no llegó.
+        this.#sendQueued(chatId, live);
       }
       // Un envío fallido no deja abierta la lectura de las carpetas de sus adjuntos.
       for (const root of addedRoots) live.roots.delete(root);
       if (err instanceof AttachmentError) throw new ChatError(err.code, err.message);
       throw err;
     }
+  }
+
+  /**
+   * Adjuntos, imágenes en base64 y el texto tachado que va a la mente. Las carpetas de los archivos adjuntos pasan a ser
+   * legibles; las que agrega quedan en `addedRoots` para que un envío fallido las quite.
+   */
+  async #compose(live: Live, input: SendInput, addedRoots: string[]): Promise<{ attachments: Attachment[]; images: ImageInput[]; composed: string }> {
+    const attachments = (input.attachmentIds ?? []).map((id) => this.#attachment(id));
+    const images: ImageInput[] = [];
+    const files: Attachment[] = [];
+    for (const a of attachments) {
+      if (a.kind !== 'image') {
+        files.push(a);
+        continue;
+      }
+      const { bytes } = await this.#readAttachment(a.id);
+      // Un archivo por ruta pudo cambiar desde que se registró: el tipo sale otra vez de sus bytes.
+      const mediaType = sniffImage(bytes);
+      if (!mediaType) {
+        files.push(a);
+        continue;
+      }
+      const data = Buffer.from(bytes).toString('base64');
+      if (data.length > MAX_IMAGE_BASE64_BYTES) throw new ChatError('too_large', imageTooLarge(a.name, data.length));
+      images.push({ mediaType, data, name: a.name });
+    }
+    for (const f of files) {
+      const root = this.#rootOf(f);
+      if (!live.roots.has(root)) addedRoots.push(root);
+      live.roots.add(root);
+    }
+    // Tachado también hacia la mente: el SDK guarda la transcripción de la sesión en disco.
+    const composed = redactSecrets(composeUserText(input.text, files));
+    if (!composed.trim() && !images.length) throw new ChatError('invalid', 'Mensaje vacío');
+    return { attachments, images, composed };
+  }
+
+  /**
+   * «Ahora» con un turno en curso: el mensaje va a la entrada del SDK con `priority: 'next'`, que lo incorpora al turno
+   * entre dos rondas de herramientas sin cortar lo hecho. Si el turno termina antes, el SDK lo corre como turno propio
+   * y llega como turno autónomo (`#beginAutonomousTurn`). El esfuerzo no cambia a mitad de turno. `undefined`: el
+   * turno terminó o se cortó mientras se leían los adjuntos y no se entregó nada.
+   */
+  async #joinTurn(chatId: string, live: Live, turn: Turn, input: SendInput): Promise<ChatMessage | undefined> {
+    const addedRoots: string[] = [];
+    try {
+      const { attachments, images, composed } = await this.#compose(live, input, addedRoots);
+      if (live.turn !== turn || turn.interrupted) {
+        for (const root of addedRoots) live.roots.delete(root);
+        return undefined;
+      }
+      try {
+        turn.session.send(composed, { images, priority: 'next' });
+      } catch (err) {
+        throw new ChatError('invalid', oneLine(err));
+      }
+      const message = this.#repo.addMessage({
+        id: this.#newId(),
+        chatId,
+        role: 'user',
+        text: redactSecrets(input.text),
+        attachments,
+        mode: this.#require(chatId).chat.mode,
+        at: this.#iso(),
+      });
+      this.#deps.hub.publish({ type: 'chat_message', message });
+      return message;
+    } catch (err) {
+      for (const root of addedRoots) live.roots.delete(root);
+      if (err instanceof AttachmentError) throw new ChatError(err.code, err.message);
+      throw err;
+    }
+  }
+
+  /** «Al terminar»: valida el mensaje y lo deja en la cola del chat; `#sendQueued` lo envía cuando termina el turno. */
+  #enqueue(chatId: string, live: Live, input: SendInput): QueuedChatMessage {
+    const attachments = (input.attachmentIds ?? []).map((id) => this.#attachment(id));
+    if (!input.text.trim() && !attachments.length) throw new ChatError('invalid', 'Mensaje vacío');
+    const message: QueuedChatMessage = { id: this.#newId(), text: redactSecrets(input.text), attachments, at: this.#iso() };
+    live.queued.push({ message, input });
+    this.#publishLive(chatId);
+    return message;
+  }
+
+  /**
+   * Al terminar un turno, envía el primer mensaje de la cola (los demás esperan a que termine el turno que abre). Si el
+   * SDK todavía tiene envíos del usuario por contestar (`queued_turn_count`), espera al turno de esos.
+   */
+  #sendQueued(chatId: string, live: Live, pendingInSdk = 0): void {
+    if (live.busy || pendingInSdk > 0) return;
+    const next = live.queued.shift();
+    if (!next) return;
+    this.#publishLive(chatId);
+    // Si falla, el `catch` de `send` ya pasó al siguiente de la cola: aquí solo se avisa.
+    this.send(chatId, next.input).catch((err: unknown) => {
+      this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `No se pudo enviar el mensaje en cola: ${oneLine(err)}` } });
+      this.#log(`chat ${chatId}: el mensaje en cola no se envió: ${oneLine(err)}`);
+    });
   }
 
   /** Corta el turno en curso (la conversación sigue). Sin turno, no hace nada. */
@@ -680,6 +804,8 @@ export class ChatService {
     for (const [chatId, live] of this.#live) {
       if (live.idle) clearTimeout(live.idle);
       if (live.turn) live.turn.interrupted = true;
+      // Al apagar no se abren turnos nuevos con lo que esperaba en la cola.
+      live.queued = [];
       this.#dropSession(chatId, live);
     }
   }
@@ -749,7 +875,7 @@ export class ChatService {
         taken: (taskId) => (this.#deps.store.getTask(taskId) ? `La tarea ${taskId} ya existe en el tablero; usa otro id` : undefined),
       });
       const sessionId = this.#require(chatId).chat.sessionId;
-      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots, background: new Set(), spend: freshSpend() };
+      live = { proposals, seq: this.#deps.store.getSession(sessionId)?.lastSeq ?? -1, busy: false, roots, background: new Set(), spend: freshSpend(), queued: [] };
       this.#live.set(chatId, live);
     }
     return live;
@@ -1124,6 +1250,7 @@ export class ChatService {
     this.#recordTurn(stored.chat, turn, ok, final);
     if (stored.chat.state !== 'closed') this.#update(chatId, { state: ok || turn.interrupted ? 'idle' : 'error' });
     this.#scheduleIdle(chatId, live);
+    this.#sendQueued(chatId, live, result?.success ? (result.data.queued_turn_count ?? 0) : 0);
   }
 
   /** Lo que la mente cambió ella misma en el turno, a la memoria del proyecto. Sin esperar: un fallo solo va al log. */

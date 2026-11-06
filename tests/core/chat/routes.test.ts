@@ -259,3 +259,29 @@ describe('rutas del chat: límites de la imagen', () => {
     expect((await json<{ error: { message: string } }>(res)).error.message).toMatch(/5 MB en base64/);
   });
 });
+
+describe('rutas: enviar con la mente ocupada (ui-chat-08)', () => {
+  it('after-turn responde 201 con queued y el chat; DELETE /queue/:queuedId lo quita y luego da 404', async () => {
+    const { chat } = await json<{ chat: Chat }>(await call('POST', '/chats', { projectId: 'demo' }));
+    hold();
+    expect((await call('POST', `/chats/${chat.id}/messages`, { text: 'largo' })).status).toBe(201);
+    const queued = await call('POST', `/chats/${chat.id}/messages`, { text: 'luego', delivery: 'after-turn' });
+    expect(queued.status).toBe(201);
+    const body = await json<{ queued: { id: string; text: string }; chat: Chat }>(queued);
+    expect(body.queued.text).toBe('luego');
+    expect(body.chat.queued?.map((m) => m.id)).toEqual([body.queued.id]);
+    expect((await json<{ chat: Chat }>(await call('GET', `/chats/${chat.id}`))).chat.queued?.map((m) => m.text)).toEqual(['luego']);
+
+    const removed = await call('DELETE', `/chats/${chat.id}/queue/${body.queued.id}`);
+    expect(removed.status).toBe(200);
+    expect((await json<{ chat: Chat }>(removed)).chat.queued).toBeUndefined();
+    expect((await call('DELETE', `/chats/${chat.id}/queue/${body.queued.id}`)).status).toBe(404);
+    expect((await call('POST', `/chats/${chat.id}/messages`, { text: 'x', delivery: 'luego' })).status).toBe(400);
+
+    const now = await call('POST', `/chats/${chat.id}/messages`, { text: 'ya', delivery: 'now' });
+    expect(now.status).toBe(201);
+    expect((await json<{ message: { text: string } }>(now)).message.text).toBe('ya');
+    release();
+    await idle(chat.id);
+  });
+});

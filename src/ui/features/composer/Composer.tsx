@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom';
 import { Button, Popover } from '@heroui/react';
 import { ArrowUp, Paperclip, Plus, Square, Upload, X } from 'lucide-react';
 import { nextMindMode } from '../../../shared/api.ts';
-import type { Attachment, Effort, MindMode } from '../../../shared/api.ts';
+import type { Attachment, Effort, MessageDelivery, MindMode } from '../../../shared/api.ts';
 import { EffortSlider } from '../../components/EffortSlider.tsx';
 import { Kbd } from '../../components/Kbd.tsx';
 import { MODE_INFO } from '../chat/format.ts';
@@ -17,15 +17,24 @@ import { AttachmentTray } from './AttachmentTray.tsx';
 import { growTextarea, hasFiles, isEditable, namePasted, pastedFiles } from './files.ts';
 import { useAttachments } from './useAttachments.ts';
 
+/** Cuándo mandar un mensaje mientras la mente trabaja: `later` lo guarda sin enviarlo. */
+export type SendTiming = MessageDelivery | 'later';
+
 export interface ComposerProps {
   placeholder: string;
   mode: MindMode;
   onModeChange: (mode: MindMode) => void;
   /** Sube o registra un archivo y devuelve el adjunto. */
   onAttach: (file: File) => Promise<Attachment>;
-  onSubmit: (turn: { text: string; attachments: Attachment[] }) => boolean | Promise<boolean>;
+  /** `delivery` solo viene si se eligió con `askDelivery`; sin él, es un envío normal. */
+  onSubmit: (turn: { text: string; attachments: Attachment[]; delivery?: SendTiming }) => boolean | Promise<boolean>;
   isStreaming?: boolean;
   onStop?: () => void;
+  /**
+   * La mente trabaja: se puede enviar aunque `isStreaming` sea true y, al enviar, el Composer pregunta cuándo
+   * entregar el mensaje (ahora, al terminar el turno o más tarde) antes de llamar a `onSubmit`.
+   */
+  askDelivery?: boolean;
   isDisabled?: boolean;
   /** `false`: la vista dibuja su propia ficha de modo (el atajo Shift+Tab del campo sigue activo). */
   showModeChip?: boolean;
@@ -55,6 +64,7 @@ export function Composer({
   onSubmit,
   isStreaming = false,
   onStop,
+  askDelivery = false,
   isDisabled = false,
   showModeChip = true,
   effort,
@@ -71,16 +81,19 @@ export function Composer({
   const [error, setError] = useState('');
   const [dragging, setDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const choice = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const submitting = useRef(false);
   const composing = useRef(false);
   const pasted = useRef(0);
   const attachments = useAttachments(onAttach);
   const locked = isDisabled || sending;
-  const canSend = !locked && !isStreaming && !attachments.busy
+  const hasContent = text.trim() !== '' || attachments.items.length > 0;
+  const canSend = !locked && (!isStreaming || askDelivery) && !attachments.busy
     && !attachments.items.some((item) => item.error)
-    && (text.trim() !== '' || attachments.items.length > 0);
+    && hasContent;
 
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
@@ -98,14 +111,31 @@ export function Composer({
     if (!submitting.current) clearAttachments();
   }, [resetKey, clearAttachments]);
 
+  // La elección de entrega no tiene sentido si ya no se puede enviar o si la mente quedó libre: se cierra.
   useEffect(() => {
-    if (!isStreaming) return;
-    const stop = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) onStop?.();
+    if (choosing && (!canSend || !askDelivery)) setChoosing(false);
+  }, [choosing, canSend, askDelivery]);
+
+  useEffect(() => {
+    if (choosing) choice.current?.querySelector('button')?.focus();
+  }, [choosing]);
+
+  // Esc detiene el turno; con la elección de entrega abierta, solo la cierra.
+  useEffect(() => {
+    if (!isStreaming && !choosing) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (choosing) {
+        event.preventDefault();
+        setChoosing(false);
+        textarea.current?.focus();
+      } else {
+        onStop?.();
+      }
     };
-    window.addEventListener('keydown', stop);
-    return () => window.removeEventListener('keydown', stop);
-  }, [isStreaming, onStop]);
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [isStreaming, choosing, onStop]);
 
   // Soltar y pegar en toda la ventana. Soltar siempre se cancela (si no, la ventana navegaría al archivo).
   useEffect(() => {
@@ -162,14 +192,14 @@ export function Composer({
     };
   }, []);
 
-  const send = async () => {
+  const send = async (delivery?: SendTiming) => {
     if (!canSend || submitting.current) return;
     submitting.current = true;
     setSending(true);
     setError('');
     try {
       const ready = attachments.items.flatMap((item) => item.attachment ? [item.attachment] : []);
-      if (await onSubmit({ text, attachments: ready })) {
+      if (await onSubmit({ text, attachments: ready, ...(delivery ? { delivery } : {}) })) {
         setText('');
         attachments.clear();
       }
@@ -181,6 +211,23 @@ export function Composer({
     }
   };
 
+  /** Enter o el botón: con la mente trabajando pregunta cuándo entregar; si no, envía. */
+  const request = () => {
+    if (!canSend || submitting.current || choosing) return;
+    if (askDelivery) setChoosing(true);
+    else void send();
+  };
+
+  const choose = (delivery: SendTiming) => {
+    setChoosing(false);
+    void send(delivery);
+  };
+
+  const cancelChoice = () => {
+    setChoosing(false);
+    textarea.current?.focus();
+  };
+
   const modeInfo = MODE_INFO[mode];
   const alerts = [
     ...attachments.items.flatMap((item) => item.error ? [`No se pudo adjuntar ${item.file.name}. ${item.error}`] : []),
@@ -190,7 +237,7 @@ export function Composer({
   return (
     <form
       className={`relative flex flex-col gap-1 rounded-[1.625rem] bg-foreground/[0.06] p-2 transition-shadow duration-quick focus-within:ring-1 focus-within:ring-foreground/20 motion-reduce:transition-none ${dragging ? 'ring-2 ring-foreground/30' : ''}`}
-      onSubmit={(event) => { event.preventDefault(); void send(); }}
+      onSubmit={(event) => { event.preventDefault(); request(); }}
     >
       <AttachmentTray items={attachments.items} onRemove={attachments.remove} isDisabled={locked} />
       {attachments.notice ? (
@@ -225,9 +272,18 @@ export function Composer({
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) return;
           if (event.key === 'Tab' && event.shiftKey) { event.preventDefault(); onModeChange(nextMindMode(mode)); }
-          if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); }
+          if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); request(); }
         }}
       />
+      {choosing ? (
+        <div ref={choice} role="group" aria-label="¿Cuándo lo envío?" className="mx-1 flex flex-wrap items-center gap-1.5 rounded-2xl bg-foreground/[0.06] px-3 py-2">
+          <span className="mr-1 text-[0.8125rem] text-muted">¿Cuándo lo envío?</span>
+          <Button type="button" size="sm" variant="secondary" onPress={() => choose('now')} className="rounded-full">Ahora</Button>
+          <Button type="button" size="sm" variant="secondary" onPress={() => choose('after-turn')} className="rounded-full">Al terminar</Button>
+          <Button type="button" size="sm" variant="secondary" onPress={() => choose('later')} className="rounded-full">Más tarde</Button>
+          <Button type="button" size="sm" variant="ghost" onPress={cancelChoice} className="rounded-full">Cancelar</Button>
+        </div>
+      ) : null}
       <div className="flex min-w-0 items-center gap-1">
         <Popover isOpen={menuOpen} onOpenChange={setMenuOpen}>
           <Button type="button" isIconOnly variant="ghost" aria-label="Añadir adjunto" isDisabled={locked} className="size-9 shrink-0 rounded-full"><Plus className="size-5" aria-hidden="true" /></Button>
@@ -251,6 +307,11 @@ export function Composer({
           <EffortSlider value={effort} onChange={onEffortChange} {...(effortLevels ? { levels: effortLevels } : {})} isDisabled={isDisabled} />
         ) : null}
         <div className="min-w-0 flex-1" />
+        {isStreaming && askDelivery && hasContent ? (
+          <Button type="submit" isIconOnly aria-label="Enviar mensaje" isDisabled={!canSend} className="size-9 shrink-0 rounded-full bg-foreground text-canvas">
+            <ArrowUp aria-hidden="true" className="size-5" />
+          </Button>
+        ) : null}
         <Button type={isStreaming ? 'button' : 'submit'} isIconOnly aria-label={isStreaming ? 'Detener respuesta' : 'Enviar mensaje'}
           isDisabled={isStreaming ? !onStop : !canSend} onPress={isStreaming ? onStop : undefined}
           className="size-9 shrink-0 rounded-full bg-foreground text-canvas">

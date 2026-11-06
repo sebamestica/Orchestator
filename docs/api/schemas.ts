@@ -15,6 +15,7 @@ import {
   messageResponse,
   messagesResponse,
   proposalsResponse,
+  sendMessageResponse,
 } from '../../src/core/chat/index.ts';
 import { pluginResponse, pluginsResponse } from '../../src/core/plugins/index.ts';
 import { addAgentFromKeySchema, agentInputSchema } from '../../src/core/registry/index.ts';
@@ -26,6 +27,7 @@ import {
   changesTargetSchema,
   chatMessageSchema,
   chatSchema,
+  queuedChatMessageSchema,
   pluginSchema,
   proposalSchema,
   settingsSchema,
@@ -162,6 +164,8 @@ const outputs: readonly [z.ZodType, string][] = [
   [chatResponse, 'ChatResponse'],
   [chatsResponse, 'ChatsResponse'],
   [messageResponse, 'ChatMessageResponse'],
+  [sendMessageResponse, 'ChatSendResponse'],
+  [queuedChatMessageSchema, 'QueuedChatMessage'],
   [messagesResponse, 'ChatMessagesResponse'],
   [proposalsResponse, 'ProposalsResponse'],
   [approvalResponse, 'ProposalApprovalResponse'],
@@ -218,6 +222,8 @@ export const componentDescriptions: Readonly<Record<string, string>> = {
   PatchUsageRatesRequest: 'Multiplicador por modelo (0–10); `null` lo borra y el modelo vuelve a 1.',
   Chat: 'Chat con la mente (src/shared/api.ts). Sus eventos llegan por `/ws` con `sessionId`.',
   ChatMessage: 'Mensaje de un chat, del usuario o de la mente (src/shared/api.ts).',
+  QueuedChatMessage: 'Mensaje del usuario que espera en la cola del chat a que termine el turno en curso (src/shared/api.ts).',
+  ChatSendResponse: '`message`: el mensaje ya está en el hilo; `queued` y `chat`: quedó en la cola del chat y se envía solo al terminar el turno.',
   Proposal: 'Tarea propuesta por la mente y su aprobación (src/shared/api.ts).',
   Attachment: 'Adjunto de un mensaje: copia subida o archivo local referido por ruta (src/shared/api.ts).',
   Plugin: 'Plugin de los agentes (Chrome o Canva) y su estado (src/shared/api.ts). Nunca trae un token.',

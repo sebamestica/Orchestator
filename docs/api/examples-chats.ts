@@ -14,6 +14,7 @@ export const chatIds = {
   chat: 'chat-8f3a2c1d',
   attachment: 'adj-5b7e9d2a',
   plugin: 'chrome',
+  queued: 'msg-9c8d7e6f',
 } as const;
 
 export const chat: Chat = {

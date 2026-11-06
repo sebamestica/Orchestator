@@ -4873,7 +4873,7 @@
         ],
         "summary": "Envía un mensaje a la mente",
         "operationId": "postChatsByIdMessages",
-        "description": "Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.",
+        "description": "Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409 si no trae `delivery`; con `delivery: 'now'` el mensaje entra al turno en curso y con `'after-turn'` queda en la cola del chat (`queued` en la respuesta y en `chat.queued`) y se envía solo al terminar el turno. Sin turno en curso, `delivery` no cambia nada. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.",
         "parameters": [
           {
             "name": "id",
@@ -4915,6 +4915,13 @@
                       "xhigh",
                       "max"
                     ]
+                  },
+                  "delivery": {
+                    "type": "string",
+                    "enum": [
+                      "now",
+                      "after-turn"
+                    ]
                   }
                 },
                 "required": [
@@ -4936,7 +4943,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ChatMessageResponse"
+                  "$ref": "#/components/schemas/ChatSendResponse"
                 },
                 "example": {
                   "message": {
@@ -4983,6 +4990,78 @@
           },
           "415": {
             "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/chats/{id}/queue/{queuedId}": {
+      "delete": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Quita un mensaje de la cola del chat antes de que se envíe",
+        "operationId": "deleteChatsByIdQueueByQueuedId",
+        "description": "La cola son los mensajes enviados con `delivery: 'after-turn'` que esperan el fin del turno. 404 si ya no está (por ejemplo, ya se envió).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          },
+          {
+            "name": "queuedId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "msg-9c8d7e6f"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "plan",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "idle",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:02:10.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
           }
         }
       }
@@ -10300,6 +10379,12 @@
             "type": "integer",
             "minimum": 0
           },
+          "queued": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueuedChatMessage"
+            }
+          },
           "internalFolder": {
             "type": "boolean",
             "const": true
@@ -10413,6 +10498,30 @@
           "chat"
         ],
         "additionalProperties": false
+      },
+      "ChatSendResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ChatMessageResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "queued": {
+                "$ref": "#/components/schemas/QueuedChatMessage"
+              },
+              "chat": {
+                "$ref": "#/components/schemas/Chat"
+              }
+            },
+            "required": [
+              "queued",
+              "chat"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "`message`: el mensaje ya está en el hilo; `queued` y `chat`: quedó en la cola del chat y se envía solo al terminar el turno."
       },
       "ChatsResponse": {
         "type": "object",
@@ -11439,6 +11548,36 @@
           "antigravity"
         ],
         "description": "Proveedor del agente (src/shared/agents.ts)."
+      },
+      "QueuedChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,100}$"
+          },
+          "text": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "attachments",
+          "at"
+        ],
+        "additionalProperties": false,
+        "description": "Mensaje del usuario que espera en la cola del chat a que termine el turno en curso (src/shared/api.ts)."
       },
       "QuotaBucket": {
         "type": "object",

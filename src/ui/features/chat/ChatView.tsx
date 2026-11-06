@@ -10,17 +10,19 @@ import { effortSchema, nextMindMode, type Attachment, type Chat, type Effort, ty
 import { navigate } from '../../app/routes.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
 import { useApp } from '../../store/app.ts';
-import { Composer, type ComposerProps } from '../composer/Composer.tsx';
+import { Composer, type ComposerProps, type SendTiming } from '../composer/Composer.tsx';
 import { ChatHeader } from './components/ChatHeader.tsx';
 import { EmptyChat } from './components/EmptyChat.tsx';
+import { LaterMessages } from './components/LaterMessages.tsx';
 import { LiveReply } from './components/LiveReply.tsx';
 import { MessageList } from './components/MessageList.tsx';
 import { ModeChip } from './components/ModeChip.tsx';
 import { ProposalsCard } from './components/ProposalsCard.tsx';
+import { QueuedMessages } from './components/QueuedMessages.tsx';
 import { BackgroundLine } from './components/BackgroundLine.tsx';
 import { TargetLine } from './components/TargetLine.tsx';
 import { APP_NAME } from './format.ts';
-import { attachFile, awaitsDelivery, chosenEffort, composingId, draftOf, effortIn, errorText, pickFolder, useChat } from './store.ts';
+import { attachFile, awaitsDelivery, chosenEffort, composingId, draftOf, effortIn, errorText, laterIn, pickFolder, useChat, type LaterMessage } from './store.ts';
 import { anchorProposals, buildReply, PROPOSALS_AT_END, splitTurns } from './timeline.ts';
 import { useChatLive } from './use-chat-live.ts';
 
@@ -30,6 +32,14 @@ export interface ChatViewProps {
 }
 
 const NEAR_BOTTOM_PX = 80;
+
+/**
+ * La mente está en un turno: un mensaje enviado ahora pide cuándo entregarlo. Con solo subagentes en segundo plano no
+ * hay turno que esperar y el núcleo acepta el mensaje como siempre.
+ */
+function isWorking(chat: Chat | null): boolean {
+  return chat?.state === 'running';
+}
 
 /** Mantiene el hilo pegado al final mientras llega texto, salvo que el usuario haya subido. */
 function useStickToBottom(signature: string) {
@@ -95,6 +105,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const busy = useChat((s) => s.busy);
   const undelivered = useChat((s) => s.undelivered);
   const chosen = useChat(chosenEffort);
+  const laterByChat = useChat((s) => s.later);
 
   useEffect(() => {
     void useChat.getState().open(projectId, chatId ?? null, useApp.getState().settings.defaultMode);
@@ -107,6 +118,8 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   // Sin elección en este chat, el esfuerzo de la mente de Ajustes.
   const effort: Effort = chosen ?? settings.mind.effort;
   const running = chat?.state === 'running';
+  const queued = chat?.queued ?? [];
+  const later = laterIn(laterByChat, chat?.id ?? null);
   const roots = chat?.extraRoots ?? pendingRoots;
   const projectName = projectId ? (project?.name ?? projectId) : null;
   // La carpeta interna de una conversación no se muestra: el usuario no eligió ninguna.
@@ -160,7 +173,14 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   const sending = useRef(false);
   const [starting, setStarting] = useState(false);
   const onSubmit = useCallback(
-    async (turn: { text: string; attachments: Attachment[] }): Promise<boolean> => {
+    async (turn: { text: string; attachments: Attachment[]; delivery?: SendTiming }): Promise<boolean> => {
+      if (turn.delivery === 'later') {
+        // «Más tarde»: queda como pendiente de este chat, sin enviarse.
+        const current = useChat.getState().chat;
+        if (!current) return false;
+        useChat.getState().saveLater(current.id, { text: turn.text, attachments: turn.attachments });
+        return true;
+      }
       if (sending.current) return false;
       sending.current = true;
       setStarting(true);
@@ -173,7 +193,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
         }
         // Un chat recién creado ya heredó el esfuerzo del borrador.
         const store = useChat.getState();
-        return await store.send(current.id, turn.text, turn.attachments, effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort);
+        return await store.send(current.id, turn.text, turn.attachments, effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort, turn.delivery);
       } finally {
         sending.current = false;
         setStarting(false);
@@ -181,6 +201,27 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
     },
     [createChat, toChat],
   );
+
+  const sendingLater = useRef(new Set<string>());
+  /** Manda un pendiente: si la mente sigue trabajando entra al turno («Ahora»); si sale bien, se quita de la lista. */
+  const sendLater = useCallback(async (item: LaterMessage): Promise<void> => {
+    const store = useChat.getState();
+    const current = store.chat;
+    if (!current || sendingLater.current.has(item.id)) return;
+    sendingLater.current.add(item.id);
+    try {
+      const effort = effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort;
+      const ok = await store.send(current.id, item.text, item.attachments, effort, isWorking(current) ? 'now' : undefined);
+      if (ok) useChat.getState().dropLater(current.id, item.id);
+    } finally {
+      sendingLater.current.delete(item.id);
+    }
+  }, []);
+
+  const dropLater = useCallback((id: string) => {
+    const store = useChat.getState();
+    if (store.chat) store.dropLater(store.chat.id, id);
+  }, []);
 
   const onNew = useCallback(async () => {
     const created = await createChat();
@@ -225,7 +266,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
     void useChat.getState().open(projectId, null, useApp.getState().settings.defaultMode);
   }, [projectId, toRoot]);
 
-  const scroll = useStickToBottom(`${activeId ?? ''}:${messages.length}:${events.at(-1)?.seq ?? -1}:${running}:${proposals.length}`);
+  const scroll = useStickToBottom(`${activeId ?? ''}:${messages.length}:${events.at(-1)?.seq ?? -1}:${running}:${proposals.length}:${queued.length}`);
 
   const proposalsCard = (list: typeof proposals) => (
     <ProposalsCard
@@ -306,6 +347,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
           <>
             {showDraft ? <LiveReply draft={draft} running={running} /> : null}
             {endProposals ? proposalsCard(endProposals) : null}
+            <QueuedMessages queued={queued} onRemove={(id) => void useChat.getState().unqueue(id)} />
           </>
         }
       />
@@ -373,6 +415,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
         )}
         {chat && (chat.backgroundTasks ?? 0) > 0 ? <BackgroundLine count={chat.backgroundTasks ?? 0} /> : null}
         <ModeChip mode={mode} onChange={setMode} mind={mind} isDisabled={unavailable} />
+        <LaterMessages items={later} onSend={(item) => void sendLater(item)} onDrop={dropLater} />
         <ChatComposer
           placeholder={projectName ? `Pídele algo a ${APP_NAME} sobre ${projectName}…` : `Pídele algo a ${APP_NAME}…`}
           mode={mode}
@@ -383,6 +426,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
           onAttach={attachFile}
           onSubmit={onSubmit}
           isStreaming={running}
+          askDelivery={running}
           onStop={() => void useChat.getState().interrupt()}
           isDisabled={!canWrite}
           showModeChip={false}
