@@ -1,7 +1,7 @@
 # Issues abiertos de Berland (`inssues/`)
 
 Esta carpeta junta los problemas **abiertos** que se encontraron en Berland (el orquestador de `C:\dev\orquestador`)
-el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **119 issues** (23 de ellas `autoeval-*`, agregadas después), uno por archivo `.md`, y
+el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **120 issues** (23 de ellas `autoeval-*`, agregadas después), uno por archivo `.md`, y
 cada uno se verificó leyendo el código (archivo:línea). Los `uso-real-*` se verificaron además con copias de solo lectura
 de la base y de los registros reales. Los números de línea son los del código en el commit `63748b8`. Si el código se
 mueve, busca el fragmento citado.
@@ -90,6 +90,7 @@ Ordenado por severidad (alta, media, baja) y después por área.
 | [ui-chat-03-errores-de-turno-sin-respuesta-desaparecen.md](ui-chat-03-errores-de-turno-sin-respuesta-desaparecen.md) | El error y los pasos de un turno que terminó sin respuesta desaparecen del hilo cuando el usuario manda otro mensaje | media | Interfaz: chat y composer |
 | [ui-chat-04-sugerencia-doble-clic-crea-dos-chats.md](ui-chat-04-sugerencia-doble-clic-crea-dos-chats.md) | Un doble clic en una sugerencia del chat vacío crea dos conversaciones y lanza dos turnos de la mente | media | Interfaz: chat y composer |
 | [ui-chat-05-replay-recorre-toda-la-historia.md](ui-chat-05-replay-recorre-toda-la-historia.md) | Al abrir un chat, la interfaz pide por /ws toda la historia de la sesión de la mente, de 500 en 500, y solo se queda con los últimos 500 eventos | media | Interfaz: chat y composer |
+| [ui-chat-08-enviar-mientras-razona.md](ui-chat-08-enviar-mientras-razona.md) | Mientras la mente razona no se le puede escribir: hay que detener el turno para mandarle lo que faltó | media | Interfaz: chat y composer |
 | [ui-resto-01-sin-error-boundary-ventana-en-blanco.md](ui-resto-01-sin-error-boundary-ventana-en-blanco.md) | Sin error boundary: si falla una vista perezosa (por ejemplo tras recompilar dist/ui) la ventana queda en blanco y sin controles | media | Interfaz: tablero, panel, ajustes |
 | [ui-resto-02-detalle-tarea-arrastra-agente-y-error.md](ui-resto-02-detalle-tarea-arrastra-agente-y-error.md) | El detalle de una tarea arrastra el agente elegido y el aviso de error de la tarea anterior, y puede aprobar otra tarea con ese agente | media | Interfaz: tablero, panel, ajustes |
 | [ui-resto-04-panel-mente-ciega-fuera-del-chat.md](ui-resto-04-panel-mente-ciega-fuera-del-chat.md) | La fila «Mente» del panel solo ve los chats de la vista de chat abierta: en el Tablero siempre dice «Libre» | media | Interfaz: tablero, panel, ajustes |
@@ -165,7 +166,7 @@ Ordenado por severidad (alta, media, baja) y después por área.
 | [servidor-06-ownedpaths-sin-validar-en-tareas-rest.md](servidor-06-ownedpaths-sin-validar-en-tareas-rest.md) | POST /tasks y POST /tasks/manual aceptan rutas propias absolutas, con «..» o negadas: la tarea se trabaja entera y falla al revisar o integrar | baja | Servidor, API y contratos |
 | [servidor-07-docs-api-sin-chats-adjuntos-plugins.md](servidor-07-docs-api-sin-chats-adjuntos-plugins.md) | La documentación del API (OpenAPI y Postman) omite las 21 rutas de chats, adjuntos y plugins, y sus pruebas no pueden detectarlo | baja | Servidor, API y contratos |
 
-Totales: 7 de severidad alta, 42 media y 47 baja.
+Totales: 7 de severidad alta, 43 media y 47 baja.
 
 ### Autoevaluación de la mente (`autoeval-*`)
 
@@ -197,7 +198,7 @@ Se agregaron después del índice principal. Ordenadas por severidad.
 | [autoeval-trabajo-05-estado-sin-tarea-ciego-tras-reinicio.md](autoeval-trabajo-05-estado-sin-tarea-ciego-tras-reinicio.md) | Tras reiniciar el núcleo, `estado()` sin `taskId` deja fuera el estado de las tareas: la mente informa la flota a medias, sin las fallidas ni las integradas | media | Mente y chat |
 | [autoeval-trabajo-06-compactacion-invisible-en-el-chat.md](autoeval-trabajo-06-compactacion-invisible-en-el-chat.md) | Cuando el SDK compacta la conversación de la mente, el chat no lo muestra: el usuario no sabe que la mente resumió lo anterior y puede haber perdido detalles | baja | Interfaz: chat y composer |
 
-Totales con las `autoeval-*`: 15 de severidad alta, 56 media y 48 baja.
+Totales con las `autoeval-*`: 15 de severidad alta, 57 media y 48 baja.
 
 ## Orden sugerido
 
@@ -280,6 +281,8 @@ Cada arreglo tiene que pasar `npm run -s check`. Con la CPU al límite, hoy el g
     errores.
   - `ui-chat-04` (doble clic crea dos chats) y `mente-08` (turno autónomo pisado): dos carreras al enviar, una en la
     interfaz y otra en el núcleo. Comparten tema, no código.
+  - `ui-chat-08` (enviar mensajes mientras la mente razona: ahora, al terminar o más tarde): sola. Toca el envío en el
+    núcleo (`service.ts`, `session.ts`), el contrato (`src/shared/api.ts`) y el Composer.
 - **Estado global (interfaz):** `agy-09` (resincronizar al reconectar `/ws`) y `ui-resto-04` (el panel no ve la mente
   fuera del chat). Los dos dependen de lo que el store global sabe de los chats. `agy-09` usa la misma regla de mezcla
   por `updatedAt` que `ui-chat-02`.
