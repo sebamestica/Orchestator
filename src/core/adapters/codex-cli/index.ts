@@ -51,10 +51,12 @@ export function codexMcpArgs(servers: McpServerMap): { args: string[]; env: Reco
   const args: string[] = [];
   const env: Record<string, string> = {};
   const set = (name: string, key: string, toml: string) => args.push('-c', `mcp_servers.${name}.${key}=${toml}`);
+  const seconds = (s: number) => String(Math.max(1, Math.ceil(s)));
   const common = (name: string, spec: McpServerMap[string]) => {
     set(name, 'enabled', 'true');
     set(name, 'default_tools_approval_mode', '"approve"');
-    if (spec.toolTimeoutSec !== undefined) set(name, 'tool_timeout_sec', String(Math.max(1, Math.ceil(spec.toolTimeoutSec))));
+    if (spec.toolTimeoutSec !== undefined) set(name, 'tool_timeout_sec', seconds(spec.toolTimeoutSec));
+    if (spec.type === 'stdio' && spec.startupTimeoutSec !== undefined) set(name, 'startup_timeout_sec', seconds(spec.startupTimeoutSec));
   };
   for (const [name, spec] of Object.entries(servers)) {
     if (spec.type === 'stdio') {

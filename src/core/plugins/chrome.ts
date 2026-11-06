@@ -38,6 +38,11 @@ export const BERLAND_CHROME_NOTE = 'Berland: Chrome personal';
 /** Espera por el candado en cada llamada de la puerta y tiempo ocioso antes de soltarlo. */
 export const DEFAULT_GATE_WAIT_MS = 5 * 60_000;
 export const DEFAULT_GATE_IDLE_MS = 3 * 60_000;
+/**
+ * Arranque de `chrome-personal` para el cliente MCP (Codex trae 10 s): la puerta, `cmd.exe`, el shim de npm y
+ * `chrome-devtools-mcp` (bundle de ~8 MB) son dos Node y dos `cmd.exe`; con Defender escaneando tardan más.
+ */
+export const CHROME_STARTUP_TIMEOUT_SEC = 60;
 
 /** La puerta MCP (`node chrome-gate.ts …`), junto a este archivo. */
 export const CHROME_GATE_SCRIPT = fileURLToPath(new URL('./chrome-gate.ts', import.meta.url));
@@ -114,6 +119,7 @@ export function chromeServerSpec(launcher: ChromeLauncher, gate: ChromeGateIdent
     instructions: `${CHROME_ONLY_NOTE} ${CHROME_TAB_NOTE} ${PERSONAL_NOTE}`,
     // Para el cliente MCP (Codex: `tool_timeout_sec`): la espera de la puerta más la llamada misma.
     toolTimeoutSec: waitSec + 120,
+    startupTimeoutSec: CHROME_STARTUP_TIMEOUT_SEC,
   };
 }
 

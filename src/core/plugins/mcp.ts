@@ -18,6 +18,8 @@ export interface McpStdioSpec {
   instructions?: string;
   /** Tope de una llamada a herramienta, en segundos (Codex: `tool_timeout_sec`). Sin él, el de cada cliente. */
   toolTimeoutSec?: number;
+  /** Tope de arranque + `initialize` + `tools/list`, en segundos. Solo lo traduce Codex (`startup_timeout_sec`); Claude no lo recibe. */
+  startupTimeoutSec?: number;
 }
 
 export interface McpHttpSpec {

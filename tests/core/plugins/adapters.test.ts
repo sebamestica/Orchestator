@@ -8,7 +8,7 @@ import { ClaudeSdkAdapter, claudeMcpOptions } from '../../../src/core/adapters/c
 import { decideToolUse, mcpToolAllowed } from '../../../src/core/adapters/claude-sdk/permissions.ts';
 import { CodexCliAdapter, codexBrowserOffArgs, codexMcpArgs, codexPluginArgs } from '../../../src/core/adapters/codex-cli/index.ts';
 import { createAdapterFactory } from '../../../src/core/app/adapters.ts';
-import { CHROME_ONLY_NOTE, CHROME_TAB_NOTE, chromeGateArgs, chromeServerSpec, mcpSecrets, type McpGrant, type McpGrantRequest, type McpServerMap, type McpServerSource } from '../../../src/core/plugins/index.ts';
+import { CHROME_ONLY_NOTE, CHROME_TAB_NOTE, chromeGateArgs, chromeServerSpec, defaultChromeLauncher, mcpSecrets, type McpGrant, type McpGrantRequest, type McpServerMap, type McpServerSource } from '../../../src/core/plugins/index.ts';
 import type { JsonlLine, JsonlProcessOptions } from '../../../src/core/process/run-jsonl.ts';
 import { agentConfigSchema, agentEventSchema, taskBriefSchema, type AgentEvent, type RunContext } from '../../../src/shared/index.ts';
 import { config as claudeConfig, ctx as claudeCtx, fakeQuery, loadJsonl, task as claudeTask } from '../adapters/claude-sdk/helpers.ts';
@@ -145,6 +145,7 @@ describe('traducción a Codex CLI', () => {
       '-c', `mcp_servers.chrome-personal.args=[${GATE_ARGS.map((a) => JSON.stringify(a)).join(',')}]`,
       ...on('chrome-personal'),
       '-c', 'mcp_servers.chrome-personal.tool_timeout_sec=420',
+      '-c', 'mcp_servers.chrome-personal.startup_timeout_sec=60',
       '-c', 'mcp_servers.canva.url="https://mcp.canva.com/mcp"',
       '-c', 'mcp_servers.canva.bearer_token_env_var="ORQ_MCP_CANVA_TOKEN"',
       ...on('canva'),
@@ -159,6 +160,17 @@ describe('traducción a Codex CLI', () => {
     expect(out.env).toEqual({ ORQ_MCP_CANVA_TOKEN: TOKEN, ORQ_MCP_OTRO_X_ORG: 'org-secreta-123', API_KEY: 'secreto-largo-123' });
     const argv = out.args.join(' ');
     for (const s of [TOKEN, 'org-secreta-123', 'secreto-largo-123']) expect(argv).not.toContain(s);
+  });
+
+  it('codexPluginArgs: chrome-personal lleva startup_timeout_sec (puerta + cmd.exe + chrome-devtools-mcp en un PC cargado); canva no', () => {
+    const { args } = codexPluginArgs({
+      'chrome-personal': chromeServerSpec(defaultChromeLauncher(), { agent: 'codex-main', task: 'tarea-codex', locksRoot: 'C:\\locks' }),
+      canva: { type: 'http', url: 'https://mcp.canva.com/mcp', headers: {} },
+    });
+    const at = args.indexOf('mcp_servers.chrome-personal.startup_timeout_sec=60');
+    expect(at).toBeGreaterThan(0);
+    expect(args[at - 1]).toBe('-c');
+    expect(args.some((a) => a.startsWith('mcp_servers.canva.startup_timeout_sec'))).toBe(false);
   });
 
   it('run: args, entorno del hijo, nota en el encargo (stdin) y eventos tachados', async () => {

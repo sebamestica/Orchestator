@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** baja
 - **Archivos:** `src/core/adapters/codex-cli/index.ts:54`, `src/core/adapters/codex-cli/index.ts:57`, `src/core/plugins/mcp.ts:11`, `src/core/plugins/mcp.ts:20`, `src/core/plugins/chrome.ts:101`, `src/core/plugins/chrome.ts:109`, `src/core/plugins/chrome-gate.ts:155`, `src/core/plugins/chrome-gate.ts:291`, `src/core/plugins/mcp-probe.ts:26`, `src/core/plugins/service.ts:405`, `tests/live/chrome-personal.live.test.ts:88`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
