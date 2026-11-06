@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** alta
 - **Archivos:** `src/core/server/server.ts:28`, `src/core/server/server.ts:38`, `src/core/server/app.ts:754`, `src/core/server/app.ts:776`, `src/core/app/f5-chat.ts:94`, `src/core/chat/service.ts:256`, `src/core/chat/db.ts:230`, `src/core/app/fleet-service.ts:238`, `src/core/app/fleet-service.ts:257`, `src/core/app/fleet-service.ts:336`, `src/core/app/compose.ts:121`, `src/core/app/cli-commands.ts:118`, `src/core/config/config.ts:32`, `src/core/store/store.ts:285`, `apps/desktop/src/lib/core-client.ts:66`, `apps/desktop/src/lib/shutdown-policy.ts:28`, `apps/desktop/src/core-supervisor.ts:272`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

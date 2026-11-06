@@ -48,8 +48,9 @@ export interface TaskHooks {
    */
   onRetry?(task: TaskRecord): void | Promise<void>;
   /**
-   * Al crear el servidor (arranque del núcleo): la orquestación pone en orden lo que quedó a medias del arranque
-   * anterior (p. ej. tareas en curso que ya nadie mueve pasan a `failed`). Un error se registra y no impide arrancar.
+   * Arranque del núcleo, una vez que el servidor ya escucha (`CoreApp.recover`): la orquestación pone en orden lo que
+   * quedó a medias del arranque anterior (p. ej. tareas en curso que ya nadie mueve pasan a `failed`). Un error se
+   * registra y no impide arrancar.
    */
   recover?(): void;
   /** Tareas del proyecto que la orquestación tiene realmente en curso (aunque el almacén diga otra cosa). */
@@ -90,6 +91,11 @@ export interface RouteModuleContext {
    * estática (c14) o el retorno de un OAuth. Todo lo demás va por `r` y sigue exigiendo el token.
    */
   beforeAuth: (handler: MiddlewareHandler) => void;
+  /**
+   * Registra lo que pone en orden la base al arrancar (p. ej. chats que quedaron `running`). Corre en
+   * `CoreApp.recover`, después de reservar el puerto: un segundo núcleo que no consigue escuchar no toca la base.
+   */
+  onStarted: (fn: () => void) => void;
 }
 
 /** Módulo de rutas: se registra después de las rutas base y antes de `/ws`. */
@@ -122,6 +128,11 @@ export interface AppDeps {
 export interface CoreApp {
   app: Hono;
   routes: readonly RouteSpec[];
+  /**
+   * Pone en orden lo que quedó a medias del núcleo anterior: primero lo de los módulos (`onStarted`), después las
+   * tareas (`tasks.recover`). Lo llama `startServer` cuando ya escucha; corre una sola vez y cada error se registra.
+   */
+  recover(): void;
 }
 
 const CANCELLABLE: readonly TaskState[] = ['pending', 'ready', 'running', 'review'];
@@ -751,8 +762,12 @@ export function createApp(deps: AppDeps): CoreApp {
   const beforeAuth = (handler: MiddlewareHandler) => {
     publicHandlers.push(handler);
   };
+  const startHooks: (() => void)[] = [];
+  const onStarted = (fn: () => void) => {
+    startHooks.push(fn);
+  };
   for (const mod of deps.routeModules ?? []) {
-    mod({ r, app, store, registry, hub, now, newId, allowWithoutToken, setBodyLimit, approveTask: approve, beforeAuth, ...(log ? { log } : {}) });
+    mod({ r, app, store, registry, hub, now, newId, allowWithoutToken, setBodyLimit, approveTask: approve, beforeAuth, onStarted, ...(log ? { log } : {}) });
   }
 
   // ----------------------------------------------------------- WebSocket
@@ -771,12 +786,22 @@ export function createApp(deps: AppDeps): CoreApp {
     ...createWsHandlers({ hub, store, version: API_VERSION, now }),
   );
 
-  // Arranque: lo que quedó a medias del núcleo anterior (tareas huérfanas en curso) queda fallido y reintentable.
-  try {
-    deps.tasks?.recover?.();
-  } catch (err) {
-    log?.(redactSecrets(`arranque: no se pudo revisar las tareas interrumpidas: ${err instanceof Error ? err.message : String(err)}`).slice(0, 500));
-  }
+  // Arranque: lo que quedó a medias del núcleo anterior (chats en curso, tareas huérfanas) se pone en orden solo
+  // cuando este proceso ya es el núcleo (escucha en el puerto); antes, un segundo `iniciar` lo rompería todo.
+  const attempt = (fn: () => void, what: string) => {
+    try {
+      fn();
+    } catch (err) {
+      log?.(redactSecrets(`arranque: ${what}: ${err instanceof Error ? err.message : String(err)}`).slice(0, 500));
+    }
+  };
+  let recovered = false;
+  const recover = () => {
+    if (recovered) return;
+    recovered = true;
+    for (const fn of startHooks) attempt(fn, 'no se pudo poner en orden lo que quedó a medias');
+    attempt(() => deps.tasks?.recover?.(), 'no se pudo revisar las tareas interrumpidas');
+  };
 
-  return { app, routes: r.specs };
+  return { app, routes: r.specs, recover };
 }

@@ -274,7 +274,6 @@ export class ChatService {
     this.#idleMs = deps.idleMs ?? CHAT_IDLE_MS;
     this.#graceMs = deps.interruptGraceMs ?? INTERRUPT_GRACE_MS;
     this.#log = deps.log ?? (() => undefined);
-    this.#repo.resetRunning(this.#iso());
 
     const base = deps.ports.fleet;
     const retry = base.retry?.bind(base);
@@ -296,6 +295,15 @@ export class ChatService {
           ].sort(),
         }),
     };
+  }
+
+  /**
+   * Arranque del núcleo: los chats que quedaron `running` no tienen turno vivo y vuelven a `idle`. No va en el
+   * constructor: lo llama el servidor cuando ya escucha (`onStarted`), para que un segundo núcleo sin puerto no los toque.
+   */
+  recover(): void {
+    const n = this.#repo.resetRunning(this.#iso());
+    if (n) this.#log(`chat: ${n} chat(s) en curso al reiniciar vuelven a libre`);
   }
 
   // ---------------------------------------------------------------- chats

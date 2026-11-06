@@ -256,6 +256,9 @@ describe('ChatService: persistencia y reanudación', () => {
       query: b.q.fn,
     });
     try {
+      // Crear el servicio no toca la base: el servidor llama a `recover()` cuando ya escucha.
+      expect(again.get(chat.id).state).toBe('running');
+      again.recover();
       // Un turno `running` sin proceso vivo vuelve a `idle` al arrancar.
       expect(again.get(chat.id).state).toBe('idle');
       expect(again.messages(chat.id).map((m) => m.role)).toEqual(['user', 'assistant']);

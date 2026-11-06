@@ -34,7 +34,7 @@ function appWith(hooks: TaskHooks, seed: (store: SqliteStore) => void = () => un
     const res = await core.app.request(`http://${HOST}${path}`, { method: 'POST', headers: { host: HOST, authorization: `Bearer ${token}` } });
     return { status: res.status, json: (await res.json()) as Record<string, unknown> };
   };
-  return { store, post, published, log };
+  return { store, core, post, published, log };
 }
 
 describe('POST /tasks/:id/retry', () => {
@@ -90,11 +90,15 @@ describe('POST /tasks/:id/retry', () => {
 });
 
 describe('arranque: recover', () => {
-  it('se llama una vez al crear el servidor; si falla, se registra y el servidor arranca igual', () => {
+  it('no corre al crear la app sino con core.recover(), una sola vez; si falla, se registra y sigue', () => {
     let calls = 0;
-    appWith({ recover: () => { calls++; } });
+    const a = appWith({ recover: () => { calls++; } });
+    expect(calls).toBe(0);
+    a.core.recover();
+    a.core.recover();
     expect(calls).toBe(1);
     const broken = appWith({ recover: () => { throw new Error('base bloqueada'); } });
+    broken.core.recover();
     expect(broken.log.join('\n')).toMatch(/no se pudo revisar las tareas interrumpidas: base bloqueada/);
   });
 });

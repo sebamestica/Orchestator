@@ -126,6 +126,7 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
       ...(ctx.log ? { log: ctx.log } : {}),
     });
     registerChatRoutes(ctx, { service, attachments });
+    ctx.onStarted(() => service.recover());
     wiring.onReady?.(service, attachments);
   };
 }

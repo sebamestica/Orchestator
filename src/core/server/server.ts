@@ -42,6 +42,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   });
   const address = server.address() as AddressInfo;
   port = address.port;
+  // Solo ahora este proceso es el núcleo: si `listen` falló (p. ej. EADDRINUSE), la base del núcleo vivo sigue intacta.
+  core.recover();
   let closed: Promise<void> | undefined;
   return {
     url: `http://${LOOPBACK_HOST}:${port}`,
