@@ -101,6 +101,10 @@ describe('hallazgo 3 (ALTA): comandos prohibidos que eludían las regex', () => 
     'git -C . status',
     'git branch',
     'git reset HEAD a.txt',
+    // En su worktree, el worker sí descarta sus propios cambios (la carpeta del usuario la protege la guardia de la mente).
+    'git checkout -- a.txt',
+    'git reset HEAD~1',
+    'git merge orq/t0',
     'npm run -s check',
     'npx vitest run tests/core',
     'echo push',

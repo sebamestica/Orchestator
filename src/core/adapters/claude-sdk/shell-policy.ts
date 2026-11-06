@@ -1,3 +1,4 @@
+import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { assertRealInside, realOrNearest } from '../../memory/safe-fs.ts';
 import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
@@ -11,6 +12,9 @@ import { parseShell, type ShellKind, type Word } from './shell-parse.ts';
  * - git: `push`, `rebase`, `config`, `remote`, reescrituras, borrar o forzar ramas, `reset --hard`,
  *   `clean -f`, `-c`, `--git-dir`, `--work-tree`, variables `GIT_*`, `-C` fuera del worktree y
  *   subcomandos desconocidos (podrían ser alias);
+ * - en la carpeta del usuario (`userCopy`, la mente en bypass y chat), además, lo que git hace sobre su
+ *   trabajo real: traer cambios a su rama (`merge`, `pull`, `cherry-pick`…), moverla (`commit --amend`,
+ *   `reset <commit>`), cambiar de rama y descartar cambios (`checkout`, `switch`, `restore`, `stash`);
  * - publicar paquetes, instalaciones globales, desplegar, la CLI de GitHub, tareas programadas, registro;
  * - crear enlaces o junctions;
  * - escrituras obvias fuera del worktree: redirecciones, `rm`/`cp`/`mv`/`mkdir`/`touch`/`tee`,
@@ -33,6 +37,8 @@ export interface ShellContext {
   cwd: string | undefined;
   /** El comando recibe la salida de otro por una tubería. */
   piped?: boolean;
+  /** La raíz es la copia de trabajo del usuario (no un worktree desechable): git no mueve su rama ni descarta. */
+  userCopy?: boolean;
 }
 
 /**
@@ -505,6 +511,11 @@ const GIT_ALLOWED = new Set([
   'stage', 'ls-remote', 'notes', 'show-branch',
 ]);
 
+/** Alguna opción corta agrupada (`-fdx`) trae una de esas letras. */
+function hasShortLetter(texts: readonly string[], letters: RegExp): boolean {
+  return texts.some((t) => /^-[A-Za-z]+$/.test(t) && letters.test(t.slice(1)));
+}
+
 async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome> {
   let k = 0;
   for (; k < args.length; k++) {
@@ -541,7 +552,7 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
   if (texts.some((t) => /^--(?:upload-pack|receive-pack|exec)/.test(t) || /^-u./.test(t) && ['fetch', 'pull', 'ls-remote', 'archive'].includes(sub))) {
     return 'opciones de git que ejecutan comandos (--upload-pack, --exec)';
   }
-  const shortHas = (letters: RegExp) => texts.some((t) => /^-[A-Za-z]+$/.test(t) && letters.test(t.slice(1)));
+  const shortHas = (letters: RegExp) => hasShortLetter(texts, letters);
 
   if (['reset', 'branch', 'clean', 'tag', 'fetch', 'pull', 'worktree', 'reflog', 'bisect', 'checkout', 'switch'].includes(sub) && rest.some((w) => w.dynamic)) {
     return `argumentos de git ${sub} no verificables`;
@@ -587,6 +598,10 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
       if (texts[0] && !['list', 'show'].includes(texts[0])) return 'solo se permite consultar notas';
       break;
   }
+  if (c.userCopy) {
+    const problem = await userCopyGitProblem(sub, rest, c);
+    if (problem) return problem;
+  }
   // Salidas a archivo (`-o`, `--output`, `--output-directory`).
   for (let j = 0; j < rest.length; j++) {
     const t = (rest[j] as Word).text;
@@ -599,6 +614,68 @@ async function evalGit(args: readonly Word[], c: ShellContext): Promise<Outcome>
     if (p) return p;
   }
   return keep(c);
+}
+
+const ASK_USER = 'en tu carpeta: ejecútalo tú o dime que lo haga';
+const ONLY_ABORT = new Set(['--abort', '--quit']);
+
+/**
+ * Lo que git no hace solo en la carpeta del usuario: ahí no hay worktree ni integración que lo revise, y cada orden
+ * actúa sobre su trabajo real. Siguen permitidos consultar, `add`, `commit` sin `--amend` y sacar del índice.
+ */
+async function userCopyGitProblem(sub: string, rest: readonly Word[], c: ShellContext): Promise<string | undefined> {
+  const texts = rest.map((w) => w.text);
+  const shortHas = (letters: RegExp) => hasShortLetter(texts, letters);
+  if ((sub === 'commit' || sub === 'restore') && rest.some((w) => w.dynamic)) return `argumentos de git ${sub} no verificables ${ASK_USER}`;
+  switch (sub) {
+    case 'merge':
+    case 'cherry-pick':
+    case 'revert':
+    case 'am':
+      if (texts.length > 0 && texts.every((t) => ONLY_ABORT.has(t))) return undefined;
+      return `git ${sub} trae cambios a tu rama ${ASK_USER}`;
+    case 'pull':
+      return `git pull trae cambios a tu rama ${ASK_USER}`;
+    case 'commit':
+      return texts.some((t) => longOpt(t, '--amend', 4)) ? `git commit --amend reescribe tu último commit ${ASK_USER}` : undefined;
+    case 'reset':
+      return userCopyResetProblem(rest, c);
+    case 'checkout':
+    case 'switch':
+      return rest.length > 0 ? `git ${sub} cambia de rama o descarta cambios ${ASK_USER}` : undefined;
+    case 'restore': {
+      const staged = shortHas(/S/) || texts.some((t) => longOpt(t, '--staged', 4));
+      const worktree = shortHas(/W/) || texts.some((t) => longOpt(t, '--worktree'));
+      return staged && !worktree ? undefined : `git restore sin --staged descarta cambios ${ASK_USER}`;
+    }
+    case 'stash':
+      return ['list', 'show'].includes(texts[0] ?? '') ? undefined : `git stash guarda o saca tus cambios sin confirmar ${ASK_USER}`;
+    case 'bisect':
+      return ['log', 'view', 'visualize', 'help'].includes(texts[0] ?? '') ? undefined : `git bisect mueve HEAD ${ASK_USER}`;
+  }
+  return undefined;
+}
+
+/** `git reset` solo saca del índice: sin commit, con `HEAD` o con una ruta que existe. Lo demás mueve la rama. */
+async function userCopyResetProblem(rest: readonly Word[], c: ShellContext): Promise<string | undefined> {
+  const mode = rest.find((w) => ['--soft', '--mixed', '--keep', '--merge'].some((o) => longOpt(w.text, o, 4)));
+  if (mode) return `git reset ${mode.text} mueve tu rama ${ASK_USER}`;
+  const dashdash = rest.findIndex((w) => w.text === '--');
+  const target = (dashdash < 0 ? rest : rest.slice(0, dashdash)).find((w) => !w.text.startsWith('-'));
+  if (!target || /^(?:HEAD|@)$/.test(target.text)) return undefined;
+  if (dashdash < 0 && (await pathExists(target, c.cwd))) return undefined;
+  return `git reset ${target.text} mueve tu rama ${ASK_USER}`;
+}
+
+async function pathExists(word: Word, cwd: string | undefined): Promise<boolean> {
+  const r = resolveShellPath(word, cwd);
+  if (!('abs' in r)) return false;
+  try {
+    await access(r.abs);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const NPM_DENIED = new Set(['publish', 'unpublish', 'deprecate', 'dist-tag', 'owner', 'adduser', 'login', 'token', 'access']);
@@ -813,7 +890,16 @@ async function evalWriteCommand(name: string, args: readonly Word[], c: ShellCon
   return undefined;
 }
 
-/** Motivo de denegación de un comando de Bash, PowerShell o cmd ejecutado en `worktree`; undefined si se permite. */
-export async function shellCommandProblem(command: string, kind: ShellKind, worktree: string, cwd: string = worktree): Promise<string | undefined> {
-  return evalShell(command, { worktree: path.resolve(worktree), kind, depth: 0, cwd: path.resolve(cwd) });
+/**
+ * Motivo de denegación de un comando de Bash, PowerShell o cmd ejecutado en `worktree`; undefined si se permite.
+ * Con `userCopy`, `worktree` es la carpeta real del usuario (la mente) y git tampoco mueve su rama ni descarta cambios.
+ */
+export async function shellCommandProblem(
+  command: string,
+  kind: ShellKind,
+  worktree: string,
+  cwd: string = worktree,
+  opts: { userCopy?: boolean } = {},
+): Promise<string | undefined> {
+  return evalShell(command, { worktree: path.resolve(worktree), kind, depth: 0, cwd: path.resolve(cwd), ...(opts.userCopy ? { userCopy: true } : {}) });
 }

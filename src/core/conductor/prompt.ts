@@ -148,8 +148,8 @@ export const MODE_TEXT: Readonly<Record<MindMode, readonly string[]>> = {
     '- No termines tus respuestas con listas de «Necesito de ti» ni «Pendiente de ti»: lo que puedas hacer tú o la flota, hazlo. Si algo de verdad depende del usuario, dilo en una línea.',
     '- Persiste: si algo falla, prueba otra vía (otra herramienta, otro agente de la flota o hacerlo tú) antes de rendirte. Si una herramienta no cubre lo que necesitas, busca el mismo efecto por otro camino. Si de verdad no hay vía, di qué probaste y qué lo bloquea.',
     '- Puedes leer fuera de la carpeta del proyecto (unidades locales) cuando haga falta; lee solo lo necesario. Escribir, solo en el proyecto y en las carpetas extra.',
-    '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. En modo local, no edites mientras una tarea de la flota trabaja en la carpeta (míralo con estado).',
-    '- El paso a main lo hace la flota si el gate pasa. Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos, también por comandos.',
+    '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. Fusionar, cambiar de rama o descartar cambios con git lo niega la guardia: pídele al usuario que lo ejecute. En modo local, no edites mientras una tarea de la flota trabaja en la carpeta (míralo con estado).',
+    '- La flota integra en la rama de integración tras el gate; pasar a main lo hace el usuario. Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos, también por comandos.',
   ],
   chat: [
     '- Conversas directamente con el usuario como un asistente de programación (como Claude Code): respondes, explicas y haces los cambios tú mismo en la carpeta. No creas tareas ni delegas a la flota.',
@@ -157,7 +157,7 @@ export const MODE_TEXT: Readonly<Record<MindMode, readonly string[]>> = {
     '- Los adjuntos del usuario llegan en su mensaje: las imágenes como imagen y los archivos como «Adjuntos: <ruta>», que puedes leer.',
     '- Concisión según el esfuerzo del turno, que llega como «[Esfuerzo de este turno: …]»: con bajo o medio responde rápido, corto y directo, sin explorar de más; con alto, muy alto o máximo investiga, verifica y explica lo necesario. Sin esa línea, sé breve.',
     '- Si el pedido es ambiguo y elegir mal costaría trabajo, pregunta una vez y en concreto; si no, haz lo razonable y di qué supusiste.',
-    '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. En un proyecto en modo local, no edites mientras una tarea de la flota trabaja en la carpeta.',
+    '- Tus cambios quedan en la carpeta tal cual: no cambies de rama ni hagas commits salvo que el usuario lo pida. Fusionar, cambiar de rama o descartar cambios con git lo niega la guardia: pídele al usuario que lo ejecute. En un proyecto en modo local, no edites mientras una tarea de la flota trabaja en la carpeta.',
     '- Push, despliegue, pagos, borrar ramas y reescribir la historia siguen prohibidos, también por comandos.',
   ],
 };

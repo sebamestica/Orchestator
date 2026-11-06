@@ -267,6 +267,38 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await guard.hook(pre('Bash', { command: `cd ${fwdRoot}` }, outside), 'tu', { signal })).toEqual({});
   });
 
+  it('en la carpeta del usuario no fusiona, no cambia de rama ni descarta cambios', async () => {
+    writeFileSync(path.join(root, 'src', 'a.ts'), 'export {};\n');
+    const denied = [
+      'git merge orq/integracion', 'git pull', 'git cherry-pick abc123', 'git revert HEAD', 'git am x.patch',
+      'git checkout -- src/a.ts', 'git checkout .', 'git checkout -f', 'git checkout otra', 'git switch -c nueva',
+      'git checkout -B main', 'git restore src/a.ts', 'git restore -SW src/a.ts', 'git stash', 'git stash pop', 'git stash drop',
+      'git stash clear', 'git stash; npm test; git stash pop', 'git commit --amend -m x', 'git reset --soft HEAD~1',
+      'git reset --keep HEAD~1', 'git reset --merge HEAD~1', 'git reset HEAD~1', 'git reset origin/main', 'git bisect start',
+      'git commit --ame -m x', 'git restore --staged --w src/a.ts',
+    ];
+    for (const command of denied) {
+      for (const tool of ['Bash', 'PowerShell']) {
+        const why = await reason(tool, { command });
+        expect(why, `${tool}: ${command}`).toMatch(/tu carpeta/);
+        expect(why, `${tool}: ${command}`).toMatch(new RegExp(`git ${command.split(/[ ;]/)[1]}`));
+      }
+    }
+    const kept = [
+      'git status', 'git diff --stat', 'git log -3', 'git add -A', 'git commit -m x', 'git restore --staged src/a.ts',
+      'git reset', 'git reset HEAD src/a.ts', 'git reset -- src/a.ts', 'git reset src/a.ts', 'git stash list', 'git stash show -p',
+      'git merge --abort', 'git checkout', 'git branch nueva', 'git fetch',
+    ];
+    for (const command of kept) {
+      for (const tool of ['Bash', 'PowerShell']) expect(await reason(tool, { command }), `${tool}: ${command}`).toBe('');
+    }
+    // También dentro de otro shell y con argumentos que no se pueden verificar.
+    expect(await reason('Bash', { command: 'bash -c "git merge x"' })).toMatch(/git merge trae cambios a tu rama/);
+    for (const tool of ['Bash', 'PowerShell']) expect(await reason(tool, { command: 'git -C src merge x' }), tool).toMatch(/git merge trae cambios a tu rama/);
+    expect(await reason('Bash', { command: 'A=--amend; git commit $A -m x' })).toMatch(/git commit no verificables/);
+    expect(await reason('PowerShell', { command: '$a = "--worktree"; git restore --staged $a src/a.ts' })).toMatch(/git restore no verificables/);
+  });
+
   it('check síncrono nunca aprueba edición ni shell; el hook y canUseTool usan la decisión completa', async () => {
     expect(guard.check('Write', { file_path: path.join(root, 'a.md'), content: 'x' }).allow).toBe(false);
     expect(guard.check('Bash', { command: 'git status' }).allow).toBe(false);

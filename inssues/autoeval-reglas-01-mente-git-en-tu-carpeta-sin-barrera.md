@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** alta
 - **Archivos:** `src/core/conductor/session.ts:59`, `src/core/conductor/session.ts:65-67`, `src/core/conductor/session.ts:313`, `src/core/chat/service.ts:313`, `src/core/conductor/guard.ts:16-18`, `src/core/conductor/guard.ts:84`, `src/core/conductor/guard.ts:212-221`, `src/core/conductor/prompt.ts:27`, `src/core/conductor/prompt.ts:54`, `src/core/conductor/prompt.ts:149`, `src/core/conductor/prompt.ts:151-152`, `src/core/conductor/prompt.ts:160-161`, `src/core/adapters/claude-sdk/shell-policy.ts:474-488`, `src/core/adapters/claude-sdk/shell-policy.ts:490-497`, `src/core/adapters/claude-sdk/shell-policy.ts:540-580`, `src/core/adapters/claude-sdk/shell-policy.ts:789-791`, `src/core/workspace/integrate.ts:27`, `src/core/adapters/claude-sdk/permissions.ts:83`, `tests/core/conductor/guard.test.ts:193-207`, `tests/core/adapters/claude-sdk/security.test.ts:94-107`, `tests/core/conductor/prompt.test.ts:75-79`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `flota-01-modo-local-reglas-fuera-del-prompt.md` (el mismo hueco para la flota en modo local; su opción (c) usa el mismo mecanismo), `autoeval-reglas-02-worktree-alcanza-stash-y-ramas-del-repo.md`, `mente-05-cd-fuera-bloquea-shell-sesion.md`
 

@@ -16,8 +16,9 @@
  *   del chat), con la ruta real (sigue junctions y enlaces), nunca en `.git`, `.claude/`, `.mcp.json`, archivos de
  *   credenciales ni `denyPaths`.
  * - Shell (Bash, PowerShell): cada comando pasa por la política de los workers (`shell-policy.ts`) con `shellRoot`
- *   como raíz: niega push, despliegue, rebase, `reset --hard`, borrar ramas, escribir fuera del proyecto… Ver su
- *   riesgo residual: sin aislamiento del sistema operativo, un script del proyecto puede escribir fuera.
+ *   como raíz: niega push, despliegue, rebase, `reset --hard`, borrar ramas, escribir fuera del proyecto… `shellRoot`
+ *   es la carpeta real del usuario, así que además git no fusiona, no mueve la rama ni descarta cambios (`userCopy`).
+ *   Ver su riesgo residual: sin aislamiento del sistema operativo, un script del proyecto puede escribir fuera.
  * - Los subagentes no pueden pedir un modo de permisos más amplio ni ejecutarse en remoto (ni, con escritura, en un
  *   worktree propio).
  */
@@ -85,7 +86,8 @@ const GLOB_CHARS = /[*?[\]{}]/;
 
 export const DENY_DEFAULT = 'Fuera del modo bypass el orquestador no edita archivos ni ejecuta comandos: delega con crear_tareas y delegar.';
 /** Cola de los rechazos de shell: la mente busca otra vía sin rendirse ni saltarse la regla. */
-const SHELL_HINT = 'Busca otra vía dentro del proyecto; push, despliegue, pagos, borrar ramas y reescribir la historia necesitan al usuario.';
+const SHELL_HINT =
+  'Busca otra vía dentro del proyecto sin esquivar la regla; push, despliegue, pagos, borrar ramas, reescribir la historia y mover la rama o descartar los cambios del usuario necesitan al usuario.';
 
 const isEditOrShell = (name: string) => name in EDIT_TOOLS || name in SHELL_TOOLS;
 /** Parte fija de un patrón glob (hasta el primer comodín), con barras `/`. */
@@ -262,7 +264,7 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     }
     const text = comparable(command);
     if (deniedText.some((d) => text.includes(d))) return { allow: false, reason: `${toolName}: el comando nombra los datos del núcleo (bóveda o base de datos); no se tocan.` };
-    const problem = await shellCommandProblem(command, kind, shellRoot, dir);
+    const problem = await shellCommandProblem(command, kind, shellRoot, dir, { userCopy: true });
     return problem ? { allow: false, reason: `${toolName} bloqueado por la guardia: ${problem}. ${SHELL_HINT}` } : { allow: true };
   };
 
