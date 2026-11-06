@@ -141,6 +141,43 @@ describe('Composer', () => {
     expect(screen.getByRole('alert').textContent).toContain('20 MB');
     expect(props.onAttach).not.toHaveBeenCalled();
   });
+  describe('aviso de adjunto rechazado', () => {
+    const big = () => {
+      const file = new File(['x'], 'grande.txt');
+      Object.defineProperty(file, 'size', { value: MAX_ATTACHMENT_BYTES + 1 });
+      return file;
+    };
+    it('se puede cerrar', () => {
+      setup();
+      paste([big()]);
+      expect(screen.getByRole('alert').textContent).toContain('20 MB');
+      fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso de adjuntos' }));
+      expect(screen.queryByText(/20 MB/)).toBeNull();
+    });
+    it('desaparece al enviar', async () => {
+      const { props } = setup();
+      paste([big()]);
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Hola' } });
+      fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+      await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.queryByText(/20 MB/)).toBeNull());
+    });
+    it('quitar adjuntos borra el aviso de límite', async () => {
+      const { props } = setup();
+      paste(Array.from({ length: 21 }, (_, i) => new File(['x'], `${i}.txt`)));
+      await waitFor(() => expect(props.onAttach).toHaveBeenCalledTimes(20));
+      await waitFor(() => expect(screen.queryByText('Subiendo…')).toBeNull());
+      expect(screen.getByText(/20 archivos/)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Quitar 0.txt' }));
+      expect(screen.queryByText(/20 archivos/)).toBeNull();
+    });
+    it('no pasa a otra conversación', () => {
+      const { props, rerender } = setup({ resetKey: 'chat_a' });
+      paste([big()]);
+      rerender(<Composer {...props} resetKey="chat_b" />);
+      expect(screen.queryByText(/20 MB/)).toBeNull();
+    });
+  });
   it('acepta exactamente 20 MB y limita a 20 adjuntos incluso en el mismo lote', async () => {
     const { props } = setup();
     const files = Array.from({ length: 21 }, (_, i) => new File(['x'], `${i}.txt`));

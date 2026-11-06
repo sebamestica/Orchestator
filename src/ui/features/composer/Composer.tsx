@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Popover } from '@heroui/react';
-import { ArrowUp, Paperclip, Plus, Square, Upload } from 'lucide-react';
+import { ArrowUp, Paperclip, Plus, Square, Upload, X } from 'lucide-react';
 import { nextMindMode } from '../../../shared/api.ts';
 import type { Attachment, Effort, MindMode } from '../../../shared/api.ts';
 import { EffortSlider } from '../../components/EffortSlider.tsx';
@@ -183,7 +183,6 @@ export function Composer({
 
   const modeInfo = MODE_INFO[mode];
   const alerts = [
-    attachments.notice,
     ...attachments.items.flatMap((item) => item.error ? [`No se pudo adjuntar ${item.file.name}. ${item.error}`] : []),
     error,
   ].filter(Boolean);
@@ -194,6 +193,19 @@ export function Composer({
       onSubmit={(event) => { event.preventDefault(); void send(); }}
     >
       <AttachmentTray items={attachments.items} onRemove={attachments.remove} isDisabled={locked} />
+      {attachments.notice ? (
+        <div role="alert" className="flex items-start gap-2 px-3 text-[0.8125rem] text-danger">
+          <p className="min-w-0 flex-1">{attachments.notice}</p>
+          <button
+            type="button"
+            aria-label="Cerrar aviso de adjuntos"
+            onClick={attachments.dismissNotice}
+            className="flex size-5 shrink-0 items-center justify-center rounded-md hover:bg-danger/10 focus-visible:outline-2 focus-visible:outline-foreground"
+          >
+            <X className="size-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
       {alerts.length > 0 ? (
         <div role="alert" className="flex flex-col gap-0.5 px-3 text-[0.8125rem] text-danger">
           {alerts.map((line, i) => <p key={`${i}:${line}`}>{line}</p>)}

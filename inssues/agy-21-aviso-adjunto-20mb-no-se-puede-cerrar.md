@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/composer/useAttachments.ts:20`, `src/ui/features/composer/useAttachments.ts:31-34`, `src/ui/features/composer/useAttachments.ts:45-55`, `src/ui/features/composer/useAttachments.ts:70-74`, `src/ui/features/composer/Composer.tsx:71-73`, `src/ui/features/composer/Composer.tsx:146-156`, `src/ui/features/composer/Composer.tsx:166-182`, `src/ui/features/chat/ChatView.tsx:337-349`, `src/ui/features/chat/ChatView.tsx:361`, `src/ui/app/App.tsx:26`, `src/ui/app/App.tsx:28`, `tests/ui/composer/Composer.test.tsx:136-143`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

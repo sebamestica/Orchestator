@@ -28,9 +28,11 @@ export function useAttachments(onAttach: (file: File) => Promise<Attachment>) {
     current.current = next;
     if (mounted.current) setItems(next);
   }, []);
+  // El aviso de un archivo rechazado deja de ser cierto al vaciar o quitar: se va con ellos.
   const clear = useCallback(() => {
     for (const item of current.current) if (item.preview) URL.revokeObjectURL(item.preview);
     update([]);
+    setNotice('');
   }, [update]);
 
   useEffect(() => {
@@ -71,7 +73,9 @@ export function useAttachments(onAttach: (file: File) => Promise<Attachment>) {
     const item = current.current.find((entry) => entry.id === id);
     if (item?.preview) URL.revokeObjectURL(item.preview);
     update(current.current.filter((entry) => entry.id !== id));
+    setNotice('');
   }, [update]);
+  const dismissNotice = useCallback(() => setNotice(''), []);
 
-  return { items, notice, add, remove, clear, busy: items.some((item) => !item.attachment && !item.error) };
+  return { items, notice, add, remove, clear, dismissNotice, busy: items.some((item) => !item.attachment && !item.error) };
 }
