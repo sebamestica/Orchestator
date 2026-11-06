@@ -11498,6 +11498,9 @@
           "resetAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "inUse": {
+            "type": "boolean"
           }
         },
         "required": [
