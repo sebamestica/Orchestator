@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** media
 - **Archivos:** `src/core/app/commit-step.ts:101-106`, `src/core/app/commit-step.ts:148-157`, `src/core/app/commit-step.ts:197`, `src/core/app/commit-step.ts:208-209`, `src/core/app/commit-step.ts:229-231`, `src/core/app/commit-step.ts:243-270`, `src/core/app/local-workspaces.ts:58-69`, `src/core/app/local-workspaces.ts:117-121`, `src/core/app/local-workspaces.ts:128-139`, `src/core/app/fleet-service.ts:387`, `src/core/orchestrator/fleet.ts:527`, `src/core/orchestrator/fleet.ts:533`, `src/core/orchestrator/fleet.ts:434-451`, `src/core/orchestrator/fleet.ts:563-564`, `src/core/orchestrator/supervisor.ts:527-528`, `src/core/adapters/claude-sdk/translate.ts:122`, `src/core/adapters/claude-sdk/translate.ts:468-474`, `src/core/adapters/claude-sdk/shell-policy.ts:16-23`, `src/core/adapters/codex-cli/index.ts:191`, `src/core/adapters/codex-cli/translate.ts:53-66`, `src/core/adapters/agy-cli/translate.ts:228-250`, `src/core/brief/render-brief.ts:28`, `src/core/brief/render-brief.ts:85`, `docs/plan/issues/01-trabajo-local.md:74-76`, `tests/integration/local-mode.test.ts:24-34`, `tests/integration/local-mode.test.ts:68-78`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `flota-01-modo-local-reglas-fuera-del-prompt.md` (la sección «Modo local» del encargo no llega al prompt), `flota-09-gate-doble-modo-local.md` (anota el mismo punto ciego para el revisor), `servidor-06-ownedpaths-sin-validar-en-tareas-rest.md`, `autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md`
 

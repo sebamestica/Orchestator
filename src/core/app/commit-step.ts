@@ -136,6 +136,8 @@ interface LocalAware {
   isLocal(workspace: Workspace): boolean;
   exclusiveKey(projectId: string): string | undefined;
   agentEnv?(workspace: Workspace): Readonly<Record<string, string>> | undefined;
+  /** Lo que cambió en la carpeta local desde que empezó la tarea; `undefined` si no se sabe. */
+  changedSince?(workspace: Workspace): Promise<string[] | undefined>;
 }
 
 function isLocalAware(inner: WorkspaceManager): inner is WorkspaceManager & LocalAware {
@@ -153,8 +155,10 @@ const LOCAL_SUMMARY_FILES = 200;
  * primero su `.orq` si no está versionada, para que `remove` no lo tome por trabajo sin confirmar.
  *
  * En **modo local** (carpeta del usuario, sin worktree) no hay nada que confirmar: no se ejecuta ningún git que
- * escriba. El resumen para el revisor sale de los archivos que informó el agente, y los que caen fuera de sus rutas
- * propias se le señalan para que rechace la tarea (sin git no se pueden bloquear).
+ * escriba. El resumen para el revisor junta los archivos que informó el agente con lo que cambió de verdad en la
+ * carpeta (foto antes y después, ver `LocalWorkspaces.changedSince`), y le señala los que caen fuera de las rutas
+ * propias. Si siguen así al integrar, `integrate` no da la tarea por buena: vuelve al autor con la lista (en la
+ * carpeta del usuario no se pueden deshacer solos).
  */
 export class CommittingWorkspaces implements WorkspaceManager {
   readonly #inner: WorkspaceManager;
@@ -233,7 +237,16 @@ export class CommittingWorkspaces implements WorkspaceManager {
   }
 
   async integrate(projectId: string, workspace: Workspace): Promise<IntegrationResult> {
-    if (!this.isLocal(workspace)) await this.prepare(workspace);
+    if (!this.isLocal(workspace)) {
+      await this.prepare(workspace);
+      return this.#inner.integrate(projectId, workspace);
+    }
+    // Se vuelve a mirar la carpeta: así entra también lo que haya escrito el revisor después del resumen.
+    const entry = this.#tasks.get(taskKey(workspace));
+    const outside = entry ? outsideOwnedPaths((await this.#changedOnDisk(workspace)) ?? [], entry.task.ownedPaths) : [];
+    if (outside.length) {
+      return { ok: false, conflicts: [], gateSummary: `local: archivos fuera de las rutas propias: ${listFiles(outside)}. Deshaz esos cambios (en la carpeta del usuario no hay copia de respaldo); si no son tuyos, pudo editarlos el usuario mientras trabajaba la tarea: dilo en tu resumen.` };
+    }
     return this.#inner.integrate(projectId, workspace);
   }
 
@@ -246,7 +259,12 @@ export class CommittingWorkspaces implements WorkspaceManager {
     this.#tasks.delete(taskKey(workspace));
   }
 
-  #localSummary(workspace: Workspace, run?: ExecuteResult): string {
+  #changedOnDisk(workspace: Workspace): Promise<string[] | undefined> {
+    const inner = this.#inner;
+    return isLocalAware(inner) && inner.changedSince ? inner.changedSince(workspace) : Promise.resolve(undefined);
+  }
+
+  async #localSummary(workspace: Workspace, run?: ExecuteResult): Promise<string> {
     const entry = this.#tasks.get(taskKey(workspace));
     const reported = [...new Set((run?.attempts ?? []).flatMap((a) => a.filesChanged))];
     const outsideFolder: string[] = [];
@@ -257,16 +275,24 @@ export class CommittingWorkspaces implements WorkspaceManager {
       else outsideFolder.push(f);
     }
     const visible = [...new Set(files)].filter((f) => f && f !== ORQ_SCRATCH && !f.startsWith(`${ORQ_SCRATCH}/`));
-    const outside = entry ? outsideOwnedPaths(visible, entry.task.ownedPaths) : [];
+    const changed = await this.#changedOnDisk(workspace);
+    const seen = new Set(visible);
+    const unreported = (changed ?? []).filter((f) => !seen.has(f));
+    const outside = entry ? outsideOwnedPaths([...visible, ...unreported], entry.task.ownedPaths) : [];
     const lines = [
       `Modo local: la tarea trabajó directamente en la carpeta del usuario (${workspace.path}), sin rama ni commits.`,
       visible.length
-        ? `Archivos cambiados según los eventos del agente (${String(visible.length)}): ${visible.slice(0, LOCAL_SUMMARY_FILES).join(', ')}${visible.length > LOCAL_SUMMARY_FILES ? ' …' : ''}`
+        ? `Archivos cambiados según los eventos del agente (${String(visible.length)}): ${listFiles(visible, LOCAL_SUMMARY_FILES)}`
         : 'El agente no informó archivos cambiados: revisa la carpeta.',
     ];
+    if (unreported.length) {
+      lines.push(`Cambiaron en la carpeta y el agente no los informó (por la terminal, o el usuario mientras trabajaba la tarea) (${String(unreported.length)}): ${listFiles(unreported, LOCAL_SUMMARY_FILES)}`);
+    } else if (!changed) {
+      lines.push('No se pudo comparar la carpeta con su estado al empezar (demasiado grande o ilegible): solo cuenta lo que informó el agente.');
+    }
     if (outside.length || outsideFolder.length) {
       lines.push(
-        `ATENCIÓN: archivos fuera de las rutas propias (${[...outside, ...outsideFolder].slice(0, 20).join(', ')}). En modo local no se pueden bloquear: rechaza la tarea y pide deshacer esos cambios.`,
+        `ATENCIÓN: archivos fuera de las rutas propias (${listFiles([...outside, ...outsideFolder])}). En modo local no se pueden deshacer solos: rechaza la tarea y pide deshacer esos cambios (mientras sigan, la flota no la integra).`,
       );
     }
     const last = run?.attempts.at(-1);
@@ -274,6 +300,11 @@ export class CommittingWorkspaces implements WorkspaceManager {
     else if (last?.texts.length) lines.push(`Último mensaje del autor: ${last.texts.at(-1) ?? ''}`);
     return redactSecrets(lines.join('\n'));
   }
+}
+
+/** Lista corta de archivos para un mensaje (`…` si hay más de `max`). */
+function listFiles(files: readonly string[], max = 20): string {
+  return `${files.slice(0, max).join(', ')}${files.length > max ? ' …' : ''}`;
 }
 
 function taskKey(workspace: Workspace): string {

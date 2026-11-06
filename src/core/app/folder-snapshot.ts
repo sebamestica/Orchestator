@@ -1,13 +1,19 @@
-import { lstat, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** Foto de una carpeta: ruta relativa (con `/`) → `tamaño:mtimeMs`. Sirve para saber qué cambió sin git. */
+/**
+ * Foto de una carpeta: ruta relativa (con `/`) → huella (`tamaño:hash` de los archivos chicos, `tamaño:mtimeMs` del
+ * resto). Sirve para saber qué cambió sin git; con el hash, un archivo devuelto a su contenido cuenta como sin cambios.
+ */
 export type FolderSnapshot = ReadonlyMap<string, string>;
 
-/** Carpetas que no se recorren: la de Berland, la de git y las dependencias (las cambia `npm install`, no la tarea). */
-const SKIPPED = new Set(['.orq', '.git', 'node_modules']);
+/** Carpetas que no se recorren: la de Berland, la de git y las dependencias (las cambia una instalación, no la tarea). */
+const SKIPPED = new Set(['.orq', '.git', 'node_modules', '.venv']);
 /** Tope de entradas: una carpeta más grande no se fotografía (cuesta más que lo que ahorra o vigila). */
 export const SNAPSHOT_LIMIT = 50_000;
+/** Archivos hasta este tamaño se comparan por contenido. */
+const HASH_MAX_BYTES = 256 * 1024;
 
 /**
  * Foto de `dir` sin seguir enlaces (un enlace cuenta como entrada, pero no se recorre). `undefined` si la carpeta pasa
@@ -24,8 +30,7 @@ export async function snapshotFolder(dir: string, limit = SNAPSHOT_LIMIT): Promi
           if (!SKIPPED.has(entry.name)) pending.push(child);
           continue;
         }
-        const st = await lstat(join(dir, child));
-        out.set(child, `${String(st.size)}:${String(st.mtimeMs)}`);
+        out.set(child, await fileprint(join(dir, child)));
         if (out.size > limit) return undefined;
       }
     }
@@ -33,6 +38,17 @@ export async function snapshotFolder(dir: string, limit = SNAPSHOT_LIMIT): Promi
     return undefined;
   }
   return out;
+}
+
+/** Huella de un archivo; uno que desaparece o no se puede leer mientras se recorre queda como `?` (cuenta como cambio). */
+async function fileprint(path: string): Promise<string> {
+  try {
+    const st = await lstat(path);
+    const print = st.isFile() && st.size <= HASH_MAX_BYTES ? createHash('sha1').update(await readFile(path)).digest('hex') : String(st.mtimeMs);
+    return `${String(st.size)}:${print}`;
+  } catch {
+    return '?';
+  }
 }
 
 /** Rutas creadas, cambiadas o borradas entre dos fotos, en orden. */

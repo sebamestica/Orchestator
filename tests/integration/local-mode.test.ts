@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CommittingWorkspaces } from '../../src/core/app/commit-step.ts';
@@ -52,7 +52,7 @@ function snapshot(repo: string) {
 }
 
 describe('modo local: carpeta sin git', () => {
-  it('trabaja en la carpeta tal cual: sin .git, sin worktrees; resume lo informado, integra sin commit y limpia .orq', async () => {
+  it('trabaja en la carpeta tal cual: sin .git, sin worktrees; resume lo informado, no integra lo que cae fuera de las rutas y limpia .orq', async () => {
     const root = await tempDir('orq-local-');
     const folder = join(root, 'marketing');
     mkdirSync(join(folder, '5', 'guiones'), { recursive: true });
@@ -74,13 +74,47 @@ describe('modo local: carpeta sin git', () => {
     expect(summary).not.toContain('.orq/PLAN-TAREA.md');
     expect(summary).toMatch(/ATENCIÓN: archivos fuera de las rutas propias \(notas\.md\)/);
 
+    // Fuera de las rutas propias: la tarea vuelve al autor con la lista (no queda «integrada»).
     const result = await ws.integrate(id, w);
-    expect(result).toEqual({ ok: true, conflicts: [], gateSummary: LOCAL_NO_GATE_SUMMARY });
+    expect(result.ok).toBe(false);
+    expect(result.gateSummary).toMatch(/fuera de las rutas propias: notas\.md/);
+    // Deshecho el cambio (mismo contenido), se integra.
+    writeFileSync(join(folder, 'notas.md'), '# del usuario\n');
+    expect(await ws.integrate(id, w)).toEqual({ ok: true, conflicts: [], gateSummary: LOCAL_NO_GATE_SUMMARY });
     await ws.remove(w);
     expect(existsSync(join(folder, '.orq'))).toBe(false);
     expect(existsSync(join(folder, '.git'))).toBe(false);
     expect(readFileSync(join(folder, '5', 'guiones', 'video-03.md'), 'utf8')).toBe('# guion\n');
     expect(existsSync(defaultWorktreesRoot(id))).toBe(false);
+  });
+
+  it('ve lo que cambió en la carpeta sin que el agente lo informara (shell): fuera de las rutas avisa y no integra; dentro, no', async () => {
+    const root = await tempDir('orq-local-');
+    const folder = join(root, 'marketing');
+    mkdirSync(join(folder, '5'), { recursive: true });
+    writeFileSync(join(folder, 'notas.md'), '# del usuario\n');
+    const { id, ws } = localSetup(folder);
+    const w = await ws.create(id, task('t1', id, ['5/**']));
+    writeFileSync(join(folder, '5', 'a.md'), 'propio\n'); // dentro de las rutas, sin informar
+    writeFileSync(join(folder, 'notas.md'), 'pisado'); // fuera, sin informar (p. ej. un sed -i)
+    const summary = await ws.reviewSummary(w, ran([]));
+    expect(summary).toMatch(/ATENCIÓN: archivos fuera de las rutas propias \(notas\.md\)/);
+    expect(summary).toMatch(/el agente no los informó[^\n]*5\/a\.md, notas\.md/);
+    const result = await ws.integrate(id, w);
+    expect(result.ok).toBe(false);
+    expect(result.gateSummary).toContain('notas.md');
+    expect(result.gateSummary).not.toContain('5/a.md');
+  });
+
+  it('un cambio sin informar dentro de las rutas propias no avisa y la tarea se integra', async () => {
+    const root = await tempDir('orq-local-');
+    const folder = join(root, 'marketing');
+    mkdirSync(join(folder, '5'), { recursive: true });
+    const { id, ws } = localSetup(folder);
+    const w = await ws.create(id, task('t1', id, ['5/**']));
+    writeFileSync(join(folder, '5', 'a.md'), 'propio\n');
+    expect(await ws.reviewSummary(w, ran([]))).not.toContain('ATENCIÓN');
+    expect((await ws.integrate(id, w)).ok).toBe(true);
   });
 
   it('la carpeta debe existir', async () => {
@@ -202,7 +236,7 @@ describe('modo local: carpeta git sin gate (caso marketing)', () => {
     expect(push.status).not.toBe(0);
     expect(git(bare, 'for-each-ref').stdout.trim()).toBe('');
     writeFileSync(join(repo, '5', 'a.md'), 'dos\n');
-    await ws.reviewSummary(w, ran(['5/a.md']));
+    expect(await ws.reviewSummary(w, ran(['5/a.md']))).not.toContain('ATENCIÓN');
     const result = await ws.integrate(id, w);
     expect(result.ok).toBe(true);
     expect(result.commit).toBeUndefined();
@@ -215,7 +249,69 @@ describe('modo local: carpeta git sin gate (caso marketing)', () => {
   });
 });
 
+describe('modo local: carpeta git, cambios sin informar fuera de las rutas', () => {
+  it('un versionado cambiado y otro borrado: avisa, no integra, y la foto no toca git', async () => {
+    const root = await tempDir('orq-local-git-');
+    const repo = join(root, 'marketing');
+    mkdirSync(join(repo, '5'), { recursive: true });
+    writeFileSync(join(repo, '5', 'a.md'), 'uno\n');
+    writeFileSync(join(repo, 'README.md'), 'léeme\n');
+    writeFileSync(join(repo, 'otro.md'), 'otro\n');
+    for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'inicio']]) expect(git(repo, ...args).status).toBe(0);
+    const before = snapshot(repo);
+    const { id, ws } = localSetup(repo, 'marketing');
+    const w = await ws.create(id, task('t1', id, ['5/**']));
+    writeFileSync(join(repo, 'README.md'), 'cambiado por shell\n');
+    rmSync(join(repo, 'otro.md'));
+    const summary = await ws.reviewSummary(w, ran([]));
+    expect(summary).toMatch(/ATENCIÓN: archivos fuera de las rutas propias \(README\.md, otro\.md\)/);
+    const result = await ws.integrate(id, w);
+    expect(result.ok).toBe(false);
+    expect(result.gateSummary).toMatch(/README\.md, otro\.md/);
+    await ws.remove(w);
+    expect(snapshot(repo)).toEqual(before);
+  });
+});
+
 describe('modo local: carpeta con gate', () => {
+  it('lo que deja el gate en la carpeta (coverage/) no cuenta como cambio de la tarea', async () => {
+    const root = await tempDir('orq-local-gate-');
+    const folder = join(root, 'app');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'package.json'), JSON.stringify({ name: 'app', private: true, scripts: { check: 'node check.mjs' } }));
+    writeFileSync(
+      join(folder, 'check.mjs'),
+      "import { mkdirSync, writeFileSync } from 'node:fs';\nmkdirSync('coverage', { recursive: true });\nwriteFileSync('coverage/x.txt', String(Date.now()));\n",
+    );
+    const { id, ws } = localSetup(folder);
+    const t = task('t1', id, ['estado.txt']);
+    const w = await ws.create(id, t);
+    writeFileSync(join(folder, 'estado.txt'), 'bien\n');
+    expect(await ws.reviewSummary(w, ran(['estado.txt']))).not.toContain('ATENCIÓN');
+    expect(await ws.verify(w, t)).toMatchObject({ ok: true });
+    expect(existsSync(join(folder, 'coverage', 'x.txt'))).toBe(true);
+    const result = await ws.integrate(id, w);
+    expect(result.ok, result.gateSummary).toBe(true);
+    await ws.remove(w);
+  }, 60_000);
+
+  it('lo que la tarea cambió fuera de sus rutas antes del gate no se esconde aunque el gate lo vuelva a tocar', async () => {
+    const root = await tempDir('orq-local-gate-');
+    const folder = join(root, 'app');
+    mkdirSync(join(folder, 'coverage'), { recursive: true });
+    writeFileSync(join(folder, 'package.json'), JSON.stringify({ name: 'app', private: true, scripts: { check: 'node check.mjs' } }));
+    writeFileSync(join(folder, 'check.mjs'), "import { writeFileSync } from 'node:fs';\nwriteFileSync('coverage/x.txt', String(Date.now()));\n");
+    const { id, ws } = localSetup(folder);
+    const t = task('t1', id, ['estado.txt']);
+    const w = await ws.create(id, t);
+    writeFileSync(join(folder, 'coverage', 'x.txt'), 'escrito por la tarea\n');
+    expect(await ws.verify(w, t)).toMatchObject({ ok: true });
+    const result = await ws.integrate(id, w);
+    expect(result.ok).toBe(false);
+    expect(result.gateSummary).toContain('coverage/x.txt');
+    await ws.remove(w);
+  }, 60_000);
+
   it('corre el gate en la carpeta: si falla la tarea no se da por buena; arreglado, pasa', async () => {
     const root = await tempDir('orq-local-gate-');
     const folder = join(root, 'app');

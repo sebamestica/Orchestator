@@ -97,6 +97,11 @@ export class ProjectWorktrees implements WorkspaceManager {
     return this.#local.agentEnv(workspace);
   }
 
+  /** Modo local: lo que cambió en la carpeta desde que empezó la tarea (ver `LocalWorkspaces.changedSince`). */
+  changedSince(workspace: Workspace): Promise<string[] | undefined> {
+    return this.#local.changedSince(workspace);
+  }
+
   /**
    * Clave de exclusión de las tareas del proyecto: la carpeta, si es local (dos tareas en la misma carpeta se
    * pisarían); `undefined` si usa worktrees (cada tarea tiene el suyo).

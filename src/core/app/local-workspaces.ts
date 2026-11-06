@@ -71,6 +71,8 @@ async function defaultGateFor(dir: string): Promise<CommandSpec[] | null> {
  * - `integrate` corre el gate si la carpeta tiene uno (si falla, la tarea vuelve al autor); si no, da por buena la
  *   tarea revisada. Nunca confirma nada. Si `verify` ya lo pasó antes de revisar y la carpeta no cambió desde
  *   entonces (misma foto), no lo repite.
+ * - `changedSince` dice qué cambió en la carpeta desde `create` (foto antes y después, sin git ni lo que dejó el
+ *   gate): así las rutas propias no dependen de lo que el agente informa.
  * - `remove` borra solo `.orq/`, y solo si la creó el modo local.
  *
  * `.orq/` es una por carpeta, pero el plan (`PLAN-TAREA.md`) y el `HANDOFF.md` son de cada tarea: la marca guarda qué
@@ -88,6 +90,8 @@ export class LocalWorkspaces {
   readonly #live = new Map<string, { project: LocalProject; env: Readonly<Record<string, string>> }>();
   /** Último `verify` bueno de cada workspace vivo, con la foto de la carpeta justo después del gate. */
   readonly #verified = new Map<string, { summary: string; snapshot: FolderSnapshot }>();
+  /** Foto de la carpeta al crear cada workspace vivo (más lo que fue cambiando el gate). */
+  readonly #base = new Map<string, Map<string, string>>();
 
   constructor(opts: LocalWorkspacesOptions = {}) {
     this.#gateFor = opts.gateFor ?? defaultGateFor;
@@ -137,13 +141,13 @@ export class LocalWorkspaces {
     // Solo corre una tarea a la vez por carpeta: lo que quede de esta carpeta es de una tarea fallida (la flota
     // conserva su `.orq/` y no llama a `remove`). Se olvida para que no impida limpiar al terminar esta.
     const folder = LocalWorkspaces.key(project.repoPath);
-    for (const [key, live] of this.#live) {
-      if (LocalWorkspaces.key(live.project.repoPath) !== folder) continue;
-      this.#live.delete(key);
-      this.#verified.delete(key);
-    }
-    this.#verified.delete(liveKey(workspace));
-    this.#live.set(liveKey(workspace), { project, env });
+    for (const [other, live] of this.#live) if (LocalWorkspaces.key(live.project.repoPath) === folder) this.#forget(other);
+    const key = liveKey(workspace);
+    this.#forget(key);
+    // Foto de partida: lo que cambie desde aquí (salvo lo que deje el gate) es de esta tarea o del usuario.
+    const base = await snapshotFolder(project.repoPath);
+    if (base) this.#base.set(key, new Map(base));
+    this.#live.set(key, { project, env });
     this.#log(`${task.id}: modo local en ${project.repoPath} (sin worktree ni commits)`);
     return workspace;
   }
@@ -161,11 +165,20 @@ export class LocalWorkspaces {
     const key = liveKey(workspace);
     this.#verified.delete(key);
     const check = await this.#runGate(project, workspace, signal);
-    if (check?.ok) {
-      const snapshot = await snapshotFolder(project.repoPath);
-      if (snapshot) this.#verified.set(key, { summary: check.summary, snapshot });
-    }
-    return check;
+    if (!check) return undefined;
+    if (check.ok && check.after) this.#verified.set(key, { summary: check.summary, snapshot: check.after });
+    return { ok: check.ok, summary: check.summary };
+  }
+
+  /**
+   * Archivos (rutas relativas con `/`) creados, cambiados o borrados en la carpeta desde `create`, por quien sea: el
+   * agente por cualquier medio, el revisor o el usuario. No cuenta `.orq/`, `.git/`, `node_modules/` ni lo que dejó el
+   * gate. `undefined` si no se pudo fotografiar la carpeta (demasiado grande o ilegible).
+   */
+  async changedSince(workspace: Workspace): Promise<string[] | undefined> {
+    const base = this.#base.get(liveKey(workspace));
+    const now = base ? await snapshotFolder(workspace.path) : undefined;
+    return base && now ? changedPaths(base, now) : undefined;
   }
 
   /** Resumen del `verify` bueno del workspace si la carpeta sigue igual (se consume: sirve una sola vez). */
@@ -178,7 +191,7 @@ export class LocalWorkspaces {
     return now && changedPaths(entry.snapshot, now).length === 0 ? entry.summary : undefined;
   }
 
-  async #runGate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string } | undefined> {
+  async #runGate(project: LocalProject, workspace: Workspace, signal?: AbortSignal): Promise<{ ok: boolean; summary: string; after?: FolderSnapshot } | undefined> {
     let gate: CommandSpec[] | null;
     try {
       gate = await this.#gateFor(project.repoPath);
@@ -186,18 +199,41 @@ export class LocalWorkspaces {
       return { ok: false, summary: `local: no se pudo leer la verificación de la carpeta (${redactSecrets(err instanceof Error ? err.message : String(err))})` };
     }
     if (!gate || gate.length === 0) return undefined;
+    const before = await snapshotFolder(project.repoPath);
     // El programa del gate no se busca dentro de la carpeta: el agente pudo dejar ahí un `npm.cmd` propio.
     const results = await runCommands(gate, workspace.path, signal, { untrustedRoots: [project.repoPath] });
+    const after = await snapshotFolder(project.repoPath);
+    this.#absorbGate(workspace, before, after);
     const ok = results.length === gate.length && results.every((r) => r.ok);
-    return { ok, summary: `local: ${summarizeCommands(results, gate.length)}` };
+    return { ok, summary: `local: ${summarizeCommands(results, gate.length)}`, ...(after ? { after } : {}) };
+  }
+
+  /**
+   * Lo que cambió el gate (cobertura, cachés, `dist/`) pasa a la foto base: no es trabajo de la tarea. Salvo lo que la
+   * tarea ya había cambiado antes del gate, que sigue a su cuenta (si no, tocarlo en el gate lo escondería).
+   */
+  #absorbGate(workspace: Workspace, before: FolderSnapshot | undefined, after: FolderSnapshot | undefined): void {
+    const base = this.#base.get(liveKey(workspace));
+    if (!base || !before || !after) return;
+    for (const path of changedPaths(before, after)) {
+      if (before.get(path) !== base.get(path)) continue;
+      const print = after.get(path);
+      if (print === undefined) base.delete(path);
+      else base.set(path, print);
+    }
+  }
+
+  #forget(key: string): void {
+    this.#live.delete(key);
+    this.#verified.delete(key);
+    this.#base.delete(key);
   }
 
   async remove(workspace: Workspace): Promise<void> {
     const key = liveKey(workspace);
     const project = this.#live.get(key)?.project;
     if (!project) return;
-    this.#live.delete(key);
-    this.#verified.delete(key);
+    this.#forget(key);
     // Otra tarea viva de la misma carpeta aún usa `.orq/` (no debería pasar: la flota las serializa).
     const folder = LocalWorkspaces.key(project.repoPath);
     if ([...this.#live.values()].some((live) => LocalWorkspaces.key(live.project.repoPath) === folder)) return;
