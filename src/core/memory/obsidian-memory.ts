@@ -10,7 +10,7 @@
  *
  * Todo texto pasa por `redactSecrets` antes de escribirse y otra vez antes de salir en un contexto.
  */
-import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { MemoryStore, SessionSummary, TaskBrief } from '../../shared/index.ts';
@@ -18,6 +18,7 @@ import { idSchema, redactSecrets } from '../../shared/index.ts';
 import { BudgetWriter, measureSavings, rankSessions, truncateText, type SessionCandidate, type TokenSavings } from './context.ts';
 import { parseNote, stringifyNote, updateNote, type Frontmatter, type FrontmatterValue } from './frontmatter.ts';
 import { appendToSection, demoteHeadings, replaceSection, sectionText, stripComments, withoutHeadingLines, withoutSection } from './markdown.ts';
+import { NoteFolder } from './note-folder.ts';
 import { assertRealInside, createFileExclusive, resolveInside, safeSegments, writeFileAtomic } from './safe-fs.ts';
 import { withVaultLock, type VaultLockOptions } from './vault-lock.ts';
 
@@ -168,6 +169,8 @@ export class ObsidianMemory implements MemoryStore {
   private readonly maxSessions: number;
   private readonly lockOptions: VaultLockOptions;
   private structureReady = false;
+  /** Notas de `Sesiones/` ya parseadas (caché por mtime y tamaño): no se reabren en cada encargo. */
+  private readonly sessionFolder: NoteFolder;
   /** Serializa las escrituras de esta instancia; entre procesos las protege el candado de la bóveda. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -179,6 +182,7 @@ export class ObsidianMemory implements MemoryStore {
     this.excerptChars = opts.sessionExcerptChars ?? 400;
     this.maxSessions = opts.maxSessions ?? 8;
     this.lockOptions = opts.lock ?? {};
+    this.sessionFolder = new NoteFolder(this.vaultPath, this.sessionsDir());
   }
 
   // ---------- rutas (relativas a la bóveda, con `/`, tal como las enlaza Obsidian) ----------
@@ -488,53 +492,24 @@ export class ObsidianMemory implements MemoryStore {
     return (await this.readSessions(projectId)).map(({ candidate }) => candidate);
   }
 
-  /**
-   * Notas de sesión del proyecto con su texto. La carpeta se comprueba una vez (ruta real dentro de la
-   * bóveda) y solo se leen archivos normales: un enlace o junction dentro de `Sesiones/` se ignora.
-   */
+  /** Notas de sesión del proyecto con su texto (las ilegibles se ignoran). Ver `NoteFolder`. */
   private async readSessions(projectId: string): Promise<{ candidate: SessionCandidate; text: string }[]> {
     const id = idSchema.parse(projectId);
-    const dir = resolveInside(this.vaultPath, this.sessionsDir());
-    let names: string[];
-    try {
-      await assertRealInside(this.vaultPath, dir);
-      names = (await readdir(dir, { withFileTypes: true }))
-        .filter((e) => e.isFile() && e.name.endsWith('.md'))
-        .map((e) => e.name)
-        .sort();
-    } catch (err) {
-      if (err instanceof Error && 'code' in err && err.code === 'ENOENT') return [];
-      throw err;
-    }
-    const out: { candidate: SessionCandidate; text: string }[] = [];
-    for (const name of names) {
-      let text: string;
-      try {
-        text = await readFile(path.join(dir, name), 'utf8');
-      } catch {
-        continue;
-      }
-      try {
-        const { data, body } = parseNote(text, { lenient: true, skipBadLines: true });
-        if (data.tipo !== 'sesion' || data.proyecto !== id) continue;
-        out.push({
-          text,
-          candidate: {
-            notePath: `${this.sessionsDir()}/${name}`,
-            taskId: stringField(data, 'tarea'),
-            agentId: stringField(data, 'agente'),
-            title: stringField(data, 'titulo') || name,
-            outcome: stringField(data, 'resultado'),
-            summary: sectionText(body, SUMMARY_HEADING),
-            files: stringList(data.archivos),
-            at: stringField(data, 'at') || stringField(data, 'fecha'),
-          },
-        });
-      } catch {
-        // Nota editada a mano con YAML que no entendemos: no rompe el contexto.
-      }
-    }
-    return out;
+    return (await this.sessionFolder.list())
+      .filter(({ data }) => data.tipo === 'sesion' && data.proyecto === id)
+      .map(({ name, data, body, text }) => ({
+        text,
+        candidate: {
+          notePath: `${this.sessionsDir()}/${name}`,
+          taskId: stringField(data, 'tarea'),
+          agentId: stringField(data, 'agente'),
+          title: stringField(data, 'titulo') || name,
+          outcome: stringField(data, 'resultado'),
+          summary: sectionText(body, SUMMARY_HEADING),
+          files: stringList(data.archivos),
+          at: stringField(data, 'at') || stringField(data, 'fecha'),
+        },
+      }));
   }
 
   /** Resumen del proyecto: el cuerpo de `Contexto.md` sin la bitácora ni comentarios. */

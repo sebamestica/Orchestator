@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/memory/obsidian-memory.ts:198`, `src/core/memory/obsidian-memory.ts:328`, `src/core/memory/obsidian-memory.ts:495`, `src/core/memory/obsidian-memory.ts:510`, `src/core/memory/obsidian-memory.ts:519`, `src/core/memory/obsidian-memory.ts:570`, `src/core/memory/obsidian-memory.ts:597`, `src/core/orchestrator/fleet.ts:368`, `src/core/orchestrator/fleet.ts:698`, `src/core/conductor/tools.ts:366`, `src/core/server/app.ts:741`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 La memoria de Berland vive en una bóveda de Obsidian (`ObsidianMemory`, creada sin caché ni envoltorio en
