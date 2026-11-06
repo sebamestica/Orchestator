@@ -79,7 +79,7 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--canvas)]">
       {/* Encabezado del Tablero */}
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-foreground/[0.06] bg-[var(--surface)] px-6 py-4 backdrop-blur-md">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-foreground/[0.06] bg-[var(--surface)] px-6 py-4">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <Kanban className="size-5 text-muted" aria-hidden="true" />
@@ -166,7 +166,7 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
               <section
                 key={col.key}
                 aria-label={`Columna ${col.title}`}
-                className="flex flex-col flex-shrink-0 w-72 rounded-2xl border border-foreground/[0.06] bg-[var(--dashboard-surface)] backdrop-blur-md p-3 max-h-full shadow-sm"
+                className="flex flex-col flex-shrink-0 w-72 rounded-2xl border border-foreground/[0.06] bg-[var(--dashboard-surface)] p-3 max-h-full shadow-sm"
               >
                 {/* Cabecera de columna */}
                 <div className="flex items-center justify-between mb-3 px-1">

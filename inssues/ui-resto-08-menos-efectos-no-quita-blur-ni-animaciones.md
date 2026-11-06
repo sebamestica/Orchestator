@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/settings/GeneralSection.tsx:42`, `src/ui/app/App.tsx:93`, `src/ui/styles/index.css:82`, `src/ui/styles/index.css:118`, `src/ui/styles/index.css:175`, `src/ui/styles/index.css:267`, `src/ui/features/board/BoardView.tsx:65`, `src/ui/features/board/BoardView.tsx:153`, `src/ui/features/agents-panel/activity.css:9`, `src/ui/features/agents-panel/ActivityRowView.tsx:8`, `src/ui/features/agents-panel/ActivityRowView.tsx:21`, `src/ui/features/home/HomeView.tsx:22`, `src/ui/features/chat/components/EmptyChat.tsx:27`, `src/ui/features/chat/components/LiveReply.tsx:144`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

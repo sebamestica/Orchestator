@@ -121,7 +121,7 @@ export function ManualTaskDialog({
   return (
     <ModalBackdrop isOpen={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <ModalContainer size="lg">
-        <ModalDialog className="max-w-2xl bg-[var(--surface)] border border-foreground/[0.08] shadow-2xl backdrop-blur-md">
+        <ModalDialog className="max-w-2xl bg-[var(--surface)] border border-foreground/[0.08] shadow-2xl">
           <form onSubmit={handleSubmit} noValidate>
             <ModalHeader className="border-b border-foreground/[0.06] pb-3">
               <ModalHeading className="text-base font-semibold text-foreground">

@@ -72,7 +72,7 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
   return (
     <ModalBackdrop isOpen={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <ModalContainer size="lg">
-        <ModalDialog className="max-w-2xl bg-[var(--surface)] border border-foreground/[0.08] shadow-2xl backdrop-blur-md">
+        <ModalDialog className="max-w-2xl bg-[var(--surface)] border border-foreground/[0.08] shadow-2xl">
           <ModalHeader className="flex flex-col gap-1 border-b border-foreground/[0.06] pb-3">
             <div className="flex items-center justify-between gap-3 pr-6">
               <span className="font-mono text-xs text-muted">{brief.id}</span>

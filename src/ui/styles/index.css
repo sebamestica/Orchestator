@@ -84,6 +84,17 @@
     --glass-backdrop: none;
 }
 
+/* …y sin animaciones, aunque Windows no pida menos movimiento. Sin capa y con atributo + clase: gana a las
+   utilidades animate-* de Tailwind y a activity.css. */
+[data-effects="reduced"] .animate-enter,
+[data-effects="reduced"] .drop-overlay,
+[data-effects="reduced"] .agent-activity,
+[data-effects="reduced"] .agent-change,
+[data-effects="reduced"] .animate-spin,
+[data-effects="reduced"] .animate-pulse {
+    animation: none;
+}
+
 html,
 body,
 #root {
