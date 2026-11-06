@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** baja
 - **Archivos:** `tests/docs/postman-run.test.ts:40`, `tests/docs/postman-run.test.ts:50`, `tests/docs/postman-run.test.ts:84`, `tests/docs/postman-run.test.ts:94`, `docs/api/source.ts:4`, `docs/api/source.ts:39`, `src/core/app/f5-servidor.ts:92`, `src/core/app/f5-servidor.ts:159`, `src/core/app/f5-servidor.ts:193`, `src/core/app/f5-servidor.ts:210`, `src/core/fs/folders.ts:49`, `src/core/fs/folders.ts:379`, `docs/api/orquestador.postman_collection.json:798`, `docs/api/orquestador.postman_collection.json:993`, `docs/api/orquestador.postman_collection.json:1069`, `docs/api/orquestador.postman_collection.json:3334`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

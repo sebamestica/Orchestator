@@ -3,13 +3,15 @@
  * `validateResponses`): cada petición documentada debe ser aceptada por el servidor tal como está
  * escrita (ruta, consulta, encabezados y cuerpo) y responder con un estado documentado.
  */
-import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { afterAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createInMemoryApp } from '../../docs/api/source.ts';
 import { docRoutes, routeKey } from '../../docs/api/routes.ts';
 import { apiSchemas } from '../../src/core/server/index.ts';
+import { cleanupDirs, gitInitWithCommit, tempDir, writeFiles } from '../core/f5-servidor/helpers.ts';
 
 const collection = z
   .object({
@@ -55,6 +57,37 @@ const requests = collection.item.flatMap((folder) => folder.item.map((i) => i.re
 const ordered = [...requests.filter((r) => r.method !== 'DELETE'), ...requests.filter((r) => r.method === 'DELETE')];
 const routes = new Map(docRoutes().map((r) => [routeKey(r), r]));
 
+/**
+ * Carpetas y archivos del equipo que nombran los ejemplos. La prueba nunca los lee: las peticiones que tocan el disco
+ * van a una carpeta temporal con un proyecto de verdad (git con un commit y gate en `package.json`) y un archivo.
+ * `POST /projects` conserva `C:\dev\Vetworld` (el store no mira el disco): así `from-folder` no choca con él.
+ */
+const EXAMPLE_PROJECT = 'C:\\dev\\Vetworld';
+const EXAMPLE_PARENT = 'C:\\dev';
+const EXAMPLE_FILE = 'C:\\Users\\yo\\Desktop\\notas.md';
+/** Texto JSON de una ruta, sin las comillas (como aparece en un cuerpo o una respuesta). */
+const jsonText = (path: string): string => JSON.stringify(path).slice(1, -1);
+/** Respuestas que repiten el `repoPath` de `POST /projects`. */
+const ECHO_REPO_PATH = new Set(['GET /projects', 'POST /projects', 'GET /projects/:id']);
+
+const sandbox = { root: '', project: '', file: '' };
+beforeAll(async () => {
+  sandbox.root = await tempDir('orq-postman-');
+  sandbox.project = join(sandbox.root, 'Vetworld');
+  sandbox.file = join(sandbox.root, 'notas.md');
+  await writeFiles(sandbox.root, { 'Vetworld/package.json': JSON.stringify({ scripts: { check: 'vitest run' } }), 'notas.md': '# Notas\n' });
+  gitInitWithCommit(sandbox.project);
+});
+afterAll(cleanupDirs);
+
+/** Qué cambia, en el cuerpo o en la consulta, cada petición que toca el disco. */
+const SANDBOXED: ReadonlyMap<string, { in: 'body' | 'query'; from: string; to: () => string }> = new Map([
+  ['POST /projects/inspect', { in: 'body', from: jsonText(EXAMPLE_PROJECT), to: () => jsonText(sandbox.project) }],
+  ['POST /projects/from-folder', { in: 'body', from: jsonText(EXAMPLE_PROJECT), to: () => jsonText(sandbox.project) }],
+  ['POST /attachments/by-path', { in: 'body', from: jsonText(EXAMPLE_FILE), to: () => jsonText(sandbox.file) }],
+  ['GET /fs/list', { in: 'query', from: EXAMPLE_PARENT, to: () => sandbox.root }],
+]);
+
 /** Estados que significan que la petición de ejemplo está mal escrita (o mal autenticada). */
 const BROKEN = new Set([400, 401, 403, 413, 415, 500]);
 /** Rechazos esperados del ejemplo: la vuelta de Canva lleva un `state` de marcador y responde 400 sin cambiar nada. */
@@ -70,27 +103,41 @@ describe('docs/api: la colección de Postman contra el servidor real', () => {
       const vmap = new Map((req.url.variable ?? []).map((v) => [v.key, fill(v.value)]));
       const path = `/${req.url.path.map((seg) => (seg.startsWith(':') ? encodeURIComponent(vmap.get(seg.slice(1)) ?? seg) : seg)).join('/')}`;
       const template = `/${req.url.path.join('/')}`;
-      const route = routes.get(`${req.method} ${template}`);
+      const key = `${req.method} ${template}`;
+      const route = routes.get(key);
       if (!route) {
-        failures.push(`${req.method} ${template}: no está en las rutas del servidor`);
+        failures.push(`${key}: no está en las rutas del servidor`);
         continue;
       }
-      const query = (req.url.query ?? []).filter((q) => !q.disabled).map((q) => `${encodeURIComponent(q.key)}=${encodeURIComponent(fill(q.value))}`);
+      const swap = SANDBOXED.get(key);
+      const swapped: string[] = [];
+      const toSandbox = (where: 'body' | 'query', text: string): string => {
+        if (swap?.in !== where || !text.includes(swap.from)) return text;
+        swapped.push(where);
+        return text.replaceAll(swap.from, swap.to());
+      };
+      const query = (req.url.query ?? [])
+        .filter((q) => !q.disabled)
+        .map((q) => `${encodeURIComponent(q.key)}=${encodeURIComponent(toSandbox('query', fill(q.value)))}`);
       const headers: Record<string, string> = { host: app.host, ...(req.auth?.type === 'noauth' ? {} : { authorization: `Bearer ${app.token}` }) };
       for (const h of req.header) headers[h.key.toLowerCase()] = fill(h.value);
-      const body = req.body?.mode === 'file' ? PNG : req.body?.raw !== undefined ? fill(req.body.raw) : undefined;
+      const body = req.body?.mode === 'file' ? PNG : req.body?.raw !== undefined ? toSandbox('body', fill(req.body.raw)) : undefined;
+      if (swap && swapped.length === 0) {
+        failures.push(`${key}: el ejemplo ya no nombra ${swap.from}; actualiza SANDBOXED para no leer el disco del equipo`);
+        continue;
+      }
       const res = await app.core.app.request(`${path}${query.length ? `?${query.join('&')}` : ''}`, {
         method: req.method,
         headers,
         ...(body !== undefined ? { body } : {}),
       });
       const text = await res.text();
-      const key = `${req.method} ${template}`;
       const documented = new Set<number>([route.status ?? 200, ...(route.errors ?? [])]);
       results.push(`${key} → ${res.status}`);
       const broken = BY_DESIGN.has(key) ? BY_DESIGN.get(key) !== res.status : BROKEN.has(res.status);
       if (broken || !documented.has(res.status)) failures.push(`${key} → ${res.status} ${text.slice(0, 200)}`);
       if (text.includes(fakeKey)) failures.push(`${key}: la respuesta contiene la clave`);
+      if (text.includes(jsonText(EXAMPLE_PROJECT)) && !ECHO_REPO_PATH.has(key)) failures.push(`${key}: la respuesta trae ${EXAMPLE_PROJECT}: leyó el disco del equipo`);
       // La vuelta de Canva responde una página HTML: no hay JSON que validar.
       if (!res.headers.get('content-type')?.includes('application/json')) continue;
       const json: unknown = JSON.parse(text);
@@ -113,9 +160,16 @@ describe('docs/api: la colección de Postman contra el servidor real', () => {
       'GET /plugins → 200',
       'POST /plugins/:id/connect → 200',
       'POST /plugins/:id/disconnect → 200',
+      // Las que leen el disco, contra la carpeta temporal: el resultado no depende del equipo.
+      'POST /projects/inspect → 200',
+      'POST /projects/from-folder → 201',
+      'GET /fs/list → 200',
+      'POST /attachments/by-path → 201',
     ]) {
       expect(results).toContain(ok);
     }
+    // Sin hub de skills (501) no lee `C:\Users\yo\Downloads\mi-skill.zip`; si se conecta, va a SANDBOXED.
+    expect(results).toContain('POST /skills/import → 501');
   });
 
   it('sin token, toda ruta documentada responde 401 {error:{code:"unauthorized"}} (también /health y /ws), salvo las públicas', async () => {
