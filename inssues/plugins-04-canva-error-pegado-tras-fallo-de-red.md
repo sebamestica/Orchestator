@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** media
 - **Archivos:** `src/core/plugins/canva.ts:160`, `src/core/plugins/canva.ts:163`, `src/core/plugins/canva.ts:165`, `src/core/plugins/canva.ts:230`, `src/core/plugins/canva.ts:240`, `src/core/plugins/canva.ts:242`, `src/core/plugins/canva.ts:284`, `src/core/plugins/oauth.ts:324`, `src/core/plugins/service.ts:157`, `src/core/plugins/service.ts:158`, `src/core/plugins/service.ts:261`, `src/core/plugins/service.ts:322`, `src/core/plugins/service.ts:345`, `src/ui/features/plugins/PluginsView.tsx:86`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

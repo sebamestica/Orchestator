@@ -74,6 +74,7 @@ const CANVA_CONNECTING_STEPS = [
 ];
 const CANVA_NOTE =
   'Usa Canva solo para los diseños que pide la tarea, con este servidor (tu cuenta, por OAuth); no confirmes cambios (commit) ni borres diseños sin que el encargo lo pida. Si algo solo se puede hacer en la web de Canva, hazlo en el Chrome personal (`chrome-personal`), nunca en otro navegador.';
+const CANVA_RETRYING = 'No se pudo renovar el token de Canva (sin conexión o el servidor falló); se reintenta solo.';
 const AGENTE_RETIRED = 'Se quitó el perfil aislado de los agentes: ahora usan solo tu Chrome personal. Pulsa Probar conexión.';
 
 export class PluginError extends Error {
@@ -125,6 +126,12 @@ export interface PluginServiceOptions {
   locks?: Pick<LockManager, 'acquire' | 'read' | 'releaseAbandoned' | 'root'>;
 }
 
+/** Detalle de Canva conectado, con la próxima expiración si se conoce. */
+function canvaConnectedDetail(expiresAt: number | undefined): string {
+  const until = expiresAt ? ` · se renueva sola (vence ${new Date(expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC)` : '';
+  return `Cuenta de Canva conectada por OAuth${until}`;
+}
+
 /** Id válido para el dueño de un candado (`idSchema`). */
 function lockId(value: string, fallback: string): string {
   if (idSchema.safeParse(value).success) return value;
@@ -158,7 +165,10 @@ export class PluginService {
       ...(opts.canva?.refreshMarginMs !== undefined ? { refreshMarginMs: opts.canva.refreshMarginMs } : {}),
       ...(opts.log ? { log: opts.log } : {}),
       onSessionChange: (e) => {
-        if (e.kind === 'lost') this.#save({ ...this.#state('canva'), status: 'error', detail: e.message, steps: [...CANVA_STEPS] });
+        const s = this.#state('canva');
+        if (e.kind === 'lost') this.#save({ ...s, status: 'error', detail: e.message, steps: [...CANVA_STEPS] });
+        // Una renovación correcta saca del error que dejó un fallo pasajero (o de un `error` viejo con sesión válida).
+        else if (s.status === 'connected' || s.status === 'error') this.#save({ ...s, status: 'connected', detail: canvaConnectedDetail(e.expiresAt), steps: [] });
       },
     });
     // Un intento a medias de un arranque anterior (Chrome probando, Canva esperando el callback) no sigue vivo.
@@ -261,8 +271,7 @@ export class PluginService {
     const result = await this.#canva.complete(query);
     if (result.ok) {
       this.#authUrl = undefined;
-      const until = result.expiresAt ? ` · se renueva sola (vence ${new Date(result.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC)` : '';
-      this.#save({ ...this.#state('canva'), status: 'connected', detail: `Cuenta de Canva conectada por OAuth${until}`, steps: [] });
+      this.#save({ ...this.#state('canva'), status: 'connected', detail: canvaConnectedDetail(result.expiresAt), steps: [] });
       return { ok: true, title: 'Canva conectado', message: 'Canva conectado, ya puedes cerrar esta pestaña.' };
     }
     if (result.consumed) {
@@ -357,11 +366,15 @@ export class PluginService {
     const canva = this.#state('canva');
     if (this.#wants('canva', canva, agentId, kind)) {
       try {
-        const token = await this.#canva.accessToken();
-        if (token) {
-          servers.canva = { type: 'http', url: this.#canvaUrl, headers: { Authorization: `Bearer ${token}` }, instructions: CANVA_NOTE };
+        const access = await this.#canva.accessToken();
+        const now = this.#state('canva');
+        if ('token' in access) {
+          servers.canva = { type: 'http', url: this.#canvaUrl, headers: { Authorization: `Bearer ${access.token}` }, instructions: CANVA_NOTE };
+        } else if (access.reason === 'transient') {
+          // Sigue conectado: el temporizador reintenta la renovación y la próxima ejecución lo recibe.
+          if (now.status === 'connected' && now.detail !== CANVA_RETRYING) this.#save({ ...now, detail: CANVA_RETRYING });
+          notes.push('Canva no está disponible en esta sesión (no se pudo renovar el token; se reintenta solo).');
         } else {
-          const now = this.#state('canva');
           if (now.status === 'connected') this.#save({ ...now, status: 'error', detail: 'No hay una sesión de Canva vigente: vuelve a conectar.', steps: [...CANVA_STEPS] });
           notes.push('Canva no está disponible en esta sesión (la sesión de Canva venció).');
         }

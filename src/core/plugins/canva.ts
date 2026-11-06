@@ -6,8 +6,9 @@
  * - `complete(query)`: el navegador vuelve a `GET /plugins/canva/callback` (sin token del núcleo); se valida el
  *   `state`, se canjea el código y se guardan `access_token`, `refresh_token`, `client_id` y la expiración en la
  *   bóveda (DPAPI), en una sola entrada `plugin-canva`.
- * - `accessToken()`: el token vigente, refrescado si le queda poco. Además hay un temporizador que lo refresca antes
- *   de que caduque aunque nadie lo pida.
+ * - `accessToken()`: el token vigente, refrescado si le queda poco, o por qué no lo hay (`none`: sin sesión o
+ *   rechazada; `transient`: la renovación falló por red y se reintenta sola). Además hay un temporizador que lo
+ *   refresca antes de que caduque aunque nadie lo pida.
  * - `disconnect()`: revoca (si el servidor lo permite) y borra la entrada de la bóveda.
  *
  * El token solo vive en la bóveda, en memoria y en el entorno del proceso del agente; nunca en SQLite, eventos ni
@@ -59,6 +60,9 @@ interface Pending {
   client: OAuthClientInfo;
   createdAt: number;
 }
+
+/** Token vigente, o por qué no lo hay: `none` (no hay sesión o se rechazó) o `transient` (falló la renovación y se reintenta). */
+export type CanvaAccess = { token: string } | { reason: 'none' | 'transient' };
 
 export type CallbackQuery = { code?: string | undefined; state?: string | undefined; error?: string | undefined; error_description?: string | undefined };
 
@@ -156,14 +160,18 @@ export class CanvaConnector {
     return (await this.#load()) !== undefined;
   }
 
-  /** Token vigente (refrescado si hace falta). undefined: no hay sesión o se perdió. */
-  async accessToken(): Promise<string | undefined> {
+  /** Token vigente (refrescado si hace falta), o por qué no lo hay. */
+  async accessToken(): Promise<CanvaAccess> {
     let stored = await this.#load();
-    if (!stored) return undefined;
+    if (!stored) return { reason: 'none' };
     if (this.#needsRefresh(stored)) stored = await this.#refresh(stored);
-    if (!stored) return undefined;
-    if (stored.tokens.expiresAt !== undefined && stored.tokens.expiresAt <= this.#now()) return undefined;
-    return stored.tokens.accessToken;
+    if (!stored) return { reason: 'none' };
+    const { expiresAt, refreshToken, accessToken } = stored.tokens;
+    if (expiresAt !== undefined && expiresAt <= this.#now()) {
+      // Vencido con refresh token: la renovación falló por red o HTTP y quedó programado otro intento.
+      return { reason: refreshToken ? 'transient' : 'none' };
+    }
+    return { token: accessToken };
   }
 
   /** Expiración del token vigente (ms), si se conoce. */

@@ -1,15 +1,28 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { CANVA_VAULT_REF, McpOAuthClient, OAuthError } from '../../../src/core/plugins/index.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CANVA_VAULT_REF, McpOAuthClient, OAuthError, PluginStateStore } from '../../../src/core/plugins/index.ts';
 import type { Plugin } from '../../../src/shared/index.ts';
 import { cleanup, dumpDatabase, fakeOAuthServer, manualClock, pluginHarness, type FakeOAuthOptions } from './helpers.ts';
 
 afterEach(cleanup);
 
-async function canvaHarness(opts: FakeOAuthOptions = {}) {
+async function canvaHarness(opts: FakeOAuthOptions = {}, fetch?: typeof globalThis.fetch) {
   const oauth = await fakeOAuthServer(opts);
   const clock = manualClock();
-  const h = await pluginHarness({ now: clock.now, canva: { mcpUrl: oauth.mcpUrl } });
+  const h = await pluginHarness({ now: clock.now, canva: { mcpUrl: oauth.mcpUrl, ...(fetch ? { fetch } : {}) } });
   return { ...h, oauth, clock };
+}
+
+/** `fetch` que, con `net.offline`, falla como sin red en las renovaciones (`grant_type=refresh_token`). */
+function flakyRefreshFetch(net: { offline: boolean }): typeof globalThis.fetch {
+  return (input, init) => {
+    if (net.offline && String(init?.body ?? '').includes('grant_type=refresh_token')) return Promise.reject(new TypeError('fetch failed'));
+    return globalThis.fetch(input, init);
+  };
+}
+
+async function storedAccessToken(h: Awaited<ReturnType<typeof canvaHarness>>): Promise<string | undefined> {
+  const raw = await h.vault.get(CANVA_VAULT_REF);
+  return raw ? (JSON.parse(raw) as { tokens: { accessToken: string } }).tokens.accessToken : undefined;
 }
 
 async function connectCanva(h: Awaited<ReturnType<typeof canvaHarness>>) {
@@ -212,6 +225,18 @@ describe('OAuth de Canva de punta a punta (servidor falso)', () => {
     expect(await h.vault.get(CANVA_VAULT_REF)).toBeUndefined();
   });
 
+  it('refresco rechazado (invalid_grant) con el token ya vencido: sigue quedando en error', async () => {
+    const h = await canvaHarness();
+    const plugin = await connectCanva(h);
+    await h.req('GET', await h.oauth.authorize(plugin.authUrl ?? ''), { token: null });
+    h.oauth.rejectRefresh();
+    h.clock.advance(61 * 60_000);
+    const grant = await h.service.grant({ agentId: 'claude-main', kind: 'claude-sdk', taskId: 't1' });
+    expect(grant.servers).toEqual({});
+    expect(h.service.status('canva')).toMatchObject({ status: 'error' });
+    expect(await h.vault.get(CANVA_VAULT_REF)).toBeUndefined();
+  });
+
   it('disconnect revoca y borra los secretos', async () => {
     const h = await canvaHarness();
     const plugin = await connectCanva(h);
@@ -243,5 +268,57 @@ describe('OAuth de Canva de punta a punta (servidor falso)', () => {
     }
     expect(haystacks.sqlite).toContain('plugins_state');
     expect(h.messages.filter((m) => m.type === 'plugin').length).toBeGreaterThan(3);
+  });
+});
+
+describe('Canva: fallos pasajeros al renovar (servidor falso)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fallo de red al renovar con el token vencido: no queda en error y se recupera solo', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const net = { offline: false };
+    const h = await canvaHarness({}, flakyRefreshFetch(net));
+    const plugin = await connectCanva(h);
+    await h.req('GET', await h.oauth.authorize(plugin.authUrl ?? ''), { token: null });
+
+    net.offline = true;
+    h.clock.advance(61 * 60_000); // el token de 3600 s ya venció
+    const grant = await h.service.grant({ agentId: 'claude-main', kind: 'claude-sdk', taskId: 't1' });
+    expect(grant.servers.canva).toBeUndefined();
+    expect(grant.notes.join('\n')).toContain('Canva no está disponible');
+    expect(h.service.status('canva').status).toBe('connected');
+    expect(h.service.status('canva').detail).toContain('se reintenta solo');
+
+    net.offline = false;
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    await vi.waitFor(() => expect(h.oauth.issued).toHaveLength(4));
+    const newAccess = h.oauth.issued[2];
+    await vi.waitFor(async () => expect(await storedAccessToken(h)).toBe(newAccess));
+    expect(h.service.status('canva').status).toBe('connected');
+    expect(h.service.status('canva').detail).toContain('Cuenta de Canva conectada por OAuth');
+    const last = h.messages.filter((m) => m.type === 'plugin' && m.plugin.id === 'canva').at(-1);
+    expect(last).toMatchObject({ type: 'plugin', plugin: { id: 'canva', status: 'connected' } });
+    const again = await h.service.grant({ agentId: 'claude-main', kind: 'claude-sdk', taskId: 't2' });
+    expect(again.servers.canva).toMatchObject({ headers: { Authorization: `Bearer ${newAccess ?? ''}` } });
+  });
+
+  it('una renovación correcta saca del error guardado si la bóveda tiene sesión', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = await canvaHarness();
+    const plugin = await connectCanva(h);
+    await h.req('GET', await h.oauth.authorize(plugin.authUrl ?? ''), { token: null });
+    const states = new PluginStateStore(h.store.database);
+    const current = states.get('canva');
+    if (!current) throw new Error('falta el estado de Canva');
+    states.put({ ...current, status: 'error', detail: 'No hay una sesión de Canva vigente: vuelve a conectar.' });
+    expect(h.service.status('canva').status).toBe('error');
+
+    // El temporizador renueva a 30 minutos de vencer (token de 60 min, margen 30 min).
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    await vi.waitFor(() => expect(h.oauth.issued).toHaveLength(4));
+    await vi.waitFor(() => expect(h.service.status('canva').status).toBe('connected'));
+    expect(h.service.status('canva')).toMatchObject({ steps: [] });
   });
 });
