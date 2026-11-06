@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { HookCallbackMatcher, HookInput, Options, SyncHookJSONOutput } from '@anthropic-ai/claude-agent-sdk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ClaudeSdkAdapter, ClaudeSdkTranslator, decideToolUse } from '../../../../src/core/adapters/claude-sdk/index.ts';
+import { createLinks } from '../../../../src/core/workspace/links.ts';
 import { FAKE_KEY, collect, config, ctx, fakeQuery, loadJsonl, payload, task } from './helpers.ts';
 
 /**
@@ -190,6 +191,36 @@ describe('hallazgo 5 (ALTA): junctions y enlaces dentro del worktree', () => {
     expect(await decision('Write', { file_path: 'enlace/sub/nuevo.txt', content: '' })).toBe('deny');
     expect(await bash('echo x > enlace/x.txt')).toBe('deny');
     expect(await ps('Set-Content .\\enlace\\x.txt dato')).toBe('deny');
+  });
+
+  it('deniega leer a través de una junction que sale del worktree', async () => {
+    expect(await decision('Read', { file_path: join(WT, 'enlace', 'existente.txt') })).toBe('deny');
+    expect(await decision('Read', { file_path: 'enlace/existente.txt' })).toBe('deny');
+    expect(await decision('Grep', { pattern: 'x', path: 'enlace' })).toBe('deny');
+    expect(await decision('Glob', { pattern: 'enlace/**/*.txt' })).toBe('deny');
+    expect(await decision('LS', { path: 'enlace' })).toBe('deny');
+    expect(await decision('Read', { file_path: join(WT, 'a.txt') })).toBe('allow');
+    expect(await decision('Grep', { pattern: 'x' })).toBe('allow');
+  });
+
+  it('sigue leyendo los enlaces de createLinks hacia la copia principal, y ninguna otra junction hacia ella', async () => {
+    // Worktree de git a mano: «.git» es un archivo gitdir y commondir apunta al .git de la copia principal.
+    const main = join(root, 'principal');
+    const wt = join(root, 'wt-enlaces');
+    const gitdir = join(main, '.git', 'worktrees', 'wt-enlaces');
+    mkdirSync(gitdir, { recursive: true });
+    mkdirSync(join(main, 'node_modules', 'pkg'), { recursive: true });
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(gitdir, 'commondir'), '../..\n');
+    writeFileSync(join(wt, '.git'), `gitdir: ${gitdir}\n`);
+    writeFileSync(join(main, 'node_modules', 'pkg', 'index.js'), 'x');
+    await createLinks(main, wt, ['node_modules']);
+    symlinkSync(join(main, 'node_modules'), join(wt, 'otro'), 'junction');
+    const read = async (input: Record<string, unknown>) => (await decideToolUse(wt, 'Read', input)).behavior;
+    expect(await read({ file_path: join(wt, 'node_modules', 'pkg', 'index.js') })).toBe('allow');
+    expect(await read({ file_path: 'node_modules/pkg/index.js' })).toBe('allow');
+    expect((await decideToolUse(wt, 'Grep', { pattern: 'x', path: 'node_modules' })).behavior).toBe('allow');
+    expect(await read({ file_path: join(wt, 'otro', 'pkg', 'index.js') })).toBe('deny');
   });
 
   it('permite archivos nuevos en carpetas nuevas del worktree', async () => {

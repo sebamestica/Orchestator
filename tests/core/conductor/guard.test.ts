@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -155,6 +155,12 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     for (const dir of [root, extra, outside, data, path.join(root, 'src'), path.join(root, '.git')]) mkdirSync(dir, { recursive: true });
     vault = path.join(data, 'vault.json');
     symlinkSync(outside, path.join(root, 'enlace'), 'junction');
+    writeFileSync(path.join(outside, 'doc.txt'), 'fuera');
+    writeFileSync(path.join(root, 'src', 'a.ts'), 'a');
+    writeFileSync(vault, '{}');
+    // Como «Configuración local» → AppData\Local: otro nombre para la carpeta de datos del núcleo.
+    symlinkSync(data, path.join(root, 'datos'), 'junction');
+    symlinkSync(path.join(root, 'src'), path.join(root, 'alias'), 'junction');
     guard = createToolGuard({
       allowedTools: tools,
       cwd: root,
@@ -188,6 +194,26 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await reason('Write', { file_path: path.join(root, 'enlace', 'x.md'), content: 'x' })).toMatch(/ruta real/);
     expect(await allowed('Write', { content: 'sin ruta' })).toBe(false);
     expect(await allowed('Write', { file_path: 42 })).toBe(false);
+  });
+
+  it('la lectura sigue junctions: no sale de las raíces ni llega a denyPaths por otro nombre', async () => {
+    const strict = createToolGuard({ allowedTools: tools, cwd: root, readRoots: [extra] });
+    const read = async (tool: string, input: unknown) => {
+      const d = await strict.decide(tool, input);
+      return d.allow ? '' : d.reason;
+    };
+    expect(await read('Read', { file_path: path.join(root, 'enlace', 'doc.txt') })).toMatch(/ruta real/);
+    expect(await read('Read', { file_path: 'enlace/doc.txt' })).toMatch(/ruta real/);
+    expect(await read('Grep', { pattern: 'x', path: 'enlace' })).toMatch(/ruta real/);
+    expect(await read('Glob', { path: root, pattern: path.join(root, 'enlace', '*') })).toMatch(/ruta real/);
+    expect(await read('Glob', { pattern: 'enlace/**/*.txt' })).toMatch(/ruta real/);
+    // Con el disco entero como raíz (bypass), la bóveda sigue vetada aunque se nombre a través de una junction.
+    expect(await reason('Read', { file_path: path.join(root, 'datos', 'vault.json') })).toMatch(/credenciales/);
+    // Control: una junction interna y la lectura normal siguen permitidas.
+    expect(await read('Read', { file_path: path.join(root, 'alias', 'a.ts') })).toBe('');
+    expect(await read('Read', { file_path: 'src/a.ts' })).toBe('');
+    expect(await read('Grep', { pattern: 'x' })).toBe('');
+    expect(await allowed('Read', { file_path: path.join(outside, 'doc.txt') })).toBe(true);
   });
 
   it('el shell pasa por la política de los workers con el proyecto como raíz', async () => {

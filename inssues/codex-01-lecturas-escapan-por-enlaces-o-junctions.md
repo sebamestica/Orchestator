@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex)
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/guard.ts:137`, `src/core/conductor/guard.ts:168`, `src/core/conductor/guard.ts:227`, `src/core/adapters/claude-sdk/permissions.ts:49`, `src/core/adapters/claude-sdk/permissions.ts:98`, `src/core/adapters/claude-sdk/shell-policy.ts:62`, `src/core/memory/safe-fs.ts:58`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Berland tiene dos guardias de herramientas para los agentes Claude:

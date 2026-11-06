@@ -9,7 +9,9 @@
  *   la hubiera permitido al arrancar en `auto`; fuera de `bypass`, edición y shell).
  * - La lectura queda dentro de la carpeta del proyecto y de las raíces extra (p. ej. el hub de skills, los adjuntos
  *   o, en `bypass`, las unidades locales), que también se leen en cada llamada; nunca toca archivos típicos de
- *   credenciales (.env, claves privadas…) ni las rutas de `denyPaths` (bóveda y base de datos del núcleo).
+ *   credenciales (.env, claves privadas…) ni las rutas de `denyPaths` (bóveda y base de datos del núcleo). `decide`
+ *   lo comprueba también con la ruta real (sigue junctions y enlaces): una junction del proyecto no saca la lectura
+ *   de las raíces ni llega a `denyPaths` por otro nombre.
  * - Edición (Edit, Write, NotebookEdit): solo dentro de `writeRoots` (en `bypass`, el proyecto y las carpetas extra
  *   del chat), con la ruta real (sigue junctions y enlaces), nunca en `.git`, `.claude/`, `.mcp.json`, archivos de
  *   credenciales ni `denyPaths`.
@@ -23,6 +25,7 @@ import path from 'node:path';
 import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import type { ShellKind } from '../adapters/claude-sdk/shell-parse.ts';
 import { lexicallyInside, shellCommandProblem, writeProblem } from '../adapters/claude-sdk/shell-policy.ts';
+import { realOrNearest } from '../memory/safe-fs.ts';
 
 export type GuardDecision = { allow: true } | { allow: false; reason: string };
 
@@ -60,7 +63,8 @@ export interface ToolGuardOptions {
 export interface ToolGuard {
   /**
    * Decisión síncrona: lectura, subagentes, MCP y herramientas no permitidas. La edición y el shell necesitan el disco
-   * o la política de shell, así que aquí se niegan siempre: decídelas con `decide`.
+   * o la política de shell, así que aquí se niegan siempre: decídelas con `decide`. La lectura se comprueba solo con el
+   * texto de la ruta (no sigue junctions ni enlaces); `decide` añade la ruta real.
    */
   check(toolName: string, input: unknown): GuardDecision;
   /** Decisión completa (la del hook y `canUseTool`). `cwd`: carpeta actual de la sesión, la que trae el hook. */
@@ -84,6 +88,15 @@ export const DENY_DEFAULT = 'Fuera del modo bypass el orquestador no edita archi
 const SHELL_HINT = 'Busca otra vía dentro del proyecto; push, despliegue, pagos, borrar ramas y reescribir la historia necesitan al usuario.';
 
 const isEditOrShell = (name: string) => name in EDIT_TOOLS || name in SHELL_TOOLS;
+/** Parte fija de un patrón glob (hasta el primer comodín), con barras `/`. */
+const fixedPart = (pattern: string) => {
+  const parts: string[] = [];
+  for (const part of pattern.replace(/\\/g, '/').split('/')) {
+    if (GLOB_CHARS.test(part)) break;
+    parts.push(part);
+  }
+  return parts.join('/');
+};
 /** Texto normalizado (barras `/`, minúsculas) para buscar una ruta dentro de un comando. */
 const comparable = (text: string) => text.replace(/\\/g, '/').toLowerCase();
 
@@ -149,12 +162,8 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
   /** Parte fija de un patrón glob (hasta el primer comodín): si es absoluta, también debe quedar dentro. */
   const checkPattern = (raw: unknown, tool: string): GuardDecision => {
     if (typeof raw !== 'string') return { allow: true };
-    const normalized = raw.replace(/\\/g, '/');
-    const fixed = normalized.split('/').reduce<{ parts: string[]; done: boolean }>(
-      (acc, part) => (acc.done || GLOB_CHARS.test(part) ? { parts: acc.parts, done: true } : { parts: [...acc.parts, part], done: false }),
-      { parts: [], done: false },
-    ).parts.join('/');
-    if (normalized.split('/').includes('..')) return { allow: false, reason: `${tool}: el patrón no puede salir del proyecto con «..».` };
+    const fixed = fixedPart(raw);
+    if (raw.replace(/\\/g, '/').split('/').includes('..')) return { allow: false, reason: `${tool}: el patrón no puede salir del proyecto con «..».` };
     if (!fixed || !p.isAbsolute(fixed)) return { allow: true };
     return checkPath(fixed, tool);
   };
@@ -188,6 +197,33 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     const decision = precheck(toolName, input);
     if (decision.allow && isEditOrShell(toolName)) return { allow: false, reason: `${toolName} se decide con la política de escritura y de shell (decide).` };
     return decision;
+  };
+
+  /** Rutas en disco que abre una lectura: el archivo o la carpeta (por defecto, el proyecto) y la parte fija del patrón. */
+  const readTargets = (toolName: string, args: Record<string, unknown>): string[] => {
+    const main = toolName === 'Read' ? args.file_path : args.path;
+    const dir = path.resolve(opts.cwd, typeof main === 'string' ? main : '');
+    const pattern = toolName === 'Glob' ? args.pattern : toolName === 'Grep' ? args.glob : undefined;
+    const fixed = typeof pattern === 'string' ? fixedPart(pattern) : '';
+    return fixed ? [dir, path.resolve(dir, fixed)] : [dir];
+  };
+
+  /** Lectura con la ruta real: dentro de la ruta real de alguna raíz, fuera de `denyPaths` y sin credenciales. */
+  const readDecision = async (toolName: string, args: Record<string, unknown>): Promise<GuardDecision> => {
+    // Una raíz que no se puede resolver (unidad sin medio, sin permiso) no autoriza nada.
+    const realRoots = (await Promise.all([opts.cwd, ...listOf(opts.readRoots)].map((r) => realOrNearest(path.resolve(opts.cwd, r)).catch(() => undefined))))
+      .filter((r): r is string => r !== undefined);
+    const realDenied = await Promise.all(deniedOnDisk.map((d) => realOrNearest(d).catch(() => d)));
+    for (const target of readTargets(toolName, args)) {
+      const real = await realOrNearest(target);
+      if (!realRoots.some((root) => lexicallyInside(root, real))) {
+        return { allow: false, reason: `${toolName}: la ruta real (sigue junctions y enlaces) sale del proyecto (${cwd}) y de las carpetas extra.` };
+      }
+      if (SENSITIVE_FILE.test(path.basename(real)) || realDenied.some((d) => lexicallyInside(d, real))) {
+        return { allow: false, reason: `${toolName}: ese archivo puede contener credenciales; no se lee.` };
+      }
+    }
+    return { allow: true };
   };
 
   const editDecision = async (toolName: string, args: Record<string, unknown>): Promise<GuardDecision> => {
@@ -224,8 +260,10 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
   const decide = async (toolName: string, input: unknown, at?: string): Promise<GuardDecision> => {
     try {
       const decision = precheck(toolName, input);
-      if (!decision.allow || !isEditOrShell(toolName)) return decision;
+      if (!decision.allow) return decision;
       const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      if (READ_TOOLS.has(toolName)) return await readDecision(toolName, args);
+      if (!isEditOrShell(toolName)) return decision;
       const kind = SHELL_TOOLS[toolName];
       return kind ? await shellDecision(toolName, kind, args, at) : await editDecision(toolName, args);
     } catch (err) {

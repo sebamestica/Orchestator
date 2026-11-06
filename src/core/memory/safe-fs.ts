@@ -3,6 +3,7 @@
  *
  * - `resolveInside` rechaza rutas absolutas, unidades (`C:`), UNC, segmentos `..`, flujos alternos de
  *   NTFS (`a:b`), caracteres inválidos en Windows y nombres de dispositivo (`CON`, `NUL`…).
+ * - `realOrNearest` da la ruta real (sigue enlaces simbólicos y junctions), aunque el final aún no exista.
  * - `assertRealInside` resuelve enlaces simbólicos y junctions: la ruta real debe seguir dentro de la raíz.
  * - `writeFileAtomic` escribe en un temporal del mismo directorio y lo renombra sobre el destino.
  */
@@ -54,22 +55,32 @@ function errorCode(err: unknown): string | undefined {
   return err instanceof Error && 'code' in err && typeof err.code === 'string' ? err.code : undefined;
 }
 
-/** Comprueba en disco (siguiendo enlaces y junctions) que el ancestro existente más cercano de `target` está dentro de `root`. */
-export async function assertRealInside(root: string, target: string): Promise<void> {
-  const realRoot = await realpath(root);
-  let probe = path.resolve(target);
+/**
+ * Ruta real de `target` en disco (sigue enlaces y junctions): `realpath` del ancestro existente más cercano más los
+ * segmentos que todavía no existen. Si no existe ni la raíz de la unidad, no hay enlaces que seguir: la ruta tal cual.
+ * Lanza si `realpath` falla por otro motivo (permisos, E/S).
+ */
+export async function realOrNearest(target: string): Promise<string> {
+  const absolute = path.resolve(target);
+  let probe = absolute;
+  const missing: string[] = [];
   for (;;) {
     try {
-      const real = await realpath(probe);
-      if (!isInside(realRoot, real)) throw new UnsafePathError(`la ruta real sale de la raíz: ${target}`);
-      return;
+      return path.join(await realpath(probe), ...missing);
     } catch (err) {
       if (errorCode(err) !== 'ENOENT') throw err;
       const parent = path.dirname(probe);
-      if (parent === probe) throw err;
+      if (parent === probe) return absolute;
+      missing.unshift(path.basename(probe));
       probe = parent;
     }
   }
+}
+
+/** Comprueba en disco (siguiendo enlaces y junctions) que el ancestro existente más cercano de `target` está dentro de `root`. */
+export async function assertRealInside(root: string, target: string): Promise<void> {
+  const realRoot = await realpath(root);
+  if (!isInside(realRoot, await realOrNearest(target))) throw new UnsafePathError(`la ruta real sale de la raíz: ${target}`);
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });

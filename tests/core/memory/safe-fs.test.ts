@@ -1,9 +1,9 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertRealInside, resolveInside, safeSegments, UnsafePathError, writeFileAtomic } from '../../../src/core/memory/safe-fs.ts';
+import { assertRealInside, realOrNearest, resolveInside, safeSegments, UnsafePathError, writeFileAtomic } from '../../../src/core/memory/safe-fs.ts';
 
 let root: string;
 let outside: string;
@@ -60,5 +60,13 @@ describe('writeFileAtomic', () => {
     const link = path.join(root, 'alias');
     await symlink(path.join(root, 'real'), link, process.platform === 'win32' ? 'junction' : 'dir');
     await expect(assertRealInside(root, path.join(link, 'x.md'))).resolves.toBeUndefined();
+  });
+
+  it('realOrNearest sigue los enlaces y conserva los segmentos que aún no existen', async () => {
+    await mkdir(path.join(root, 'destino'));
+    const link = path.join(root, 'atajo');
+    await symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(await realOrNearest(path.join(link, 'nueva', 'x.md'))).toBe(path.join(await realpath(outside), 'nueva', 'x.md'));
+    expect(await realOrNearest(path.join(root, 'destino'))).toBe(await realpath(path.join(root, 'destino')));
   });
 });

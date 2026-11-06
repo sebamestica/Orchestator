@@ -1,6 +1,8 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CanUseTool, HookCallbackMatcher, HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { ShellKind } from './shell-parse.ts';
+import { realOrNearest } from '../../memory/safe-fs.ts';
 import { lexicallyInside, shellCommandProblem, writeProblem } from './shell-policy.ts';
 
 /**
@@ -12,7 +14,8 @@ import { lexicallyInside, shellCommandProblem, writeProblem } from './shell-poli
  * de `canUseTool`; un hook corre antes que todo y su deny vale incluso en `bypassPermissions`.
  *
  * Denegación por defecto. Solo se permiten:
- * - lectura (`Read`, `Grep`, `Glob`, `LS`) dentro del worktree o de las rutas de lectura autorizadas;
+ * - lectura (`Read`, `Grep`, `Glob`, `LS`) dentro del worktree o de las rutas de lectura autorizadas, también con la
+ *   ruta real (una junction no saca la lectura; solo se siguen los enlaces compartidos con la copia principal);
  * - edición (`Edit`, `Write`, `MultiEdit`, `NotebookEdit`) si la ruta real (sigue junctions y enlaces)
  *   queda dentro del worktree y no es `.git`, `.claude/` ni `.mcp.json`;
  * - `Bash` y `PowerShell` según `shell-policy.ts` (ver su riesgo residual: sin aislamiento del sistema
@@ -45,12 +48,42 @@ function deny(reason: string): PermissionResult {
   return { behavior: 'deny', message: `Bloqueado por el orquestador: ${reason}. Si de verdad hace falta, propónlo en tu informe en lugar de ejecutarlo.` };
 }
 
-/** Problema si `target` no se puede leer (fuera del worktree y de las rutas autorizadas). */
-function readProblem(worktree: string, cwd: string, roots: readonly string[], target: string): string | undefined {
+/** Copia principal del repo si `worktree` es un worktree de git (su `.git` es un archivo `gitdir:`). */
+async function mainCopyOf(worktree: string): Promise<string | undefined> {
+  try {
+    const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(await readFile(path.join(worktree, '.git'), 'utf8'))?.[1];
+    if (!gitdir) return undefined;
+    const dir = path.resolve(worktree, gitdir);
+    const common = path.resolve(dir, (await readFile(path.join(dir, 'commondir'), 'utf8')).trim());
+    return path.basename(common).toLowerCase() === '.git' ? path.dirname(common) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * True si `abs` (dentro del worktree) llega a la misma ruta real que su equivalente en la copia principal: es un
+ * enlace de `createLinks` (`<worktree>/node_modules` → `<repo>/node_modules`). Una junction hacia otra parte, no.
+ */
+async function sharedLinkRead(worktree: string, abs: string, real: string): Promise<boolean> {
+  const main = await mainCopyOf(worktree);
+  if (!main) return false;
+  const mirror = await realOrNearest(path.join(main, path.relative(worktree, abs)));
+  return lexicallyInside(await realOrNearest(main), real) && path.relative(mirror, real) === '';
+}
+
+/** Problema si `target` no se puede leer: fuera del worktree y de las rutas autorizadas, en texto o con la ruta real. */
+async function readProblem(worktree: string, cwd: string, roots: readonly string[], target: string): Promise<string | undefined> {
   const abs = path.resolve(cwd, target);
-  if (lexicallyInside(worktree, abs)) return undefined;
-  if (roots.some((r) => lexicallyInside(path.resolve(r), abs))) return undefined;
-  return `lectura fuera del worktree: ${abs}`;
+  const inWorktree = lexicallyInside(worktree, abs);
+  if (!inWorktree && !roots.some((r) => lexicallyInside(path.resolve(r), abs))) return `lectura fuera del worktree: ${abs}`;
+  const real = await realOrNearest(abs);
+  for (const root of [worktree, ...roots]) {
+    const realRoot = await realOrNearest(path.resolve(root)).catch(() => undefined); // sin resolver, no autoriza
+    if (realRoot !== undefined && lexicallyInside(realRoot, real)) return undefined;
+  }
+  if (inWorktree && (await sharedLinkRead(worktree, abs, real))) return undefined;
+  return `la ruta real sale del worktree (enlace o junction): ${abs}`;
 }
 
 /** Parte fija (sin comodines) de un patrón de Glob. */
@@ -110,7 +143,7 @@ export async function decideToolUse(worktreePath: string, toolName: string, inpu
         targets = [dir];
       }
       for (const t of targets) {
-        const problem = readProblem(wt, cwd, roots, t);
+        const problem = await readProblem(wt, cwd, roots, t);
         if (problem) return deny(problem);
       }
       return allow;
