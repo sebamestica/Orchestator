@@ -141,6 +141,15 @@ export const taskNotificationSchema = z.looseObject({
   usage: taskUsageSchema.optional(),
 });
 
+/** `system/status`: el SDK está compactando (`compacting`), pidiendo (`requesting`) o nada; al compactar, su resultado. */
+export const sdkStatusSchema = z.looseObject({
+  type: z.literal('system'),
+  subtype: z.literal('status'),
+  status: z.string().nullable().optional(),
+  compact_result: z.string().optional(),
+  compact_error: z.string().optional(),
+});
+
 export const apiRetrySchema = z.looseObject({
   type: z.literal('system'),
   subtype: z.literal('api_retry'),

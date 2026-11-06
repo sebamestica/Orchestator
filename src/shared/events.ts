@@ -10,6 +10,12 @@ const base = {
   ts: z.iso.datetime(),
 };
 
+/**
+ * `status.detail` con que el traductor del SDK de Claude marca que la conversación se compactó (los turnos viejos
+ * pasaron a un resumen). Lo reconocen el núcleo y la interfaz sin cambiar el contrato de eventos.
+ */
+export const COMPACTED_DETAIL = 'contexto compactado';
+
 export const sessionStateSchema = z.enum(['starting', 'running', 'waiting', 'done', 'failed', 'cancelled']);
 
 export const errorCodeSchema = z.enum(['quota_exhausted', 'auth', 'timeout', 'crash', 'invalid_output', 'cancelled', 'unknown']);

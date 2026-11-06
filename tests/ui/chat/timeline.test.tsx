@@ -10,6 +10,7 @@ import {
   splitTurns,
   upsertMessage,
 } from '../../../src/ui/features/chat/timeline.ts';
+import { COMPACTED_DETAIL } from '../../../src/shared/index.ts';
 import { at, ev, makeMessage, makeProposal } from './helpers.ts';
 
 describe('mergeEvents', () => {
@@ -54,6 +55,12 @@ describe('buildReply', () => {
     // El uso es acumulado por modelo: cuenta el último.
     expect(draft.usage).toEqual({ inputTokens: 1500, outputTokens: 300, costUsd: 0.02, models: ['claude-opus-5-5'] });
     expect(draft.done).toBe(false);
+  });
+
+  it('marca en su lugar del turno que el SDK compactó la conversación, y la marca sobrevive en activityOf', () => {
+    const draft = buildReply([ev.text(0, 1, 'a'), ev.status(1, 2, COMPACTED_DETAIL), ev.text(2, 3, 'b'), ev.status(3, 4, 'modelo x')]);
+    expect(draft.items.map((i) => i.kind)).toEqual(['text', 'compact', 'text']);
+    expect(activityOf(draft).map((i) => i.kind)).toEqual(['compact']);
   });
 
   it('separa el pensamiento del texto y marca done', () => {

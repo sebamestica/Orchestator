@@ -10,6 +10,7 @@ import {
   FilePen,
   FilePlus,
   FileText,
+  FoldVertical,
   Globe,
   ListChecks,
   ListTree,
@@ -162,6 +163,13 @@ export function ItemRow({ item, running, announce = true }: { item: StepItem; ru
         <li className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-[0.8125rem] text-danger" role={announce ? 'alert' : undefined}>
           <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span className="selectable min-w-0 break-words">{item.message}</span>
+        </li>
+      );
+    case 'compact':
+      return (
+        <li className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-[0.8125rem] text-muted">
+          <FoldVertical className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          <span>La mente resumió la conversación para seguir. Si algo del principio es importante, recuérdaselo.</span>
         </li>
       );
     case 'thinking':

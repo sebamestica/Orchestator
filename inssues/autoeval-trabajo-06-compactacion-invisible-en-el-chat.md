@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** baja
 - **Archivos:** `src/core/adapters/claude-sdk/translate.ts:532-545`, `src/shared/events.ts:37`, `src/ui/features/chat/timeline.ts:9`, `src/ui/features/chat/timeline.ts:16-24`, `src/ui/features/chat/timeline.ts:77-121`, `src/ui/features/chat/timeline.ts:139-140`, `src/ui/features/chat/components/MessageList.tsx:37-43`, `src/ui/features/chat/components/LiveReply.tsx:89-127`, `src/ui/features/chat/components/LiveReply.tsx:144`, `src/ui/features/agents-panel/model.ts:45-50`, `src/core/conductor/session.ts:366`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:3810-3816`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:6032-6040`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmación 3 («en tareas largas pierde detalles del principio»)
 - **Relacionadas:** `autoeval-trabajo-01` (después de compactar, la mente solo puede recuperar decisiones con `leer_memoria`), `autoeval-trabajo-02` (al compactar, el prompt de sistema salta al de la última sesión), `ui-chat-03` (pasos que se pierden del hilo), `ui-chat-05` (la interfaz solo conserva los últimos 500 eventos de la sesión, así que una marca hecha solo con eventos se pierde al recargar un chat largo)
 

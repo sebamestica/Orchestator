@@ -84,6 +84,7 @@ export const ev = {
   }),
   done: (seq: number, sec: number): AgentEvent => ({ ...base(seq, sec), type: 'done', payload: { ok: true } }),
   error: (seq: number, sec: number, message: string): AgentEvent => ({ ...base(seq, sec), type: 'error', payload: { code: 'unknown', message } }),
+  status: (seq: number, sec: number, detail: string): AgentEvent => ({ ...base(seq, sec), type: 'status', payload: { state: 'running', detail } }),
 };
 
 export interface Call {

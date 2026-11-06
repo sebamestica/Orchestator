@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { z } from 'zod';
 import type { AgentEvent, ErrorCode } from '../../../shared/index.ts';
-import { redactSecrets } from '../../../shared/index.ts';
+import { COMPACTED_DETAIL, redactSecrets } from '../../../shared/index.ts';
 import { classifyClaudeError } from './errors.ts';
 import { estimateCostUsd, type TokenUsage } from './pricing.ts';
 import {
@@ -12,6 +12,7 @@ import {
   initMessageSchema,
   rateLimitEventSchema,
   resultMessageSchema,
+  sdkStatusSchema,
   systemMessageSchema,
   taskNotificationSchema,
   taskProgressSchema,
@@ -572,7 +573,16 @@ export class ClaudeSdkTranslator {
       case 'files_persisted':
         return [];
       case 'compact_boundary':
-        return [this.status('running', 'contexto compactado')];
+        return [this.status('running', COMPACTED_DETAIL)];
+      case 'status': {
+        const s = sdkStatusSchema.safeParse(message);
+        if (!s.success) return [this.#raw('claude-sdk:system/status', message)];
+        if (s.data.compact_result === 'failed') {
+          return [this.error('unknown', `No se pudo compactar el contexto${s.data.compact_error ? `: ${s.data.compact_error}` : '.'}`)];
+        }
+        // `requesting`, `null` y el fin sin error de una compactación (lo marca `compact_boundary`): sin evento.
+        return s.data.status === 'compacting' ? [this.status('running', 'compactando el contexto')] : [];
+      }
       default:
         return [this.#raw(`claude-sdk:system/${base.data.subtype}`, message)];
     }

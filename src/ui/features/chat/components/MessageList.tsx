@@ -1,4 +1,4 @@
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, FoldVertical } from 'lucide-react';
 import { memo, useMemo, type ReactNode } from 'react';
 import type { AgentEvent, ChatMessage } from '../../../../shared/index.ts';
 import { activityOf, buildReply } from '../timeline.ts';
@@ -35,10 +35,19 @@ export const UserMessage = memo(function UserMessage({ message }: { message: Cha
 });
 
 export function AssistantMessage({ message, events }: { message: ChatMessage; events?: readonly AgentEvent[] }) {
-  const steps = useMemo(() => (events ? activityOf(buildReply(events)) : []), [events]);
+  const all = useMemo(() => (events ? activityOf(buildReply(events)) : []), [events]);
+  // El texto guardado es un solo bloque: la compactación va como una línea antes de él, fuera de los pasos.
+  const compacted = all.some((i) => i.kind === 'compact');
+  const steps = compacted ? all.filter((i) => i.kind !== 'compact') : all;
   return (
     <div className="group flex flex-col gap-2" data-testid="assistant-message">
       {steps.length ? <ActivitySummary items={steps} /> : null}
+      {compacted ? (
+        <p className="flex items-start gap-2 px-2 text-[0.8125rem] text-muted">
+          <FoldVertical className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          En este turno la mente resumió la conversación para seguir. Si algo del principio es importante, recuérdaselo.
+        </p>
+      ) : null}
       <AttachmentList attachments={message.attachments} align="start" />
       <Markdown text={message.text} />
       {message.text ? (

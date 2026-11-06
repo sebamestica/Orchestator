@@ -3,7 +3,7 @@
  * la mente, parten los eventos por turnos (con el `at` de los mensajes guardados) y anclan las propuestas
  * al mensaje de la mente que las trajo. Sin React ni red: se prueban solas.
  */
-import type { AgentEvent, ChatMessage, Proposal, Usage } from '../../../shared/index.ts';
+import { COMPACTED_DETAIL, type AgentEvent, type ChatMessage, type Proposal, type Usage } from '../../../shared/index.ts';
 
 /** Historia en memoria por sesión (docs/plan/F5-INTERFAZ.md §2 «Recursos»). */
 export const MAX_SESSION_EVENTS = 500;
@@ -18,7 +18,9 @@ export type LiveItem =
   | { kind: 'thinking'; key: string; text: string }
   | { kind: 'tool'; key: string; callId: string; name: string; input: string; result: ToolResult | null }
   | { kind: 'file'; key: string; path: string; change: 'add' | 'modify' | 'delete' }
-  | { kind: 'error'; key: string; message: string };
+  | { kind: 'error'; key: string; message: string }
+  /** El SDK compactó la conversación: desde aquí la mente trabaja con un resumen de lo anterior. */
+  | { kind: 'compact'; key: string };
 
 /** Paso de trabajo (todo lo que no es texto de la respuesta). */
 export type StepItem = Exclude<LiveItem, { kind: 'text' }>;
@@ -113,6 +115,9 @@ export function buildReply(events: readonly AgentEvent[]): ReplyDraft {
       case 'done':
         done = true;
         break;
+      case 'status':
+        if (e.payload.detail === COMPACTED_DETAIL) items.push({ kind: 'compact', key: `compact-${e.seq}` });
+        break;
       default:
         break;
     }
@@ -135,9 +140,9 @@ function totalUsage(byModel: ReadonlyMap<string, Usage>): UsageTotals | null {
   return { inputTokens, outputTokens, costUsd, models };
 }
 
-/** Pasos de trabajo (herramientas, archivos y errores) de un turno ya respondido. */
+/** Pasos de trabajo (herramientas, archivos, errores y compactaciones) de un turno ya respondido. */
 export function activityOf(draft: ReplyDraft): StepItem[] {
-  return draft.items.filter((i): i is StepItem => i.kind === 'tool' || i.kind === 'file' || i.kind === 'error');
+  return draft.items.filter((i): i is StepItem => i.kind === 'tool' || i.kind === 'file' || i.kind === 'error' || i.kind === 'compact');
 }
 
 const time = (iso: string) => {

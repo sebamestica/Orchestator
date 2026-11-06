@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopBridge } from '../../../src/shared/api.ts';
+import { COMPACTED_DETAIL } from '../../../src/shared/index.ts';
 
 vi.mock('../../../src/ui/api/live.ts', async () => {
   const m = await import('./fake-live.ts');
@@ -208,6 +209,38 @@ describe('respuesta en vivo', () => {
     const second = screen.getByText('Segundo intento');
     expect(first.compareDocumentPosition(orphan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(orphan.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('marca la compactación: en el turno guardado, antes del texto; en el que está en curso, entre las dos partes', async () => {
+    const live = resetFakeLive();
+    const chat = makeChat({ state: 'running' });
+    const messages = [
+      makeMessage({ id: 'u1', role: 'user', text: 'Larga', at: at(1) }),
+      makeMessage({ id: 'a1', role: 'assistant', text: 'Respuesta guardada', at: at(10) }),
+      makeMessage({ id: 'u2', role: 'user', text: 'Sigue', at: at(20) }),
+    ];
+    fakeCore({ chats: [chat], messages: { [chat.id]: messages } });
+    render(<ChatView projectId="demo" chatId="chat_abc123" />);
+    await screen.findByText('Respuesta guardada');
+    act(() =>
+      live.emit({
+        type: 'replay',
+        sessionId: 'sess_chat_1',
+        events: [ev.text(0, 3, 'Respuesta guardada'), ev.status(1, 5, COMPACTED_DETAIL), ev.text(2, 21, 'antes'), ev.status(3, 22, COMPACTED_DETAIL), ev.text(4, 23, 'después')],
+        lastSeq: 4,
+        hasMore: false,
+      }),
+    );
+    const saved = screen.getAllByTestId('assistant-message')[0];
+    if (!saved) throw new Error('falta el mensaje de la mente');
+    const line = await within(saved).findByText(/En este turno la mente resumió la conversación/);
+    expect(line.compareDocumentPosition(within(saved).getByText('Respuesta guardada')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const reply = await screen.findByTestId('live-reply');
+    const mark = await within(reply).findByText(/La mente resumió la conversación para seguir/);
+    expect(within(reply).getByText('antes').compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mark.compareDocumentPosition(within(reply).getByText('después')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

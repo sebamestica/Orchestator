@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeSdkTranslator, SUMMARY_MAX, describeToolInput, toolResultText, truncate } from '../../../../src/core/adapters/claude-sdk/index.ts';
-import { agentEventSchema, type AgentEvent } from '../../../../src/shared/index.ts';
+import { COMPACTED_DETAIL, agentEventSchema, type AgentEvent } from '../../../../src/shared/index.ts';
 import { FAKE_KEY, WORKTREE, loadJsonl, payload } from './helpers.ts';
 
 const MAIN = 'sesion-principal';
@@ -275,6 +275,17 @@ describe('otros mensajes', () => {
     expect(call?.inputSummary.length).toBeGreaterThan(1000);
     // El traductor por defecto (flota, terminal) sigue con una línea de 300.
     expect(payload(translateAll(messages), 'tool_result')[0]?.summary.length).toBe(SUMMARY_MAX);
+  });
+
+  it('avisa de la compactación: compactando, fallo con su motivo y fin con COMPACTED_DETAIL; el resto de system/status no deja raw', () => {
+    const one = (m: unknown) => translateAll([m]);
+    expect(one({ type: 'system', subtype: 'status', status: 'compacting' })).toMatchObject([{ type: 'status', payload: { state: 'running', detail: 'compactando el contexto' } }]);
+    const failed = one({ type: 'system', subtype: 'status', status: null, compact_result: 'failed', compact_error: 'x' });
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.type === 'error' && failed[0].payload.message).toContain('x');
+    expect(one({ type: 'system', subtype: 'status', status: 'requesting' })).toEqual([]);
+    expect(one({ type: 'system', subtype: 'status', status: null, compact_result: 'success' })).toEqual([]);
+    expect(one({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 1 } })).toMatchObject([{ type: 'status', payload: { detail: COMPACTED_DETAIL } }]);
   });
 
   it('emite file_change al confirmarse una edición (add si Write crea, modify si no)', () => {
