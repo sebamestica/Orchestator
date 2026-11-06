@@ -63,12 +63,25 @@ export interface TranslatorOptions {
   secrets?: readonly string[];
   /** Carpeta de trabajo: las rutas de `file_change` se informan relativas a ella. */
   cwd?: string;
+  /**
+   * Tope de la entrada y el resultado de cada herramienta (por defecto `SUMMARY_MAX`, una línea para los paneles de
+   * la flota). El chat lo sube para que el usuario pueda comprobar lo que vio la mente; por encima de `SUMMARY_MAX`
+   * se conservan los saltos de línea.
+   */
+  detailMax?: number;
 }
 
 /** Recorta y aplana espacios para paneles: como mucho `max` caracteres. */
 export function truncate(text: string, max = SUMMARY_MAX): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+/** Detalle de una herramienta: hasta `SUMMARY_MAX` se aplana como `truncate`; con un tope mayor conserva las líneas. */
+function clipDetail(text: string, max: number): string {
+  if (max <= SUMMARY_MAX) return truncate(text, max);
+  const trimmed = text.trim();
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
 }
 
 function str(value: unknown): string | undefined {
@@ -161,6 +174,7 @@ export class ClaudeSdkTranslator {
   readonly #now: () => Date;
   readonly #secrets: readonly string[];
   readonly #cwd: string | undefined;
+  readonly #detailMax: number;
   #seq = 0;
   /** tool_use_id → sesión que emitió la llamada. */
   readonly #toolOwner = new Map<string, string>();
@@ -181,6 +195,7 @@ export class ClaudeSdkTranslator {
     this.#now = opts.now ?? (() => new Date());
     this.#secrets = opts.secrets ?? [];
     this.#cwd = opts.cwd;
+    this.#detailMax = opts.detailMax ?? SUMMARY_MAX;
   }
 
   redact(text: string): string {
@@ -455,7 +470,7 @@ export class ClaudeSdkTranslator {
           if (path) this.#pendingFiles.set(id, { tool: name, path });
         }
         out.push(
-          this.#event('tool_call', { callId: id, name, inputSummary: truncate(this.redact(describeToolInput(name, input))) }, sessionId, parent),
+          this.#event('tool_call', { callId: id, name, inputSummary: clipDetail(this.redact(describeToolInput(name, input)), this.#detailMax) }, sessionId, parent),
         );
         continue;
       }
@@ -481,7 +496,7 @@ export class ClaudeSdkTranslator {
       // El resultado va a la sesión que hizo la llamada (la del mensaje, salvo casos raros).
       const target = this.#toolOwner.get(callId) ?? sessionId;
       const targetParent = target === sessionId ? parent : this.#parentOf(target);
-      out.push(this.#event('tool_result', { callId, ok, summary: truncate(this.redact(toolResultText(content))) }, target, targetParent));
+      out.push(this.#event('tool_result', { callId, ok, summary: clipDetail(this.redact(toolResultText(content)), this.#detailMax) }, target, targetParent));
       const file = this.#pendingFiles.get(callId);
       if (file) {
         this.#pendingFiles.delete(callId);

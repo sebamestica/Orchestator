@@ -18,9 +18,12 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { z } from 'zod';
+import { agentEventSchema } from '../../../../shared/events.ts';
+import { api, ApiError } from '../../../api/client.ts';
 import { formatCost, formatTokens } from '../format.ts';
-import type { LiveItem, ReplyDraft, StepItem, UsageTotals } from '../timeline.ts';
+import { activityOf, buildReply, type LiveItem, type ReplyDraft, type StepItem, type UsageTotals } from '../timeline.ts';
 import { Markdown } from './Markdown.tsx';
 
 /** `mcp__orquestador__crear_tareas` → `crear_tareas`. */
@@ -28,6 +31,8 @@ export function toolLabel(name: string): string {
   if (!name.startsWith('mcp__')) return name;
   return name.split('__').slice(2).join('__') || name;
 }
+
+const isSubagent = (name: string) => name === 'Agent' || name === 'Task';
 
 function toolIcon(name: string): LucideIcon {
   const n = toolLabel(name).toLowerCase();
@@ -85,6 +90,43 @@ function Detail({ label, text }: { label: string; text: string }) {
   );
 }
 
+const sessionEventsSchema = z.object({ events: z.array(agentEventSchema) });
+
+/** Pasos de un subagente: su sesión hija (id = el de la llamada `Agent`/`Task`), pedida al desplegar su fila. */
+function SubagentSteps({ callId }: { callId: string }) {
+  const [steps, setSteps] = useState<StepItem[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<unknown>(`/sessions/${encodeURIComponent(callId)}/events?since=-1&limit=500`)
+      .then((data) => alive && setSteps(activityOf(buildReply(sessionEventsSchema.parse(data).events))))
+      // Sin sesión todavía: el subagente aún no hizo nada.
+      .catch((err: unknown) => alive && (err instanceof ApiError && err.status === 404 ? setSteps([]) : setFailed(true)));
+    return () => {
+      alive = false;
+    };
+  }, [callId]);
+  let body: ReactNode;
+  if (failed) body = <span className="text-[0.75rem] text-muted">No se pudieron leer sus pasos.</span>;
+  else if (steps === null) body = <span className="text-[0.75rem] text-muted">Cargando sus pasos…</span>;
+  else if (steps.length === 0) body = <span className="text-[0.75rem] text-muted">Sin pasos guardados.</span>;
+  else
+    body = (
+      <ul className="flex flex-col border-l border-foreground/[0.08] pl-1">
+        {steps.map((step) => (
+          <ItemRow key={step.key} item={step} running={false} announce={false} />
+        ))}
+      </ul>
+    );
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[0.6875rem] uppercase tracking-wide text-muted">Pasos del subagente</span>
+      {body}
+    </div>
+  );
+}
+
 /**
  * Un paso de trabajo de la mente (herramienta, archivo, error o pensamiento). `announce: false` (historial)
  * pinta el error sin `role="alert"`, para que un lector de pantalla no repita errores viejos en cada carga.
@@ -106,6 +148,7 @@ export function ItemRow({ item, running, announce = true }: { item: StepItem; ru
         <StepRow icon={toolIcon(item.name)} title={toolLabel(item.name)} summary={item.input || item.result?.summary || ''} status={status}>
           <>
             <Detail label="Entrada" text={item.input} />
+            {isSubagent(item.name) ? <SubagentSteps callId={item.callId} /> : null}
             <Detail label={item.result?.ok === false ? 'Error' : 'Resultado'} text={item.result?.summary ?? ''} />
             {item.result === null ? <span className="text-[0.75rem] text-muted">Sin resultado todavía.</span> : null}
           </>

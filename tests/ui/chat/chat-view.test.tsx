@@ -210,6 +210,31 @@ describe('respuesta en vivo', () => {
     expect(orphan.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  it('muestra el resultado entero y, al desplegar un subagente, sus pasos pedidos a /sessions/:id/events', async () => {
+    const live = resetFakeLive();
+    const chat = makeChat({ state: 'running' });
+    const subRead = { ...ev.call(0, 3, 'r9', 'Read', 'src/x.ts'), sessionId: 'a1', parentSessionId: 'sess_chat_1' };
+    const { calls } = fakeCore({ chats: [chat], messages: { [chat.id]: [makeMessage({ id: 'm1', role: 'user', text: 'Investiga', at: at(1) })] } }, (method, path) =>
+      method === 'GET' && path.startsWith('/sessions/a1/events') ? { body: { sessionId: 'a1', events: [subRead], lastSeq: 0, hasMore: false } } : undefined,
+    );
+    render(<ChatView projectId="demo" chatId="chat_abc123" />);
+    await screen.findByText('Investiga');
+    const long = `inicio ${'z'.repeat(2000)} fin`;
+    act(() => {
+      live.emit({ type: 'event', event: ev.call(0, 2, 'c1', 'mcp__orquestador__cupos', '{}') });
+      live.emit({ type: 'event', event: ev.result(1, 2, 'c1', true, long) });
+      live.emit({ type: 'event', event: ev.call(2, 3, 'a1', 'Agent', 'investigador: revisar') });
+      live.emit({ type: 'event', event: ev.result(3, 4, 'a1', true, 'informe') });
+    });
+    const reply = await screen.findByTestId('live-reply');
+    fireEvent.click(await within(reply).findByRole('button', { name: /cupos/ }));
+    expect(within(reply).getByText(long)).toBeTruthy();
+
+    fireEvent.click(within(reply).getByRole('button', { name: /investigador/ }));
+    expect(await within(reply).findByText('src/x.ts')).toBeTruthy();
+    expect(calls.some((c) => c.method === 'GET' && c.path.startsWith('/sessions/a1/events'))).toBe(true);
+  });
 });
 
 describe('modo de la mente', () => {

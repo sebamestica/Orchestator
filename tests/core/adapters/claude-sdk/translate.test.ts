@@ -262,6 +262,21 @@ describe('otros mensajes', () => {
     expect(toolResultText([{ type: 'text', text: 'uno' }, { type: 'image', source: {} }])).toBe('uno [image]');
   });
 
+  it('con detailMax el resultado y la entrada no se cortan a 300 y conservan los saltos de línea', () => {
+    const long = `{\n  "a": 1,\n${'x'.repeat(4990)}\n}`;
+    const messages = [
+      { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id: 'r1', name: 'Mcp', input: { plan: 'p'.repeat(1000) } }] } },
+      { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'r1', content: long }] } },
+    ];
+    const wide = new ClaudeSdkTranslator({ agentId: 'claude-main', sessionId: MAIN, secrets: [FAKE_KEY], detailMax: 8000 });
+    const [call] = payload(translateAll(messages, wide), 'tool_call');
+    const [result] = payload(translateAll(messages, wide), 'tool_result');
+    expect(result?.summary).toBe(long);
+    expect(call?.inputSummary.length).toBeGreaterThan(1000);
+    // El traductor por defecto (flota, terminal) sigue con una línea de 300.
+    expect(payload(translateAll(messages), 'tool_result')[0]?.summary.length).toBe(SUMMARY_MAX);
+  });
+
   it('emite file_change al confirmarse una edición (add si Write crea, modify si no)', () => {
     const events = translateAll([
       {

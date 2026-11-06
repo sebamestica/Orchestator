@@ -13,7 +13,7 @@ import type { Settings } from '../../shared/index.ts';
 import { claudeMcpOptions } from '../adapters/claude-sdk/adapter.ts';
 import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes, type MindPlugins, type MindPort } from '../chat/index.ts';
-import type { ConductorQueryFn, FleetPort } from '../conductor/index.ts';
+import { MAX_OUTPUT_CHARS, type ConductorQueryFn, type FleetPort } from '../conductor/index.ts';
 import { pluginsSection } from '../plugins/index.ts';
 import type { RouteModule } from '../server/index.ts';
 import type { Composition } from './compose.ts';
@@ -104,7 +104,8 @@ export function chatRouteModule(comp: Composition, wiring: ChatWiring = {}): Rou
         // Solo las skills comunes del hub: las de `<carpeta del núcleo>/.agents/skills` son de otro proyecto.
         skills: projectSkillsPort(comp.skills),
       },
-      translator: (init) => new ClaudeSdkTranslator(init),
+      // El detalle de cada herramienta, con el mismo tope que reciben de ellas la mente y sus subagentes.
+      translator: (init) => new ClaudeSdkTranslator({ ...init, detailMax: MAX_OUTPUT_CHARS }),
       attachments,
       ...(wiring.mcpServersFor ? { mcpServersFor: wiring.mcpServersFor } : {}),
       readRoots: existsSync(skillsRoot) ? [skillsRoot] : [],

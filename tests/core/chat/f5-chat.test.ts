@@ -1,6 +1,6 @@
 /** Cableado del chat (f5-chat.ts) sobre la composición real: bóveda, registro, flota, tablero y traductor de c1. */
 import { existsSync } from 'node:fs';
-import type { Options } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { compose, type Composition } from '../../../src/core/app/compose.ts';
 import { chatRouteModule, lazyFleetPort, type ChatWiring } from '../../../src/core/app/f5-chat.ts';
@@ -15,7 +15,7 @@ import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
 import { brief, fakePorts, jsonOf, promptBlocks } from '../conductor/fakes.ts';
-import { chatQuery, echoTurn, settleChat, tick } from './helpers.ts';
+import { chatQuery, echoTurn, sdkInit, sdkResult, settleChat, tick, type TurnFn } from './helpers.ts';
 
 const HOST = '127.0.0.1:47998';
 const HOST_KEY = fakeKey('anfitrion');
@@ -56,13 +56,13 @@ function composeAt(dir: string): Composition {
   return comp;
 }
 
-async function setup(extra: { real?: boolean } = {}) {
+async function setup(extra: { real?: boolean; turn?: TurnFn } = {}) {
   const dir = await tempDir();
   const comp = composeAt(dir);
   const key = fakeKey();
   await comp.registry.addAgentFromKey({ provider: 'anthropic', apiKey: key, baseUrl: USER_BASE_URL, displayName: 'Claude', id: 'claude', budgetUsd: 2 });
   comp.store.putProject({ id: 'demo', name: 'Demo', repoPath: dir });
-  const q = chatQuery(echoTurn);
+  const q = chatQuery(extra.turn ?? echoTurn);
   const token = generateToken();
   const hub = new EventHub(comp.store);
   const registry = new AgentRegistry({ store: comp.store, vault: comp.vault, detectors: [] });
@@ -147,6 +147,22 @@ describe('f5-chat: cableado con la composición', () => {
     expect(await read(`${dir}/AGENTS.md`)).toBe('{}');
     // El gasto de la mente queda en SQLite como el del orquestador.
     expect(comp.spentUsd('orquestador')).toBeCloseTo(0.01, 9);
+  });
+
+  it('el resultado de una herramienta de la mente se guarda entero hasta 8.000 caracteres, no cortado a 300', async () => {
+    const long = 'y'.repeat(5000);
+    const read: TurnFn = () => [
+      sdkInit('sdk-1'),
+      { type: 'assistant', parent_tool_use_id: null, session_id: 'sdk-1', uuid: 'u-1', message: { id: 'm1', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: 'a.ts' } }], usage: { input_tokens: 1, output_tokens: 1 } } } as unknown as SDKMessage,
+      { type: 'user', parent_tool_use_id: null, session_id: 'sdk-1', uuid: 'u-2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'r1', content: long }] } } as unknown as SDKMessage,
+      sdkResult('listo', 'sdk-1', 0.01),
+    ];
+    const { comp, call } = await setup({ turn: read });
+    const { chat } = (await (await call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
+    await call('POST', `/chats/${chat.id}/messages`, { text: 'lee' });
+    for (let i = 0; i < 200 && services[0]?.get(chat.id).state === 'running'; i++) await tick();
+    const result = comp.store.eventsSince(chat.sessionId).find((e) => e.type === 'tool_result' && e.payload.callId === 'r1');
+    expect(result?.type === 'tool_result' && result.payload.summary.length).toBe(5000);
   });
 
   it('aprobar en el chat lleva la tarea al tablero y a la cola real de la flota', async () => {

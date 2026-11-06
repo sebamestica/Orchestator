@@ -44,10 +44,17 @@ export function applyEvents(current: Record<string, SessionView>, incoming: read
   return next;
 }
 
+const LINE_MAX = 300;
+/** Una línea para el panel: el chat guarda entradas y resultados de herramientas de hasta 8.000 caracteres. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= LINE_MAX ? flat : `${flat.slice(0, LINE_MAX - 1)}…`;
+}
+
 export function actionText(event?: AgentEvent): string {
   switch (event?.type) {
-    case 'tool_call': return `${event.payload.name} · ${event.payload.inputSummary}`;
-    case 'tool_result': return event.payload.summary;
+    case 'tool_call': return oneLine(`${event.payload.name} · ${event.payload.inputSummary}`);
+    case 'tool_result': return oneLine(event.payload.summary);
     case 'status': return event.payload.detail ?? 'Esperando actividad…';
     case 'error': return event.payload.message;
     case 'done': return event.payload.summary ?? 'Tarea terminada';

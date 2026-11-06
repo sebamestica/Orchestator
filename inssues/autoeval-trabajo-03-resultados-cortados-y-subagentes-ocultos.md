@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** media
 - **Archivos:** `src/core/adapters/claude-sdk/translate.ts:38`, `src/core/adapters/claude-sdk/translate.ts:57-66`, `src/core/adapters/claude-sdk/translate.ts:69-72`, `src/core/adapters/claude-sdk/translate.ts:322-330`, `src/core/adapters/claude-sdk/translate.ts:441`, `src/core/adapters/claude-sdk/translate.ts:459-467`, `src/core/app/f5-chat.ts:116`, `src/core/conductor/tools.ts:29`, `src/core/conductor/tools.ts:113-114`, `src/core/conductor/prompt.ts:42`, `src/core/conductor/prompt.ts:67`, `src/core/conductor/session.ts:76-87`, `src/ui/features/chat/use-chat-live.ts:42-44`, `src/ui/features/chat/timeline.ts:91-101`, `src/ui/features/chat/components/LiveReply.tsx:78-85`, `src/ui/features/chat/components/LiveReply.tsx:103-108`, `src/ui/features/agents-panel/model.ts:45-56`, `src/ui/features/agents-panel/model.ts:72-80`, `src/core/server/app.ts:630`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05), afirmaciones 2 («se equivoca con mucha seguridad») y 4 («repite lo que devuelve una herramienta sin poder comprobarlo»)
 - **Relacionadas:** `ui-chat-03` (los pasos de un turno fallido desaparecen), `ui-chat-05` (el hilo solo guarda los últimos 500 eventos), `ui-resto-04` (la fila «Mente» del panel), `uso-real-06` (las sesiones hijas de la mente en la tienda, que la solución leería)
 - **Revisión (2026-11-05):** las citas se verificaron contra `63748b8`. Se corrigió: la fila «Mente» del panel es
