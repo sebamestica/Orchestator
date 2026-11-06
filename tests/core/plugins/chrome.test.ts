@@ -13,6 +13,7 @@ import {
   NO_BROWSER_NOTE,
   PluginService,
   type McpStdioSpec,
+  type StdioProbeResult,
 } from '../../../src/core/plugins/index.ts';
 import { systemExe } from '../../../src/core/process/system-exe.ts';
 import { SqliteStore } from '../../../src/core/store/index.ts';
@@ -144,6 +145,59 @@ describe('plugin Chrome: Probar conexión (MCP falso por stdio)', () => {
     expect(await s.mcpServersFor('claude-main', 'claude-sdk')).toEqual({});
     s.close();
     store.close();
+  });
+
+  it('Probar conexión no le quita Chrome a una sesión nueva ni pisa un «Desconectar» hecho mientras prueba', async () => {
+    const ok: StdioProbeResult = { ok: true, tools: ['list_pages', 'new_page'], stderr: [] };
+    // El probe se cambia entre pruebas: la función que se pasa al servicio lo lee en cada llamada.
+    let probe: () => Promise<StdioProbeResult> = async () => ok;
+    const h = await chromeHarness('ok', { chrome: { probe: () => probe() } });
+
+    // 1. Una prueba correcta deja Chrome conectado.
+    await h.service.connect('chrome', {});
+    expect(h.service.status('chrome').status).toBe('connected');
+
+    // 2. Una prueba que queda pendiente hasta que la resolvamos a mano.
+    let resolve!: (r: StdioProbeResult) => void;
+    let onStart!: () => void;
+    const started = new Promise<void>((r) => { onStart = () => r(); });
+    probe = () => { onStart(); return new Promise<StdioProbeResult>((r) => { resolve = r; }); };
+    const p = h.service.connect('chrome', {});
+    await started;
+
+    // 3. Mientras sigue pendiente, una sesión nueva recibe tu Chrome y no la nota de «sin navegador».
+    const during = await h.service.grant({ agentId: 'claude-main', kind: 'claude-sdk', taskId: 't-1' });
+    expect(Object.keys(during.servers)).toContain('chrome-personal');
+    expect(during.notes).not.toContain(NO_BROWSER_NOTE);
+    await during.release();
+
+    // 4. El usuario desconecta durante la prueba; cuando la prueba termina bien, no debe volver a conectar.
+    await h.service.disconnect('chrome');
+    resolve(ok);
+    await p;
+
+    // 5. Queda desconectado y una sesión nueva recibe la nota de no tener navegador.
+    expect(h.service.status('chrome').status).toBe('disconnected');
+    expect((await h.service.grant({ agentId: 'claude-main', kind: 'claude-sdk', taskId: 't-2' })).notes).toContain(NO_BROWSER_NOTE);
+  });
+
+  it('Probar conexión tras un «Desconectar» hecho durante otra prueba vuelve a probar: no se pega a la prueba vieja', async () => {
+    const ok: StdioProbeResult = { ok: true, tools: ['list_pages', 'new_page'], stderr: [] };
+    let resolve!: (r: StdioProbeResult) => void;
+    let onStart!: () => void;
+    const started = new Promise<void>((r) => { onStart = () => r(); });
+    let probe: () => Promise<StdioProbeResult> = () => { onStart(); return new Promise<StdioProbeResult>((r) => { resolve = r; }); };
+    const h = await chromeHarness('ok', { chrome: { probe: () => probe() } });
+    const first = h.service.connect('chrome', {});
+    await started;
+    await h.service.disconnect('chrome');
+    probe = async () => ok;
+    const second = h.service.connect('chrome', {});
+    resolve(ok);
+    // La vieja no guarda su resultado; la nueva espera a que suelte el candado y conecta.
+    expect((await first).status).toBe('disconnected');
+    expect((await second).status).toBe('connected');
+    expect(h.service.status('chrome').status).toBe('connected');
   });
 });
 

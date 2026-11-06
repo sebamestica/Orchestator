@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** baja
 - **Archivos:** `src/core/plugins/service.ts:239`, `src/core/plugins/service.ts:242`, `src/core/plugins/service.ts:322`, `src/core/plugins/service.ts:325`, `src/core/plugins/service.ts:335`, `src/core/plugins/service.ts:356`, `src/core/plugins/service.ts:368`, `src/core/plugins/service.ts:402`, `src/core/plugins/service.ts:413`, `src/core/plugins/routes.ts:92`, `src/core/adapters/claude-sdk/adapter.ts:296`, `src/core/adapters/codex-cli/index.ts:159`, `src/ui/features/plugins/PluginsView.tsx:22`, `src/ui/features/plugins/PluginsView.tsx:72`, `src/ui/features/plugins/PluginsView.tsx:84`, `src/ui/app/App.tsx:33`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

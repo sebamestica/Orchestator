@@ -140,7 +140,10 @@ export class PluginService {
   readonly #locks: Pick<LockManager, 'acquire' | 'read' | 'releaseAbandoned' | 'root'>;
   #publish: ((message: F5HubMessage) => void) | undefined;
   #authUrl: string | undefined;
-  #chromeProbe: Promise<Plugin> | undefined;
+  /** Prueba de Chrome en curso y la generación con que empezó. */
+  #chromeProbe: { gen: number; result: Promise<Plugin> } | undefined;
+  /** Sube con cada «Desconectar» de Chrome: una prueba que empezó antes no escribe su resultado encima. */
+  #chromeGen = 0;
 
   constructor(opts: PluginServiceOptions) {
     this.#opts = opts;
@@ -239,6 +242,7 @@ export class PluginService {
   async disconnect(id: PluginId): Promise<Plugin> {
     const s = this.#state(id);
     if (id === 'chrome') {
+      this.#chromeGen++;
       return this.#save({ ...s, status: 'disconnected', detail: 'Desconectado: los agentes no reciben navegador (ni otro Chrome).', steps: chromeSteps() });
     }
     this.#authUrl = undefined;
@@ -374,18 +378,29 @@ export class PluginService {
   }
 
   #connectChrome(body: ConnectPluginBody): Promise<Plugin> {
-    if (this.#chromeProbe) return this.#chromeProbe;
-    this.#chromeProbe = this.#probeChrome(body).finally(() => {
-      this.#chromeProbe = undefined;
+    const gen = this.#chromeGen;
+    const running = this.#chromeProbe;
+    if (running?.gen === gen) return running.result;
+    // Una prueba que empezó antes de un «Desconectar» ya no cuenta: se espera a que suelte el candado y se prueba de nuevo.
+    const probe = running ? running.result.catch(() => undefined).then(() => this.#probeChrome(body, gen)) : this.#probeChrome(body, gen);
+    const result: Promise<Plugin> = probe.finally(() => {
+      if (this.#chromeProbe?.result === result) this.#chromeProbe = undefined;
     });
-    return this.#chromeProbe;
+    this.#chromeProbe = { gen, result };
+    return result;
   }
 
-  async #probeChrome(body: ConnectPluginBody): Promise<Plugin> {
+  /** `gen`: la de `#chromeGen` al pedir la prueba; si un «Desconectar» la cambió, el resultado no se guarda. */
+  async #probeChrome(body: ConnectPluginBody, gen: number): Promise<Plugin> {
+    if (this.#chromeGen !== gen) return this.status('chrome');
     const prev = this.#state('chrome');
     const agents = body.agents ?? prev.agents;
     const extraSteps = this.#unsupportedAgentSteps('chrome', agents);
-    this.#save({ ...prev, profile: 'personal', agents, status: 'connecting', detail: 'Comprobando tu Chrome personal…', steps: chromeSteps() });
+    // Un Chrome conectado se sigue entregando mientras se vuelve a probar: solo cambia el detalle de la tarjeta.
+    const status = prev.status === 'connected' ? 'connected' : 'connecting';
+    this.#save({ ...prev, profile: 'personal', agents, status, detail: 'Comprobando tu Chrome personal…', steps: chromeSteps() });
+    // Si alguien desconecta durante la prueba, su resultado no deshace el «Desconectar».
+    const finish = (state: PluginState): Plugin => (this.#chromeGen === gen ? this.#save(state) : this.status('chrome'));
 
     const chromeOpts = this.#opts.chrome ?? {};
     const launcher = this.#launcher();
@@ -394,7 +409,7 @@ export class PluginService {
       try {
         await access(launcherPath);
       } catch {
-        return this.#save({
+        return finish({
           ...this.#state('chrome'),
           status: 'error',
           detail: `No se encontró el lanzador ${launcherPath}.`,
@@ -430,7 +445,7 @@ export class PluginService {
     }
     const outcome = interpretChromeProbe(result, { ...(launcherPath ? { launcherPath } : {}), browserChecked: verifyBrowser, ...(busyBy ? { busyBy } : {}) });
     this.#opts.log?.(redactSecrets(`plugins: chrome personal → ${outcome.status} (${outcome.tools} herramientas)`));
-    return this.#save({ ...this.#state('chrome'), status: outcome.status, detail: outcome.detail, steps: [...outcome.steps, ...extraSteps] });
+    return finish({ ...this.#state('chrome'), status: outcome.status, detail: outcome.detail, steps: [...outcome.steps, ...extraSteps] });
   }
 
   async #connectCanva(body: ConnectPluginBody, redirectUri: string | undefined): Promise<Plugin> {
