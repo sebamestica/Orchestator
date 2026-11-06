@@ -3,7 +3,7 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace } from '../../shared/index.ts';
 import { idSchema, PLAN_FILES, redactSecrets } from '../../shared/index.ts';
 import { deduceGate, gateForWorkspace } from '../fs/folders.ts';
-import { createGitRunner, pushBlockEnv, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
+import { createGitRunner, physicalPath, pushBlockEnv, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
 
 /**
  * Rama ficticia de un workspace local: no hay rama, se trabaja sobre la carpeta del usuario. No es un nombre de rama
@@ -91,9 +91,12 @@ export class LocalWorkspaces {
     this.#log = opts.log ?? (() => undefined);
   }
 
-  /** Clave de exclusión de una carpeta local (misma carpeta escrita distinto → misma clave en Windows). */
+  /**
+   * Clave de exclusión de una carpeta local: la carpeta física (junctions y enlaces resueltos), así la misma carpeta
+   * escrita distinto o alcanzada por otra ruta da la misma clave (en Windows, además, sin mayúsculas).
+   */
   static key(repoPath: string, platform: NodeJS.Platform = process.platform): string {
-    const r = resolve(repoPath).replace(/[\\/]+$/, '');
+    const r = physicalPath(resolve(repoPath)).replace(/[\\/]+$/, '');
     return platform === 'win32' ? r.toLowerCase() : r;
   }
 

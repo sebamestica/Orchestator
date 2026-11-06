@@ -9,7 +9,7 @@ import { homedir } from 'node:os';
 import { join, posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 import { idSchema, redactSecrets, type FolderInspection, type FsListResponse } from '../../shared/index.ts';
-import { branchSchema, isInside } from '../workspace/index.ts';
+import { branchSchema, isInside, physicalPath } from '../workspace/index.ts';
 
 /** Tope de entradas de una carpeta en `GET /fs/list`. */
 export const MAX_FS_ENTRIES = 2000;
@@ -379,9 +379,12 @@ export async function inspectFolder(raw: string, opts: FsEnv & { projects?: read
   await requireDir(dir);
   const projects = opts.projects ?? [];
   const folderName = pathApi(platform).basename(dir) || dir.replace(/[\\/:]+/g, '') || 'proyecto';
+  // También por la carpeta física: una junction hacia una carpeta ya registrada es la misma carpeta.
+  const same = (a: string, b: string) => isInside(a, b, platform) && isInside(b, a, platform);
+  const physical = (p: string) => (platform === process.platform ? physicalPath(p) : p);
   const registeredAs = projects.find((p) => {
     try {
-      return isInside(p.repoPath, dir, platform) && isInside(dir, p.repoPath, platform);
+      return same(p.repoPath, dir) || same(physical(p.repoPath), physical(dir));
     } catch {
       return false;
     }

@@ -1,6 +1,9 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { symlinkSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ProjectWorktrees } from '../../../src/core/app/workspaces.ts';
 import { briefHints } from '../../../src/core/brief/reasoning.ts';
 import { renderBrief } from '../../../src/core/brief/render-brief.ts';
 import { Fleet } from '../../../src/core/orchestrator/fleet.ts';
@@ -80,6 +83,25 @@ describe('Fleet: modo local (una tarea a la vez por carpeta)', () => {
     expect(maxActive(s.changes, () => true)).toBe(2);
     const order = s.changes.map((c) => `${c.taskId}:${c.to}`);
     expect(order.indexOf('m2:running')).toBeGreaterThan(order.indexOf('m1:integrated'));
+  });
+
+  it('dos proyectos locales que llegan a la misma carpeta por una junction no corren a la vez (clave real)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orq-fleet-junction-'));
+    try {
+      const real = join(root, 'real');
+      await mkdir(real);
+      const alias = join(root, 'alias');
+      symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      const repoPath: Record<string, string> = { 'proy-a': real, 'proy-b': alias };
+      const pw = new ProjectWorktrees({ storeProject: (id) => (repoPath[id] ? { id, name: id, repoPath: repoPath[id], createdAt: '2026-11-05T00:00:00.000Z' } : undefined) });
+      const s = await setup({ exclusiveKey: (projectId) => pw.exclusiveKey(projectId) });
+      s.queue.addAll([task('ja', { projectId: 'proy-a' }), task('jb', { projectId: 'proy-b' })]);
+      const report = await s.fleet.run();
+      expect(report.states).toEqual({ ja: 'integrated', jb: 'integrated' });
+      expect(maxActive(s.changes, () => true)).toBe(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('sin clave de exclusión (worktrees) las tareas del mismo proyecto corren en paralelo', async () => {

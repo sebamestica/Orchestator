@@ -22,7 +22,8 @@ import {
   type TaskBrief,
   type TaskState,
 } from '../../shared/index.ts';
-import { defaultWorktreesRoot, projectsOverlapProblem, projectWorkspaceProblem, projectWorkspaceSchema, type ProjectWorkspace } from '../workspace/config.ts';
+import { defaultWorktreesRoot, physicalPath, projectsOverlapProblem, projectWorkspaceProblem, projectWorkspaceSchema, type ProjectWorkspace } from '../workspace/config.ts';
+import { isInside } from '../workspace/guard.ts';
 import { redactDeep } from './redact-deep.ts';
 import { MIGRATIONS } from './schema.ts';
 
@@ -238,6 +239,12 @@ function sanitize<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   return again.data;
 }
 
+/** La misma carpeta, escrita igual o alcanzada por otra ruta (junction, enlace). */
+function sameFolder(a: string, b: string): boolean {
+  const pa = [a, physicalPath(a)];
+  return [b, physicalPath(b)].some((y) => pa.some((x) => isInside(x, y) && isInside(y, x)));
+}
+
 /** Id válido que además no tiene forma de clave. */
 function cleanId(value: unknown, what: string): string {
   const parsed = idSchema.safeParse(value);
@@ -346,6 +353,10 @@ export class SqliteStore implements EventSink {
       });
       const overlap = projectsOverlapProblem(paths(p), this.listProjects().filter((o) => o.workspace).map(paths));
       if (overlap) throw new StoreError('invalid', `Proyecto: ${overlap}`);
+    } else {
+      // Dos proyectos locales no comparten carpeta (tampoco por una junction): la flota correría sus tareas a la vez en ella.
+      const twin = this.listProjects().find((o) => o.id !== p.id && !o.workspace && sameFolder(o.repoPath, p.repoPath));
+      if (twin) throw new StoreError('invalid', `Proyecto: la carpeta ${p.repoPath} ya es el proyecto local ${twin.id}`);
     }
     const existing = this.getProject(p.id);
     const createdAt = existing?.createdAt ?? this.iso();

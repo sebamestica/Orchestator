@@ -1,3 +1,4 @@
+import { mkdirSync, symlinkSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -138,5 +139,21 @@ describe('proyectos con configuración de worktrees (workspace)', () => {
     const again = store(path);
     expect(again.getProject('nuevo')?.workspace?.gate[0]?.command).toBe('npm.cmd');
     expect(again.getProject('viejo')?.workspace).toBeUndefined();
+  });
+});
+
+describe('proyectos locales (sin workspace) en la misma carpeta', () => {
+  it('rechaza otro proyecto local con la misma carpeta, escrita igual o por una junction; el mismo id se puede reemplazar', () => {
+    const real = join(dir, 'real');
+    mkdirSync(real);
+    const alias = join(dir, 'alias');
+    symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const s = store();
+    s.putProject({ id: 'proy-a', name: 'A', repoPath: real });
+    expect(() => s.putProject({ id: 'proy-b', name: 'B', repoPath: alias })).toThrow(StoreError);
+    expect(() => s.putProject({ id: 'proy-b', name: 'B', repoPath: real })).toThrow(/ya es el proyecto local proy-a/);
+    expect(() => s.putProject({ id: 'proy-b', name: 'B', repoPath: alias })).toThrow(/ya es el proyecto local proy-a/);
+    expect(s.putProject({ id: 'proy-a', name: 'A2', repoPath: alias }).name).toBe('A2');
+    expect(s.putProject({ id: 'proy-c', name: 'C', repoPath: join(real, 'sub') }).id).toBe('proy-c');
   });
 });

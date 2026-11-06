@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CommittingWorkspaces } from '../../src/core/app/commit-step.ts';
-import { LOCAL_BRANCH, LOCAL_MARKER, LOCAL_NO_GATE_SUMMARY } from '../../src/core/app/local-workspaces.ts';
+import { LOCAL_BRANCH, LOCAL_MARKER, LOCAL_NO_GATE_SUMMARY, LocalWorkspaces } from '../../src/core/app/local-workspaces.ts';
 import { ProjectWorktrees } from '../../src/core/app/workspaces.ts';
 import type { ExecuteResult } from '../../src/core/orchestrator/index.ts';
 import type { ProjectRecord } from '../../src/core/store/index.ts';
@@ -150,6 +150,32 @@ describe('modo local: carpeta sin git', () => {
     const w = await ws.create(id, task('t1', id, ['src/**']));
     await ws.remove(w);
     expect(readFileSync(join(folder, '.orq', 'propio.txt'), 'utf8')).toBe('mío\n');
+  });
+});
+
+describe('modo local: la misma carpeta por una junction', () => {
+  it('dos proyectos locales que llegan a la misma carpeta comparten la clave de exclusión', async () => {
+    const root = await tempDir('orq-local-junction-');
+    const real = join(root, 'real');
+    mkdirSync(real, { recursive: true });
+    const alias = join(root, 'alias');
+    symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const records = new Map<string, ProjectRecord>([
+      ['proy-a', { id: 'proy-a', name: 'A', repoPath: real, createdAt: '2026-11-04T00:00:00.000Z' }],
+      ['proy-b', { id: 'proy-b', name: 'B', repoPath: alias, createdAt: '2026-11-04T00:00:00.000Z' }],
+    ]);
+    const pw = new ProjectWorktrees({ storeProject: (pid) => records.get(pid) });
+    expect(pw.exclusiveKey('proy-a')).toMatch(/^local:/);
+    expect(pw.exclusiveKey('proy-b')).toBe(pw.exclusiveKey('proy-a'));
+    expect(LocalWorkspaces.key(join(alias, 'sub'))).toBe(LocalWorkspaces.key(join(real, 'sub')));
+
+    // La guardia de `remove` mira la misma carpeta física: quitar la de `proy-b` limpia la `.orq/` que creó `proy-a`.
+    const wa = await pw.create('proy-a', task('ta', 'proy-a', ['src/**']));
+    expect(existsSync(join(real, '.orq'))).toBe(true);
+    const wb = await pw.create('proy-b', task('tb', 'proy-b', ['src/**']));
+    expect(pw.isLocal(wa)).toBe(false); // la de `proy-a` era de la misma carpeta (una fallida, para la flota)
+    await pw.remove(wb);
+    expect(existsSync(join(real, '.orq'))).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { symlinkSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -220,6 +221,17 @@ describe('POST /projects/from-folder', () => {
       expect(project).toMatchObject({ id, name });
       expect(project.workspace).toBeUndefined();
     }
+  });
+
+  it('la misma carpeta local por una junction: 409, ya es un proyecto', async () => {
+    const root = await tempDir();
+    await writeFiles(root, { 'real/README.md': '#' });
+    symlinkSync(join(root, 'real'), join(root, 'alias'), isWin ? 'junction' : 'dir');
+    const t = makeF5App();
+    expect((await t.req('POST', '/projects/from-folder', { body: { path: join(root, 'real') } })).status).toBe(201);
+    const res = await t.req('POST', '/projects/from-folder', { body: { path: join(root, 'alias'), id: 'alias' } });
+    expect(res.status, res.text).toBe(409);
+    expect(res.text).toMatch(/ya está registrada como el proyecto real/);
   });
 
   it('repo git SIN commits (caso marketing), aunque tenga gate: modo local, sin workspace, con aviso', async () => {

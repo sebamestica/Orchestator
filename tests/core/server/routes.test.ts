@@ -10,7 +10,7 @@ function textEvent(sessionId: string, seq: number, text: string, agentId = 'code
 }
 
 async function seedProject(t: ReturnType<typeof makeTestApp>, id = 'proyecto-1') {
-  const res = await t.req('POST', '/projects', { body: { id, name: 'Proyecto', repoPath: 'C:\\dev\\proyecto' } });
+  const res = await t.req('POST', '/projects', { body: { id, name: 'Proyecto', repoPath: `C:\\dev\\${id}` } });
   expect(res.status).toBe(201);
   return res.json;
 }

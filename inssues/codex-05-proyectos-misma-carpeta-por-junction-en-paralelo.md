@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex): núcleo de la flota, modo local
 - **Severidad:** media
 - **Archivos:** `src/core/app/local-workspaces.ts:85-88`, `src/core/app/local-workspaces.ts:142-151`, `src/core/app/local-workspaces.ts:174-176`, `src/core/app/workspaces.ts:99-102`, `src/core/orchestrator/fleet.ts:265-279`, `src/core/fs/folders.ts:45-53`, `src/core/fs/folders.ts:382-388`, `src/core/app/f5-servidor.ts:211-216`, `src/core/store/store.ts:340-349`, `src/core/workspace/config.ts:121-136`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 En modo local (issue 1), un proyecto registrado sin `workspace` trabaja directamente en la carpeta del usuario, sin
