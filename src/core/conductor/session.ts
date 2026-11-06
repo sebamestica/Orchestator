@@ -7,7 +7,8 @@
  * deja `delegar` fuera de `allowedTools` y la guardia la bloquea; `auto`/`bypass` aprueban solas las tareas nuevas
  * (`autoApprove`). `bypass` con proyecto y `chat` (con o sin proyecto) suman `BYPASS_TOOLS`: la mente escribe en la
  * carpeta y en las carpetas extra del chat, y sus comandos pasan por la política de shell de los workers con la carpeta
- * como raíz. `chat` además oculta `crear_tareas` y `delegar` (no orquesta). El modo se lee en cada llamada de la
+ * como raíz. `chat` además oculta `crear_tareas` y `delegar` (no orquesta). Fuera de esos modos, de los plugins
+ * (Chrome, Canva) solo pasan las herramientas que miran (`plugin-policy.ts`). El modo se lee en cada llamada de la
  * guardia y de las herramientas; su texto va en el contexto dinámico del prompt (el prefijo en caché no cambia). El
  * esfuerzo cambia en vivo con `setEffort` (`Query.applyFlagSettings`), sin recrear el proceso.
  */
@@ -22,6 +23,7 @@ import type { AgentEvent, MindLimits, MindMode } from '../../shared/index.ts';
 import { MCP_ENV_PREFIX, bearerToken } from '../plugins/mcp.ts';
 import { createExternalContentHook } from './external-content.ts';
 import { createToolGuard } from './guard.ts';
+import { pluginModeProblem } from './plugin-policy.ts';
 import type { Awaitable, ConductorPorts, OwnModelUsage, ProposedTask, SdkMessageTranslator, TranslatorInit } from './ports.ts';
 import { buildConductorSystemPrompt, type ConductorWorkMode } from './prompt.ts';
 import { redactDeep } from './redact.ts';
@@ -345,6 +347,7 @@ export class ConductorSession {
     const pluginLive = opts.pluginLive;
     const pluginOf = (tool: string) => plugins.find(([name]) => tool.startsWith(`mcp__${name}__`))?.[0];
     const agents = { ...CONDUCTOR_SUBAGENTS };
+    const pluginServers = plugins.map(([name]) => name);
     const guard = createToolGuard({
       allowedTools,
       cwd: o.cwd,
@@ -353,7 +356,7 @@ export class ConductorSession {
       denyPaths: [...(opts.denyPaths ?? [])],
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
       ...(acts ? { writeRoots: () => [o.cwd, ...extra()], shellRoot: o.cwd } : {}),
-      deny: (name) => {
+      deny: (name, input) => {
         const plugin = pluginLive && pluginOf(name);
         if (plugin && !pluginLive(plugin)) return `${plugin} se desconectó en Plugins: ya no está disponible para ti en esta sesión.`;
         if (standalone && fleetTools.has(name)) return `${name} no está disponible en una conversación (sin proyecto ni flota).`;
@@ -364,6 +367,8 @@ export class ConductorSession {
         if (actTools.has(name) && !modeActs(current, standalone)) {
           return `${name} solo está disponible en los modos bypass y chat: en el modo ${current ?? 'actual'} delega con crear_tareas y delegar.`;
         }
+        // Plugins: clic, formularios, scripts o publicar cambian algo fuera de Berland; solo en los modos que actúan.
+        if (!modeActs(current, standalone)) return pluginModeProblem(name, input, pluginServers, current, standalone);
         return undefined;
       },
     });

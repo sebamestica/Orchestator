@@ -19,7 +19,7 @@ import {
   sdkSessionIdOf,
 } from '../../../src/core/conductor/index.ts';
 import type { ConductorSessionOptions, SdkMessageTranslator, TranslatorInit } from '../../../src/core/conductor/index.ts';
-import type { AgentEvent } from '../../../src/shared/index.ts';
+import type { AgentEvent, MindMode } from '../../../src/shared/index.ts';
 import { FAKE_API_KEY, SECRET_PATTERN, assistantText, fakePorts, promptBlocks, readTurn, resultMessage, scriptedQuery, toolResultMessage, userText } from './fakes.ts';
 
 const PROXY_KEY = 'clave-del-proxy-0123456789';
@@ -374,13 +374,15 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
 
   it('servidores MCP de plugins: van en mcpServers y sus herramientas en allowedTools', async () => {
     const fake = { type: 'stdio' as const, command: 'node', args: ['servidor-falso.js'] };
-    const { s, q } = session({ mcpServers: { chrome: fake } });
+    const { s, q } = session({ mcpServers: { 'chrome-personal': fake } });
     s.send('hola');
     const o = optionsOf(q);
-    expect(o.mcpServers?.chrome).toEqual(fake);
+    expect(o.mcpServers?.['chrome-personal']).toEqual(fake);
     expect(o.mcpServers?.orquestador).toBe(s.tools.server);
-    expect(o.allowedTools).toContain('mcp__chrome__*');
-    expect(await hookOf(o)('mcp__chrome__navigate_page', { url: 'https://example.com' })).toBe('{}');
+    expect(o.allowedTools).toContain('mcp__chrome-personal__*');
+    expect(await hookOf(o)('mcp__chrome-personal__navigate_page', { url: 'https://example.com' })).toBe('{}');
+    // Sin modo la mente no actúa: mirar sí, hacer clic no.
+    expect(await hookOf(o)('mcp__chrome-personal__click', { uid: '1' })).toMatch(/"permissionDecision":"deny"/);
     s.close();
     expect(() => session({ mcpServers: { orquestador: fake } })).toThrow();
     expect(() => session({ mcpServers: { 'con espacio': fake } })).toThrow();
@@ -408,6 +410,56 @@ describe('ConductorSession: modos, agente suelto, plugins e imágenes', () => {
     bare.s.send('hola');
     expect(optionsOf(bare.q).hooks?.PostToolUse).toBeUndefined();
     bare.s.close();
+  });
+
+  it('plugins según el modo: fuera de chat y bypass solo pasa mirar (Chrome y Canva)', async () => {
+    let mode: MindMode = 'plan';
+    const fake = { type: 'stdio' as const, command: 'node', args: ['x.js'] };
+    const fakeHttp = { type: 'http' as const, url: 'https://mcp.canva.test/mcp' };
+    const check = async (projectId: string | null) => {
+      const { s, q } = session({ projectId, mode: () => mode, mcpServers: { 'chrome-personal': fake, canva: fakeHttp } });
+      s.send('hola');
+      const pre = hookOf(optionsOf(q));
+      return { s, pre };
+    };
+    const acts = [
+      ['mcp__chrome-personal__click', { uid: '1' }],
+      ['mcp__chrome-personal__fill_form', { elements: [] }],
+      ['mcp__chrome-personal__evaluate_script', { function: '() => 1' }],
+      ['mcp__chrome-personal__navigate_page', { url: 'javascript:alert(1)' }],
+      ['mcp__chrome-personal__upload_file', { uid: '1', filePaths: ['C:\\dev\\demo\\a.pdf'] }],
+      ['mcp__chrome-personal__handle_dialog', { action: 'accept' }],
+      ['mcp__chrome-personal__herramienta_nueva', {}],
+      ['mcp__canva__commit-editing-transaction', { transaction_id: 't' }],
+    ] as const;
+    const { s, pre } = await check('demo');
+    for (const m of ['plan', 'auto'] as const) {
+      mode = m;
+      expect(await pre('mcp__chrome-personal__take_snapshot', {}), m).toBe('{}');
+      expect(await pre('mcp__chrome-personal__navigate_page', { url: 'https://example.com' }), m).toBe('{}');
+      expect(await pre('mcp__canva__get-design-content', { design_id: 'd' }), m).toBe('{}');
+      for (const [tool, input] of acts) {
+        const out = await pre(tool, input);
+        expect(out, `${m} ${tool}`).toMatch(/"permissionDecision":"deny"/);
+        expect(out, `${m} ${tool}`).toContain(`en el modo ${m} no actúas`);
+      }
+    }
+    mode = 'chat';
+    expect(await pre('mcp__chrome-personal__click', { uid: '1' })).toBe('{}');
+    mode = 'bypass';
+    expect(await pre('mcp__canva__commit-editing-transaction', { transaction_id: 't' })).toBe('{}');
+    s.close();
+
+    // Conversación (sin proyecto): bypass no actúa; chat sí.
+    const standalone = await check(null);
+    for (const m of ['plan', 'bypass'] as const) {
+      mode = m;
+      expect(await standalone.pre('mcp__chrome-personal__click', { uid: '1' }), m).toMatch(/no actúas/);
+      expect(await standalone.pre('mcp__chrome-personal__take_snapshot', {}), m).toBe('{}');
+    }
+    mode = 'chat';
+    expect(await standalone.pre('mcp__chrome-personal__click', { uid: '1' })).toBe('{}');
+    standalone.s.close();
   });
 
   it('readRoots dinámico: additionalDirectories con el valor inicial y la guardia ve los cambios', async () => {

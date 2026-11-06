@@ -137,6 +137,8 @@ describe('prompt de sistema del orquestador', () => {
     expect(text).toMatch(/pasar a main lo hace el usuario/);
     // Plan y auto no cambian: ni edición ni shell.
     for (const mode of ['plan', 'auto'] as const) expect(MODE_TEXT[mode].join('\n'), mode).not.toMatch(/Edit|Bash|no preguntes/i);
+    // autoeval-navegador-02: en plan y auto, Chrome y Canva solo para mirar.
+    for (const mode of ['plan', 'auto'] as const) expect(MODE_TEXT[mode].join('\n'), mode).toMatch(/Chrome[\s\S]*Canva[\s\S]*solo miras/);
   });
 
   it('MODE_TEXT.chat: asistente directo como Claude Code, sin flota, con concisión según el esfuerzo', () => {

@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** alta
 - **Archivos:** `src/shared/api.ts:17`, `src/core/conductor/prompt.ts:14`, `src/core/conductor/prompt.ts:134`, `src/core/conductor/prompt.ts:180`, `src/core/conductor/session.ts:65`, `src/core/conductor/session.ts:298`, `src/core/conductor/session.ts:314`, `src/core/conductor/session.ts:320`, `src/core/conductor/session.ts:363`, `src/core/conductor/guard.ts:117`, `src/core/conductor/guard.ts:135`, `src/core/conductor/guard.ts:165`, `src/core/conductor/guard.ts:184`, `src/core/chat/service.ts:665`, `src/core/chat/service.ts:680`, `src/core/chat/service.ts:706`, `src/core/chat/service.ts:715`, `src/core/chat/service.ts:732`, `src/core/plugins/service.ts:54`, `src/core/plugins/service.ts:322`, `src/core/plugins/service.ts:342`, `src/core/plugins/service.ts:366`, `src/core/app/f5-chat.ts:77`, `src/ui/features/plugins/PluginsView.tsx:55`, `tests/core/conductor/session.test.ts:261`, `tests/core/conductor/session.test.ts:323`, `C:\dev\agent-hub\tools\browser\node_modules\chrome-devtools-mcp\build\src\tools\input.js:135` (fuera del repo), `…\tools\script.js:64`, `…\tools\pages.js:132`, `…\tools\pages.js:154`, `…\config\mcp-options.js:124`, `…\utils\url.js:197`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `mente-01` (lectura por `file://` y `upload_file` en todos los modos), `plugins-03` (la mente no recibe las reglas de Chrome y Canva), `autoeval-navegador-01` (inyección), `autoeval-navegador-03` (confirmación en chat y bypass; hacer juntas), `ui-resto-05` (textos de los modos)
 

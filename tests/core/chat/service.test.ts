@@ -725,17 +725,17 @@ describe('ChatService: plugins para la mente', () => {
     const b = await bench({
       mcpServersFor: (agentId) => {
         asked.push(agentId);
-        return { chrome: fake };
+        return { 'chrome-personal': fake };
       },
     });
     const chat = b.service.create({ projectId: 'demo' });
     await turn(b, chat.id, 'navega');
     const o = optionsOf(b);
     expect(asked).toContain('claude');
-    expect(o.mcpServers?.chrome).toEqual(fake);
-    expect(Object.keys(o.mcpServers ?? {}).sort()).toEqual(['chrome', 'orquestador']);
-    expect(o.allowedTools).toContain('mcp__chrome__*');
-    expect(await guardOf(o)('mcp__chrome__navigate_page', { url: 'https://example.com' })).toBe(true);
+    expect(o.mcpServers?.['chrome-personal']).toEqual(fake);
+    expect(Object.keys(o.mcpServers ?? {}).sort()).toEqual(['chrome-personal', 'orquestador']);
+    expect(o.allowedTools).toContain('mcp__chrome-personal__*');
+    expect(await guardOf(o)('mcp__chrome-personal__navigate_page', { url: 'https://example.com' })).toBe(true);
     expect(await guardOf(o)('mcp__otro__borrar', {})).toBe(false);
   });
 

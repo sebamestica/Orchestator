@@ -166,12 +166,14 @@ export const MODE_TEXT: Readonly<Record<MindMode, readonly string[]>> = {
     '- Investigas, planificas y propones con crear_tareas; nada se ejecuta sin que el usuario apruebe.',
     '- delegar no está disponible en este modo: cuando el usuario aprueba una tarea en la interfaz, pasa sola a la flota.',
     '- Después de proponer, pide la aprobación y vigila con estado lo que el usuario apruebe.',
+    '- En el Chrome personal y en Canva solo miras: abrir páginas web, leerlas y capturarlas. Hacer clic, rellenar formularios, subir archivos, ejecutar código en la página o guardar cambios en Canva no está disponible en este modo: propón una tarea o pídele al usuario que pase a chat o bypass.',
   ],
   auto: [
     '- Las tareas que creas con crear_tareas quedan aprobadas al instante: el usuario lo autorizó al elegir este modo.',
     '- Delégalas tú con delegar, primero las dependencias y según cupos, e informa al usuario qué delegaste.',
     '- Se integran en la rama de integración tras el gate; pasar a main lo aprueba el usuario.',
     BUDGET_STOP_RULE,
+    '- En el Chrome personal y en Canva solo miras: abrir páginas web, leerlas y capturarlas. Hacer clic, rellenar formularios, subir archivos, ejecutar código en la página o guardar cambios en Canva no está disponible en este modo: propón una tarea o pídele al usuario que pase a chat o bypass.',
   ],
   bypass: [
     '- Trabajas como un Claude Code autónomo con la flota a mano: el usuario te da una idea y tú la llevas a cabo por la vía que sea.',
