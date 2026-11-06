@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TaskBrief } from '../../../src/shared/index.ts';
@@ -18,6 +19,8 @@ function gitIn(cwd: string, ...args: string[]): string {
 }
 
 let template: string | undefined;
+/** Carpetas de `makeRepo` que `cleanup` no pudo borrar (Windows las retenía): `disposeRepoTemplate` las reintenta. */
+const leftovers: string[] = [];
 
 /**
  * Plantilla creada una vez por proceso de pruebas: copiarla cuesta mucho menos que lanzar git
@@ -39,9 +42,30 @@ function repoTemplate(): string {
   writeFileSync(join(dir, 'node_modules', 'paquete', 'keep.txt'), 'no borrar');
   mkdirSync(join(dir, 'workbench'));
   writeFileSync(join(dir, 'workbench', 'keep.txt'), 'no borrar');
-  process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
   template = dir;
   return dir;
+}
+
+/** Ruta de la plantilla del proceso, si ya se creó (para las pruebas de la limpieza). */
+export function repoTemplatePath(): string | undefined {
+  return template;
+}
+
+/**
+ * Borra la plantilla y los restos que `cleanup` no pudo quitar. Va en un `afterAll`: Vitest termina sus workers con
+ * `kill()`, que no emite `exit`, así que un manejador de `exit` nunca corría. Usa `rm` asíncrono porque en Node 24
+ * `rmSync` no reintenta un EPERM (carpeta retenida) aunque se le pida `maxRetries`.
+ */
+export async function disposeRepoTemplate(): Promise<void> {
+  const dirs = [...(template ? [template] : []), ...leftovers.splice(0)];
+  template = undefined;
+  await Promise.all(
+    dirs.map((dir) =>
+      rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }).catch((err: unknown) => {
+        console.warn(`makeRepo: no se pudo borrar ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      }),
+    ),
+  );
 }
 
 /** Repo git real en `os.tmpdir()` con un commit inicial, `node_modules` ignorado y `workbench` sin ignorar. */
@@ -51,10 +75,10 @@ export function makeRepo(): TempRepo {
   cpSync(repoTemplate(), repo, { recursive: true });
   const cleanup = () => {
     try {
-      rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch (err) {
-      // Sin fallar la prueba (Windows a veces retiene la carpeta), pero a la vista: un resto aquí suele ser un proceso vivo.
-      console.warn(`makeRepo: no se pudo borrar ${base}: ${err instanceof Error ? err.message : String(err)}`);
+      rmSync(base, { recursive: true, force: true });
+    } catch {
+      // Windows la retiene (un proceso con su cwd dentro, Defender): se reintenta al final, en `disposeRepoTemplate`.
+      leftovers.push(base);
     }
   };
   return { base, repo, worktreesRoot: join(base, 'worktrees'), git: gitIn, cleanup };

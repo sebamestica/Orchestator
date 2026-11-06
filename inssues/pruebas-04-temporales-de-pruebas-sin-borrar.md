@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** baja
 - **Archivos:** `tests/core/workspace/helpers.ts:42`, `tests/core/workspace/helpers.ts:52-58`, `tests/core/workspace/repos.test.ts:3-7`, `node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3045`, `node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3179`, `node_modules/vitest/dist/chunks/coverage.DM_a_rWm.js:180`, `tests/integration/helpers.ts:108-116`, `tests/core/chat/f5-chat.test.ts:21-25`, `tests/core/chat/f5-chat.test.ts:113-125`, `src/core/app/compose.ts:205-210`, `src/core/app/compose.ts:233-236`, `src/core/app/fleet-port.ts:116-124`, `src/core/orchestrator/fleet.ts:364-369`, `src/core/orchestrator/fleet.ts:651-654`, `src/core/memory/obsidian-memory.ts:234-238`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

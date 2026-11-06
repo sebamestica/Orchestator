@@ -1,4 +1,5 @@
 /** Cableado del chat (f5-chat.ts) sobre la composición real: bóveda, registro, flota, tablero y traductor de c1. */
+import { existsSync } from 'node:fs';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import { afterEach, describe, expect, it } from 'vitest';
 import { compose, type Composition } from '../../../src/core/app/compose.ts';
@@ -25,11 +26,13 @@ const mind = (): ChatService => {
   return service;
 };
 
-afterEach(async () => {
+async function teardown(): Promise<void> {
   for (const s of services.splice(0)) s.shutdown();
-  for (const c of comps.splice(0)) c.close();
+  // shutdown y no close: detiene la flota (la tarea aprobada sigue escribiendo el plan en la memoria de `dir`).
+  for (const c of comps.splice(0)) await c.shutdown();
   await cleanupDirs();
-});
+}
+afterEach(teardown);
 
 async function setup(extra: { real?: boolean } = {}) {
   const dir = await tempDir();
@@ -137,7 +140,7 @@ describe('f5-chat: cableado con la composición', () => {
   });
 
   it('aprobar en el chat lleva la tarea al tablero y a la cola real de la flota', async () => {
-    const { comp, call } = await setup();
+    const { dir, comp, call } = await setup();
     const { chat } = (await (await call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
     await call('POST', `/chats/${chat.id}/messages`, { text: 'plan' });
     await settleChat(mind(), chat.id);
@@ -149,6 +152,10 @@ describe('f5-chat: cableado con la composición', () => {
     expect(comp.fleet.queue.get('tarea-a')).toBeDefined();
     expect(comp.store.getTask('tarea-a')).toBeDefined();
     expect((await lazyFleetPort(comp).status('tarea-a'))?.taskId).toBe('tarea-a');
+    // La flota sigue con la tarea (plan en la memoria): el cierre la detiene antes de borrar y nada recrea la carpeta.
+    await teardown();
+    for (let i = 0; i < 40; i++) await tick();
+    expect(existsSync(dir)).toBe(false);
   });
 
   it('desconectar Chrome en Plugins se lo quita a la sesión viva de la mente (y conectarlo se lo da)', async () => {
