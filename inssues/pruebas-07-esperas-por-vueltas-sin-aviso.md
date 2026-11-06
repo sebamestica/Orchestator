@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** baja
 - **Archivos:** `tests/core/chat/f5-chat.test.ts:91`, `tests/core/chat/f5-chat.test.ts:110`, `tests/core/chat/f5-chat.test.ts:117`, `tests/core/chat/aislamiento-f5.test.ts:91-97`, `tests/core/chat/service.test.ts:262-264`, `tests/core/chat/target.test.ts:288-290`, `tests/core/chat/helpers.ts:205-213`, `tests/core/chat/helpers.ts:228`, `src/core/chat/service.ts:455-470`, `src/core/chat/service.ts:736`, `src/core/chat/service.ts:860`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Las pruebas del chat mandan un mensaje a la mente (con una `query` falsa, `chatQuery`/`echoTurn` de

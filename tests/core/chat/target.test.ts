@@ -20,7 +20,7 @@ import { projectWorkspaceSchema, type ProjectStorage } from '../../../src/core/w
 import { changesTargetSchema, chatTargetResponse, DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { ChangesTarget, Chat } from '../../../src/shared/index.ts';
 import { brief, fakePorts, jsonOf, SECRET_PATTERN } from '../conductor/fakes.ts';
-import { bench, chatQuery, claudeAgent, closeBenches, echoTurn, MIND_KEY, type ChatBench } from './helpers.ts';
+import { bench, chatQuery, claudeAgent, closeBenches, echoTurn, MIND_KEY, settleChat, type ChatBench } from './helpers.ts';
 
 // Repos git reales.
 vi.setConfig({ testTimeout: 90_000 });
@@ -286,7 +286,7 @@ describe('GET /chats/:id/target', () => {
       expect(chatTargetResponse.parse(await local.json())).toEqual({ target: { kind: 'local', path: dir, git: 'remote', worktrees: false } });
 
       await service.send(chat.id, { text: 'hola' });
-      for (let i = 0; i < 400 && service.get(chat.id).state === 'running'; i++) await new Promise((r) => setTimeout(r, 5));
+      await settleChat(service, chat.id);
       await service.sessionOf(chat.id)?.tools.call('crear_tareas', { plan: 'plan', destino: { remoto: 'origin', rama: 'main' } });
       const remote = chatTargetResponse.parse(await (await get(`/chats/${chat.id}/target`)).json());
       expect(remote.target).toEqual({ kind: 'remote', path: dir, remote: { name: 'origin', url: 'https://github.com/a/b.git' }, branch: 'main', configured: true });

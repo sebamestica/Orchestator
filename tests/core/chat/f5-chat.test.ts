@@ -11,12 +11,18 @@ import { MemoryVault } from '../../../src/core/vault/index.ts';
 import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
-import { chatQuery, echoTurn, tick } from './helpers.ts';
+import { chatQuery, echoTurn, settleChat } from './helpers.ts';
 
 const HOST = '127.0.0.1:47998';
 const HOST_KEY = fakeKey('anfitrion');
 const comps: Composition[] = [];
 const services: ChatService[] = [];
+/** El servicio del chat que la composición entregó por `onReady`. */
+const mind = (): ChatService => {
+  const service = services[0];
+  if (!service) throw new Error('la composición no entregó el servicio del chat');
+  return service;
+};
 
 afterEach(async () => {
   for (const s of services.splice(0)) s.shutdown();
@@ -88,7 +94,7 @@ describe('f5-chat: cableado con la composición', () => {
     const { chat } = (await (await call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
     expect(chat.mindAgentId).toBe('claude');
     expect((await call('POST', `/chats/${chat.id}/messages`, { text: 'hola' })).status).toBe(201);
-    for (let i = 0; i < 200 && services[0]?.get(chat.id).state === 'running'; i++) await tick();
+    await settleChat(mind(), chat.id);
     const o = q.calls[0]?.options as Options;
     expect(o.env?.ANTHROPIC_API_KEY).toBe(key);
     expect(o.env?.ANTHROPIC_BASE_URL).toBe(USER_BASE_URL);
@@ -114,7 +120,7 @@ describe('f5-chat: cableado con la composición', () => {
     const { comp, call } = await setup();
     const { chat } = (await (await call('POST', '/chats', { projectId: 'demo' })).json()) as { chat: Chat };
     await call('POST', `/chats/${chat.id}/messages`, { text: 'plan' });
-    for (let i = 0; i < 200 && services[0]?.get(chat.id).state === 'running'; i++) await tick();
+    await settleChat(mind(), chat.id);
     // crear_tareas → planToTasks (c2) con la clave de la bóveda contra el servidor falso.
     const created = await services[0]?.sessionOf(chat.id)?.tools.call('crear_tareas', { plan: '1. A\n2. B' });
     expect(created?.isError).toBeFalsy();

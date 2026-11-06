@@ -7,7 +7,7 @@ import { ChatError, ChatService, composeUserText, resolveMind } from '../../../s
 import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index.ts';
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
-import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, sdkInit, sdkResult, sdkText, tick, type ChatBench, type TurnFn } from './helpers.ts';
+import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, sdkInit, sdkResult, sdkText, settleChat, tick, type ChatBench, type TurnFn } from './helpers.ts';
 
 afterEach(closeBenches);
 
@@ -260,7 +260,7 @@ describe('ChatService: persistencia y reanudación', () => {
       expect(again.messages(chat.id).map((m) => m.role)).toEqual(['user', 'assistant']);
       expect(again.proposals(chat.id).map((p) => [p.task.id, p.approval])).toEqual([['api', 'proposed'], ['ui', 'proposed']]);
       await again.send(chat.id, { text: 'sigo' });
-      for (let i = 0; i < 200 && again.get(chat.id).state === 'running'; i++) await tick();
+      await settleChat(again, chat.id);
       expect(b.q.calls.at(-1)?.options.resume).toBe('sdk-1');
       const events = b.events(chat.sessionId);
       expect(new Set(events.map((e) => e.seq)).size).toBe(events.length);

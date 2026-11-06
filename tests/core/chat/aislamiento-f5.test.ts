@@ -16,7 +16,7 @@ import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
 import { brief, jsonOf, textOf } from '../conductor/fakes.ts';
-import { chatQuery, echoTurn, tick } from './helpers.ts';
+import { chatQuery, echoTurn, settleChat } from './helpers.ts';
 
 const HOST = '127.0.0.1:47997';
 const comps: Composition[] = [];
@@ -91,8 +91,10 @@ async function setup() {
   const openChat = async () => {
     const { chat } = (await (await call('POST', '/chats', { projectId: 'demo', mode: 'bypass' })).json()) as { chat: Chat };
     expect((await call('POST', `/chats/${chat.id}/messages`, { text: 'hola' })).status).toBe(201);
-    for (let i = 0; i < 200 && services[0]?.get(chat.id).state === 'running'; i++) await tick();
-    const session = services[0]?.sessionOf(chat.id);
+    const service = services[0];
+    if (!service) throw new Error('la composición no entregó el servicio del chat');
+    await settleChat(service, chat.id);
+    const session = service.sessionOf(chat.id);
     if (!session) throw new Error('sin sesión');
     return { chat, session };
   };

@@ -202,15 +202,7 @@ export async function bench(opts: BenchOptions = {}): Promise<ChatBench> {
     envCalls,
     sent: (type) => published.filter((m): m is Extract<HubMessage, { type: typeof type }> => m.type === type),
     events: (sessionId) => store.eventsSince(sessionId, -1, 5000),
-    async settle(chatId, timeoutMs = 5_000) {
-      const t0 = Date.now();
-      while (service.get(chatId).state === 'running') {
-        if (Date.now() - t0 > timeoutMs) throw new Error(`el chat ${chatId} sigue running`);
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      // Deja correr lo que quede del lector (mensaje de la mente, costo).
-      await new Promise((r) => setTimeout(r, 5));
-    },
+    settle: (chatId, timeoutMs = 5_000) => settleChat(service, chatId, timeoutMs),
     async close() {
       service.shutdown();
       store.close();
@@ -226,6 +218,20 @@ export async function closeBenches(): Promise<void> {
 }
 
 export const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Espera a que el chat salga de `running`, con plazo en tiempo (no en vueltas): al vencer lanza un error que nombra la
+ * espera, antes que el «Test timed out» de 60 s. 15 s por defecto, para la CPU cargada del gate.
+ */
+export async function settleChat(service: Pick<ChatService, 'get'>, chatId: string, timeoutMs = 15_000): Promise<void> {
+  const t0 = Date.now();
+  while (service.get(chatId).state === 'running') {
+    if (Date.now() - t0 > timeoutMs) throw new Error(`el chat ${chatId} sigue running tras ${timeoutMs} ms`);
+    await tick();
+  }
+  // Deja correr lo que quede del lector (mensaje de la mente, costo).
+  await tick();
+}
 
 /** Bytes mínimos con firma real de cada formato. */
 export const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
