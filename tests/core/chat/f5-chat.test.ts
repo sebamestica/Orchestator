@@ -14,7 +14,7 @@ import { MemoryVault } from '../../../src/core/vault/index.ts';
 import { DEFAULT_SETTINGS } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { USER_BASE_URL, anthropicRoutes, cleanupDirs, fakeKey, mockFetch, planJson, tempDir } from '../../integration/helpers.ts';
-import { brief, fakePorts, jsonOf } from '../conductor/fakes.ts';
+import { brief, fakePorts, jsonOf, promptBlocks } from '../conductor/fakes.ts';
 import { chatQuery, echoTurn, settleChat, tick } from './helpers.ts';
 
 const HOST = '127.0.0.1:47998';
@@ -177,7 +177,7 @@ describe('f5-chat: cableado con la composición', () => {
     expect(Object.keys(first.mcpServers ?? {})).toContain('chrome-personal');
     expect(first.allowedTools).toContain('mcp__chrome-personal__*');
     // Con las reglas de la flota: pestaña propia, sin contraseñas, nunca otro navegador.
-    const rulesOf = (o: Options) => (o.systemPrompt as string[]).join('\n');
+    const rulesOf = (o: Options) => promptBlocks(o).join('\n');
     expect(rulesOf(first)).toContain(CHROME_TAB_NOTE);
     expect(rulesOf(first)).toContain('no escribas contraseñas');
     expect(rulesOf(first)).not.toContain(NO_BROWSER_NOTE);
