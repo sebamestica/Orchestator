@@ -206,8 +206,10 @@ export class FleetRuntime implements FleetPort {
       .catch((err: unknown) => this.#log(redactSecrets(`flota: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300)))
       .finally(() => {
         this.#running = undefined;
-        // Tareas que quedaron listas justo cuando la flota terminaba.
-        if (!this.#abort.signal.aborted && this.queue.list().some((e) => e.state === 'ready')) this.#kick();
+        // Tareas que quedaron listas justo cuando la flota terminaba. Sin cupo no se relanza: ese run() saldría sin
+        // esperar nada y el relanzamiento sería un bucle de microtareas que congela el núcleo.
+        const hasRoom = this.queue.active < this.queue.concurrency;
+        if (!this.#abort.signal.aborted && hasRoom && this.queue.list().some((e) => e.state === 'ready')) this.#kick();
       });
   }
 }

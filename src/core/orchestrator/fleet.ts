@@ -263,6 +263,8 @@ export class Fleet {
         readied = false;
         if (!opts.signal?.aborted) {
           const canStart = (t: TaskBrief) => {
+            // Reintentada mientras su ciclo anterior aún guarda sesiones o limpia: espera a que ese job termine.
+            if (this.#inFlight.has(t.id)) return false;
             const key = this.#keyOf(t);
             return key === undefined || ![...this.#exclusive.values()].includes(key);
           };
@@ -274,6 +276,7 @@ export class Fleet {
               .then((r) => { reports.push(r); })
               .catch((err: unknown) => { this.#warn(`${id}: ${err instanceof Error ? err.message : String(err)}`); })
               .finally(() => {
+                if (running.get(id) !== job) return; // la entrada ya es de otro ciclo con el mismo id
                 running.delete(id);
                 this.#exclusive.delete(id);
               });
