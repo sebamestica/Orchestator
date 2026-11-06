@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** media
 - **Archivos:** `vitest.config.ts:9-17`, `vitest.config.ts:13-16`, `node_modules/vitest/dist/chunks/cli-api.B0Pz1_R7.js:3832-3838`, `node_modules/vitest/dist/chunks/coverage.DM_a_rWm.js:180`, `node_modules/vitest/dist/chunks/coverage.DM_a_rWm.js:380`, `src/core/app/fleet-service.ts:126`, `src/shared/api.ts:60`, `src/shared/api.ts:74`, `src/core/orchestrator/fleet.ts:533`, `src/core/orchestrator/fleet.ts:577-581`, `src/core/app/workspaces.ts:138-146`, `src/core/workspace/manager.ts:163-167`, `src/core/workspace/integrate.ts:119`, `src/core/locks/names.ts:9-22`, `AGENTS.md:17`
-- **Estado:** abierta
+- **Estado:** resuelta en el commit «fix(pruebas): tope de workers de Vitest al 50 % de la CPU» (sobre 5f64877). Se aplicó el cambio 1 (`maxWorkers: '50%'`, probado en `tests/config/vitest-workers.test.ts`). El reparto de `VITEST_MAX_WORKERS` por concurrencia queda pendiente hasta medir con la CPU libre.
 
 ## Cómo ocurre
 El gate de este repo es `npm run -s check`, que encadena typecheck, lint, `vitest run` y los dos builds

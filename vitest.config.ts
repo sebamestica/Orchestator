@@ -10,6 +10,9 @@ export default defineConfig({
     // Las pruebas de la interfaz (tests/ui/**/*.test.tsx) declaran `// @vitest-environment happy-dom`.
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     environment: 'node',
+    // Media CPU por suite: la flota corre varios gates y checks a la vez, y sin tope cada uno abre
+    // availableParallelism() - 1 forks. VITEST_MAX_WORKERS, si está puesta, sigue mandando.
+    maxWorkers: '50%',
     // 60 s: con la flota corriendo pruebas en paralelo en 4 núcleos, pruebas de 1 s llegaron a tardar 20 s.
     // Una prueba colgada de verdad sigue fallando.
     testTimeout: 60_000,
