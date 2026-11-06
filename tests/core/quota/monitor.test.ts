@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseAgyUsage } from '../../../src/core/quota/agy.ts';
 import { CodexQuotaProvider } from '../../../src/core/quota/codex.ts';
 import { QuotaMonitor } from '../../../src/core/quota/monitor.ts';
 import type { QuotaSnapshot } from '../../../src/shared/quota.ts';
@@ -112,6 +113,20 @@ describe('monitor de cupos', () => {
     expect(m.all()).toHaveLength(2);
     expect(set).toHaveBeenCalledWith(expect.any(Function), 42);
     m.stop(); expect(clear).toHaveBeenCalledExactlyOnceWith(123);
+  });
+
+  it('agy con modelo Gemini no alerta por el grupo Claude/GPT, que no gasta', async () => {
+    const raw = JSON.parse(await readFile(new URL('../../../fixtures/agy/usage.json', import.meta.url), 'utf8')) as { command: { data: { groups: { name: string; buckets: { remaining_fraction: number }[] }[] } } };
+    for (const group of raw.command.data.groups) {
+      for (const bucket of group.buckets) bucket.remaining_fraction = group.name === 'Gemini Models' ? 1 : 0.05;
+    }
+    const onAlert = vi.fn();
+    const read = async () => parseAgyUsage(raw, 'agy', new Date().toISOString(), { model: 'gemini-3.8-flash-high' });
+    const m = new QuotaMonitor([{ agentId: 'agy', read }], { onAlert });
+    monitors.push(m);
+    await m.refresh();
+    expect(m.latest('agy')?.buckets).toHaveLength(4);
+    expect(onAlert).not.toHaveBeenCalled();
   });
 
   it('ignora fracciones desconocidas y aísla errores de consumidores', async () => {

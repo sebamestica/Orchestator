@@ -153,6 +153,15 @@ describe('Panel mínimo', () => {
     expect(!!screen.queryByText(/Cupo bajo/)).toBe(fraction < 0.1);
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
+  it('con grupos marcados en uso, el cupo bajo de otro grupo no avisa', () => {
+    const buckets = [
+      { groupId: 'flash', groupName: 'Flash', window: 'daily' as const, remainingFraction: 0.6, inUse: true },
+      { groupId: 'pro', groupName: 'Pro', window: 'daily' as const, remainingFraction: 0.02 },
+    ];
+    useApp.setState({ quotas: { claude: { recordedAt: ts, snapshot: { agentId: 'claude', method: 'manual-budget', takenAt: ts, stale: false, buckets } } } });
+    render(<AgentsPanel />);
+    expect(screen.queryByText(/Cupo bajo/)).toBeNull();
+  });
   it('libera listeners al desmontar y avisa la desconexión', () => {
     useApp.setState({ live: 'closed' });
     const { unmount } = render(<AgentsPanel />);

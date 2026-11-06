@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { idSchema, minRemainingFraction, quotaSnapshotSchema, redactSecrets, taskBriefSchema } from '../../shared/index.ts';
+import { decidingBuckets, idSchema, minRemainingFraction, quotaSnapshotSchema, redactSecrets, taskBriefSchema } from '../../shared/index.ts';
 import type { ChangesTarget, MindMode, QuotaSnapshot, TaskBrief } from '../../shared/index.ts';
 import type { Awaitable, ConductorPorts, FleetTaskStatus, ProposedTask } from './ports.ts';
 import { label } from './proposals.ts';
@@ -557,7 +557,7 @@ function summarizeQuota(raw: QuotaSnapshot) {
   if (!parsed.success) return { agente: String((raw as { agentId?: unknown }).agentId ?? 'desconocido'), error: 'lectura de cupo inválida' };
   const s = parsed.data;
   const min = minRemainingFraction(s);
-  const limiting = s.buckets
+  const limiting = decidingBuckets(s)
     .filter((b) => b.remainingFraction !== null && b.remainingFraction === min)
     .map((b) => b.resetAt)
     .filter((r): r is string => r !== undefined)

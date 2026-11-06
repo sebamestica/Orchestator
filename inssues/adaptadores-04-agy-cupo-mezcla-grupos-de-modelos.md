@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes (cupo de agy y router)
 - **Severidad:** media
 - **Archivos:** `src/core/quota/agy.ts:55-89`, `src/core/app/quotas.ts:33-34`, `src/shared/quota.ts:27-31`, `src/core/orchestrator/router.ts:248-273`, `src/core/orchestrator/router.ts:305-314`, `src/core/orchestrator/router.ts:320-328`, `src/core/quota/monitor.ts:98-111`, `src/core/adapters/agy-cli/index.ts:217-219`, `fixtures/agy/usage.json`, `fixtures/agy/stream-quota-error.jsonl`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

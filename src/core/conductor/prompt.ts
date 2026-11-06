@@ -11,7 +11,7 @@
  */
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import type { EffortLevel } from '@anthropic-ai/claude-agent-sdk';
-import { minRemainingFraction, redactSecrets } from '../../shared/index.ts';
+import { decidingBuckets, minRemainingFraction, redactSecrets } from '../../shared/index.ts';
 import type { MindLimits, MindMode, QuotaSnapshot } from '../../shared/index.ts';
 
 export const CONDUCTOR_PROMPT_PREFIX = `Eres el orquestador de una flota local de agentes de IA que programan en paralelo. Conversas con el usuario, conviertes su plan en tareas, las delegas a los agentes adecuados y vigilas su avance hasta integrarlas. Fuera de los modos bypass y chat no editas código ni ejecutas comandos: delegas. Respondes siempre en español, breve y concreto.
@@ -142,7 +142,7 @@ export function renderSessionContext(ctx: ConductorPromptContext): string {
     lines.push('- Cupos al iniciar (pueden cambiar; usa cupos() para la lectura actual):');
     for (const q of [...ctx.quotas].sort((a, b) => a.agentId.localeCompare(b.agentId))) {
       const min = minRemainingFraction(q);
-      const reset = q.buckets.filter((b) => b.remainingFraction === min && b.resetAt).map((b) => b.resetAt).sort()[0];
+      const reset = decidingBuckets(q).filter((b) => b.remainingFraction === min && b.resetAt).map((b) => b.resetAt).sort()[0];
       const pct = min === null ? 'sin dato' : `${Math.round(min * 1000) / 10} %`;
       lines.push(`  - ${q.agentId}: ${pct}${reset ? `, reinicio ${reset}` : ''}${q.stale ? ' (lectura antigua)' : ''}`);
     }

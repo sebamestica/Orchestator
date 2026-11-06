@@ -31,7 +31,7 @@ export function createQuotaProviderFactory(opts: QuotaFactoryOptions): QuotaProv
     const method = agent.quotaMethod ?? defaultQuotaMethod(config);
     switch (method) {
       case 'agy-usage':
-        return new AgyQuotaProvider({ agentId });
+        return new AgyQuotaProvider({ agentId, model: config.model });
       case 'codex-ratelimits':
         return new CodexQuotaProvider(agentId);
       case 'openrouter-key':

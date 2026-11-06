@@ -35,6 +35,34 @@ describe('AgyQuotaProvider / parseAgyUsage', () => {
     expect(minRemainingFraction(snap)).toBeCloseTo(0.9986, 3);
   });
 
+  describe('con el modelo del agente, decide solo con el grupo que ese modelo gasta', () => {
+    // Copia en memoria: grupo Claude/GPT casi agotado y Gemini entero.
+    const spent = structuredClone(usageRaw) as { command: { data: { groups: { name: string; buckets: { remaining_fraction: number }[] }[] } } };
+    for (const group of spent.command.data.groups) {
+      for (const bucket of group.buckets) bucket.remaining_fraction = group.name === 'Gemini Models' ? 1 : 0.02;
+    }
+
+    it('modelo Gemini → 1, aunque Claude/GPT esté al 2 %', () => {
+      const snap = parseAgyUsage(spent, 'agy', '2026-11-01T20:00:00Z', { model: 'gemini-3.8-flash-high' });
+      expect(minRemainingFraction(snap)).toBe(1);
+      expect(snap.buckets).toHaveLength(4); // la interfaz sigue viendo los dos grupos
+      expect(snap.buckets.filter((b) => b.inUse).map((b) => b.groupId)).toEqual(['gemini-models', 'gemini-models']);
+    });
+
+    it('modelo Claude → 0,02', () => {
+      const snap = parseAgyUsage(spent, 'agy', '2026-11-01T20:00:00Z', { model: 'claude-sonnet-4-6' });
+      expect(minRemainingFraction(snap)).toBe(0.02);
+      expect(snap.buckets.filter((b) => b.inUse).map((b) => b.groupId)).toEqual(['claude-and-gpt-models', 'claude-and-gpt-models']);
+    });
+
+    it('sin modelo o con uno que no encaja en ningún grupo → todos los grupos, como antes', () => {
+      expect(minRemainingFraction(parseAgyUsage(spent, 'agy', '2026-11-01T20:00:00Z'))).toBe(0.02);
+      const unknown = parseAgyUsage(spent, 'agy', '2026-11-01T20:00:00Z', { model: 'llama-4' });
+      expect(minRemainingFraction(unknown)).toBe(0.02);
+      expect(unknown.buckets.some((b) => b.inUse)).toBe(false);
+    });
+  });
+
   it('falla con un objeto que no cumple el esquema de agy usage', () => {
     expect(() => parseAgyUsage({ command: { name: 'other' } }, 'agy')).toThrow();
   });

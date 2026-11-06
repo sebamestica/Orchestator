@@ -51,11 +51,44 @@ export function resolveAgyCommand(explicitCommand?: string): string {
   return 'agy';
 }
 
+type AgyGroupRaw = z.infer<typeof agyGroupRawSchema>;
+
+function words(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/** Familias de un grupo: la primera palabra de cada modelo de «Models within this group: …» y la del nombre. */
+function groupFamilies(group: AgyGroupRaw): Set<string> {
+  const listed = /models within this group:\s*(.+)/i.exec(group.description ?? '')?.[1] ?? '';
+  const families = listed.split(',').map((model) => words(model)[0]);
+  return new Set([...families, words(group.name)[0]].filter((f): f is string => f !== undefined));
+}
+
+/** Único grupo cuyo cupo gasta `model`; undefined si no encaja en ninguno o encaja en varios. */
+function groupForModel(groups: AgyGroupRaw[], model: string | undefined): AgyGroupRaw | undefined {
+  if (!model) return undefined;
+  const modelWords = new Set(words(model));
+  const matches = groups.filter((group) => [...groupFamilies(group)].some((family) => modelWords.has(family)));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export interface ParseAgyUsageOptions {
+  /** Modelo con que se lanza el agente: marca `inUse` los buckets de su grupo para que solo esos decidan el cupo. */
+  model?: string;
+}
+
 /** Convierte la salida JSON de `agy -p "/usage" --output-format json` en un QuotaSnapshot. */
-export function parseAgyUsage(rawJson: unknown, agentId: string, takenAt: string = new Date().toISOString()): QuotaSnapshot {
+export function parseAgyUsage(
+  rawJson: unknown,
+  agentId: string,
+  takenAt: string = new Date().toISOString(),
+  options: ParseAgyUsageOptions = {},
+): QuotaSnapshot {
   const parsed = agyUsageOutputSchema.parse(rawJson);
+  const inUseGroup = groupForModel(parsed.command.data.groups, options.model);
   const buckets: QuotaBucket[] = parsed.command.data.groups.flatMap((group) => {
     const groupId = slugify(group.name);
+    const inUse = group === inUseGroup;
     return group.buckets.map((b): QuotaBucket => {
       const window = mapWindow(b.window);
       const remainingFraction =
@@ -75,6 +108,7 @@ export function parseAgyUsage(rawJson: unknown, agentId: string, takenAt: string
         window,
         remainingFraction,
         ...(resetAt ? { resetAt } : {}),
+        ...(inUse ? { inUse } : {}),
       };
     });
   });
@@ -90,6 +124,8 @@ export function parseAgyUsage(rawJson: unknown, agentId: string, takenAt: string
 
 export interface AgyQuotaProviderOptions {
   agentId?: string;
+  /** Modelo de la configuración del agente; decide qué grupo de cupo cuenta. */
+  model?: string;
   command?: string;
   cwd?: string;
   timeoutMs?: number;
@@ -98,6 +134,7 @@ export interface AgyQuotaProviderOptions {
 /** Proveedor de cupo para agy CLI. Ejecuta `/usage` sin gastar tokens. */
 export class AgyQuotaProvider implements QuotaProvider {
   readonly agentId: string;
+  private readonly model: string | undefined;
   private readonly command: string;
   private readonly cwd: string;
   private readonly timeoutMs: number;
@@ -105,6 +142,7 @@ export class AgyQuotaProvider implements QuotaProvider {
   constructor(optsOrAgentId: string | AgyQuotaProviderOptions = {}) {
     const opts = typeof optsOrAgentId === 'string' ? { agentId: optsOrAgentId } : optsOrAgentId;
     this.agentId = opts.agentId ?? 'agy';
+    this.model = opts.model;
     this.command = resolveAgyCommand(opts.command);
     this.cwd = opts.cwd ?? process.cwd();
     this.timeoutMs = opts.timeoutMs ?? 30000;
@@ -131,7 +169,7 @@ export class AgyQuotaProvider implements QuotaProvider {
     }
 
     if (lastJson) {
-      return parseAgyUsage(lastJson, this.agentId);
+      return parseAgyUsage(lastJson, this.agentId, undefined, { model: this.model });
     }
 
     return quotaSnapshotSchema.parse({

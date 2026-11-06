@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { minRemainingFraction, quotaSnapshotSchema } from '../../shared/quota.ts';
+import { decidingBuckets, minRemainingFraction, quotaSnapshotSchema } from '../../shared/quota.ts';
 import { redactSecrets } from '../../shared/index.ts';
 import type { QuotaSnapshot } from '../../shared/quota.ts';
 import type { QuotaProvider } from '../../shared/contracts.ts';
@@ -97,7 +97,7 @@ export class QuotaMonitor {
 
   private checkAlerts(snapshot: QuotaSnapshot): void {
     if (minRemainingFraction(snapshot) === null) return;
-    for (const bucket of snapshot.buckets) {
+    for (const bucket of decidingBuckets(snapshot)) {
       const remaining = bucket.remainingFraction;
       if (remaining === null) continue;
       for (const threshold of this.thresholds) {

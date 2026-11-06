@@ -3,6 +3,7 @@ import { api } from '../../api/client.ts';
 import { getLive } from '../../api/live.ts';
 import { useApp } from '../../store/app.ts';
 import type { Chat } from '../../../shared/api.ts';
+import { minRemainingFraction } from '../../../shared/index.ts';
 import { upsertChat, useChat } from '../chat/store.ts';
 import { ActivityRowView } from './ActivityRowView.tsx';
 import { applyEvents, chatsSchema, initialView, isActive, mindRow, selectChat, sessionResponseSchema, sessionsSchema, workerRow, type SessionView } from './model.ts';
@@ -114,7 +115,9 @@ export function AgentsPanel({ overlay = false, onClose }: { overlay?: boolean; o
       <div className="space-y-1 border-t border-foreground/[0.06] pt-2">
         {agents.filter((agent) => agent.config.enabled).map((agent) => {
           const id = agent.config.id;
-          const low = quotas[id]?.snapshot.buckets.reduce<number | null>((min, bucket) => bucket.remainingFraction === null ? min : Math.min(min ?? 1, bucket.remainingFraction), null);
+          // Solo los grupos que usa el agente (`inUse`), si los marca: el de otro modelo no avisa.
+          const snapshot = quotas[id]?.snapshot;
+          const low = snapshot ? minRemainingFraction(snapshot) : null;
           return <ActivityRowView key={id} name={agent.config.displayName} row={workerRow(id, views, tasks, now)}
             quota={low != null && low < 0.1 ? `Cupo bajo: ${Math.floor(low * 100)} % restante` : undefined} />;
         })}

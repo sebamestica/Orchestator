@@ -1,5 +1,7 @@
+import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { Router, RoutingError } from '../../../src/core/orchestrator/router.ts';
+import { parseAgyUsage } from '../../../src/core/quota/agy.ts';
 import { agentConfigSchema } from '../../../src/shared/index.ts';
 import { agents, agyFixtureQuota, FakeQuota, task } from './fakes.ts';
 
@@ -69,6 +71,28 @@ describe('Router: umbral de cupo', () => {
     expect(check.allowed).toBe(true);
     expect(check.fraction).toBeGreaterThan(0.99);
     expect((await router.route(task('tarea'))).agentId).toBe('agy');
+  });
+
+  it('agy decide con el grupo de su modelo: Claude/GPT agotado no frena a un agy en Gemini', async () => {
+    const raw = JSON.parse(await readFile(new URL('../../../fixtures/agy/usage.json', import.meta.url), 'utf8')) as { command: { data: { groups: { name: string; buckets: { remaining_fraction: number }[] }[] } } };
+    for (const group of raw.command.data.groups) {
+      for (const bucket of group.buckets) bucket.remaining_fraction = group.name === 'Gemini Models' ? 1 : 0.05;
+    }
+    const routerFor = (model: string) => {
+      const agy = agentConfigSchema.parse({ ...agents.agy, model });
+      const snapshot = parseAgyUsage(raw, 'agy', new Date().toISOString(), { model });
+      return new Router({ agents: [agents.claude1, agy], quotas: [{ agentId: 'agy', read: async () => snapshot }] });
+    };
+
+    const gemini = routerFor('gemini-3.8-flash-high');
+    expect(await gemini.checkQuota('agy')).toMatchObject({ allowed: true, fraction: 1 });
+    expect((await gemini.route(task('tarea'))).agentId).toBe('agy');
+
+    const claude = routerFor('claude-sonnet-4-6');
+    expect(await claude.checkQuota('agy')).toMatchObject({ allowed: false, fraction: 0.05 });
+    const decision = await claude.route(task('tarea'));
+    expect(decision.agentId).toBe('claude-1');
+    expect(decision.warnings.join(' ')).toMatch(/agy descartado/);
   });
 
   it('reutiliza la lectura de cupo durante quotaCacheMs y la vuelve a leer al invalidarla', async () => {
