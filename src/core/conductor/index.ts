@@ -1,4 +1,5 @@
 export * from './approve.ts';
+export * from './external-content.ts';
 export * from './guard.ts';
 export * from './ports.ts';
 export * from './prompt.ts';

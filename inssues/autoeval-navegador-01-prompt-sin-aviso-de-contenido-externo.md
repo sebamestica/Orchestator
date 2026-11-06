@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/prompt.ts:14`, `src/core/conductor/prompt.ts:41`, `src/core/conductor/prompt.ts:42`, `src/core/conductor/prompt.ts:68`, `src/core/conductor/prompt.ts:157`, `src/core/conductor/prompt.ts:187`, `src/core/conductor/session.ts:79`, `src/core/conductor/session.ts:298`, `src/core/conductor/session.ts:342`, `src/core/conductor/session.ts:366`, `src/core/conductor/session.ts:433`, `src/core/chat/service.ts:216`, `src/core/plugins/chrome.ts:65`, `src/core/plugins/service.ts:75`, `src/core/adapters/claude-sdk/adapter.ts:397`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:2349`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts:2715`, `node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe` (Claude Code 2.1.302, prompt por defecto)
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `plugins-03` (la mente no recibe las reglas de uso de Chrome y Canva; ninguna de esas notas dice que el contenido es dato, así que arreglarla no cubre esta), `mente-01` (lectura de archivos locales por `file://`), `autoeval-navegador-02` y `autoeval-navegador-03` (acciones en Chrome y Canva sin barrera), `autoeval-subagentes-01` (la mente usa los subagentes integrados del SDK, cuyo prompt Berland no controla), `codex-04` (tachado de secretos de los plugins)
 

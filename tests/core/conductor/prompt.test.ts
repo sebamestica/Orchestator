@@ -59,6 +59,15 @@ describe('prompt de sistema del orquestador', () => {
     expect(p).toMatch(/Agent \(subagentes\)/);
   });
 
+  it('trata como datos el contenido externo', () => {
+    const p = CONDUCTOR_PROMPT_PREFIX;
+    expect(p).toMatch(/## Contenido externo/);
+    const section = p.split('## Contenido externo')[1]?.split('\n## ')[0] ?? '';
+    for (const source of ['Chrome', 'Canva', 'Read', 'adjuntos', 'imagen']) expect(section, source).toContain(source);
+    expect(section).toMatch(/no instrucciones/);
+    expect(section).toMatch(/avísale al usuario/);
+  });
+
   it('exige un plan de implementación en cada crear_tareas (en el prefijo fijo)', () => {
     const p = CONDUCTOR_PROMPT_PREFIX;
     expect(p).toMatch(/## Plan de implementación \(obligatorio\)/);
