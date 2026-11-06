@@ -7,7 +7,7 @@ export const APP_NAME = 'Berland';
 export const MODE_INFO: Record<MindMode, { label: string; hint: string; tone: string }> = {
   plan: { label: 'Plan', hint: 'Propone tareas y espera tu aprobación.', tone: 'text-foreground' },
   auto: { label: 'Auto', hint: 'Aprueba y delega sola; pasar a main lo apruebas tú.', tone: 'text-success' },
-  bypass: { label: 'Bypass', hint: 'Como Auto, lee fuera de la carpeta y pasa a main si el gate pasa.', tone: 'text-danger' },
+  bypass: { label: 'Bypass', hint: 'Edita y ejecuta comandos sin preguntar; delega lo largo y pasa a main si el gate pasa.', tone: 'text-danger' },
   chat: { label: 'Chat', hint: 'Como Claude Code: responde y hace los cambios en la carpeta, sin flota.', tone: 'text-accent' },
 };
 

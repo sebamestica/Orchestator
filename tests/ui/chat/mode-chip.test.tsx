@@ -36,4 +36,10 @@ describe('modo chat en la ficha del modo', () => {
     fireEvent.click(screen.getByTestId('mode-chip'));
     expect(onChange).toHaveBeenCalledWith('chat');
   });
+
+  it('en Bypass la línea avisa que edita sin preguntar', () => {
+    render(<ModeChip mode="bypass" onChange={vi.fn()} mind={null} />);
+    expect(screen.getByText(/sin preguntar/i).textContent).toBe(MODE_INFO.bypass.hint);
+    expect(MODE_INFO.bypass.hint).toMatch(/^Edita/);
+  });
 });

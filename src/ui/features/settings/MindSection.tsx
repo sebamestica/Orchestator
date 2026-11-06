@@ -18,7 +18,7 @@ const AGENT_MODEL = '__agente__';
 export const MODES: readonly { value: MindMode; label: string; description: string }[] = [
   { value: 'plan', label: 'Plan', description: 'La mente lee y propone tareas; nada se ejecuta hasta que apruebas.' },
   { value: 'auto', label: 'Auto', description: 'La mente aprueba y delega sola; integra tras el gate. Pasar a main te lo pregunta.' },
-  { value: 'bypass', label: 'Bypass', description: 'Como Auto, y además lee fuera de la carpeta y pasa a main sin preguntar si el gate pasa.' },
+  { value: 'bypass', label: 'Bypass', description: 'La mente hace el trabajo ella misma, sin preguntar: en un proyecto edita archivos y ejecuta comandos en la carpeta, delega lo largo a la flota y pasa a main si el gate pasa. Además lee fuera de la carpeta.' },
 ];
 
 const SUPPORT_LABEL = { full: 'Completa', experimental: 'Experimental', none: 'No disponible' } as const;

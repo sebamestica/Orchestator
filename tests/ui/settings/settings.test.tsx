@@ -60,6 +60,17 @@ describe('Mente y subagentes', () => {
     expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ mind: { effort: 'max' } }, { defaultMode: 'bypass' }]);
   });
 
+  it('la descripción de Bypass avisa que edita y ejecuta sin preguntar', async () => {
+    fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }) });
+    render(<SettingsView section="mente" />);
+    await screen.findByRole('radiogroup', { name: 'Mente' });
+    const text = within(screen.getByRole('radiogroup', { name: 'Modo inicial' })).getByRole('radio', { name: /Bypass/ }).textContent ?? '';
+    expect(text).toMatch(/edita/i);
+    expect(text).toMatch(/comandos/i);
+    expect(text).toMatch(/sin preguntar/i);
+    expect(text.replace(/^Bypass/, '')).not.toMatch(/^Como Auto/);
+  });
+
   it('los interruptores de subagentes arman workers (todos activos = [])', async () => {
     const calls = fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }), 'PATCH /settings': patchSettings });
     render(<SettingsView section="mente" />);

@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** media
 - **Archivos:** `src/ui/features/settings/MindSection.tsx:18-22`, `src/ui/features/settings/MindSection.tsx:159-184`, `src/ui/features/chat/format.ts:7-12`, `src/ui/features/chat/components/ModeChip.tsx:36`, `src/ui/features/chat/ChatView.tsx:360`, `src/core/conductor/prompt.ts:143-153`, `src/core/conductor/session.ts:59-67`, `src/shared/api.ts:20-23`, `tests/ui/settings/settings.test.tsx:52-61`, `tests/ui/chat/mode-chip.test.tsx:16`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Desde el issue 8 (commit `ee6b125`, `docs/plan/issues/08-bypass-autonomo.md`), el modo Bypass ya no es «Auto con más
