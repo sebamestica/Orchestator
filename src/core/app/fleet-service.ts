@@ -437,7 +437,7 @@ export class FleetService {
     if (!adapter) return undefined;
     let quota: QuotaProvider | undefined;
     try {
-      quota = await d.quotaProviderFactory(agent, await d.registry.secretsFor(agent.config));
+      quota = await d.quotaProviderFactory(agent, lazySecrets(() => d.registry.secretsFor(agent.config)));
     } catch (err) {
       this.#log(redactSecrets(`flota: cupo de ${id} no disponible: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
     }

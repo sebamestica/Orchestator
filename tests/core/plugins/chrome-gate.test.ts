@@ -263,7 +263,7 @@ describe('puerta MCP del Chrome personal: cierre durante la toma', () => {
 
   it('con el gestor real, cerrar en pleno mkdir del candado no deja la carpeta ni un owner', async () => {
     const root = await tempDir('orq-gate-');
-    const brake = deferred<void>();
+    const brake = deferred<undefined>();
     let braked = false;
     const locks = new LockManager({
       root,
@@ -278,7 +278,7 @@ describe('puerta MCP del Chrome personal: cierre durante la toma', () => {
     const t = gateWith(root, locks);
     await until(() => braked);
     const closing = t.g.close();
-    brake.resolve();
+    brake.resolve(undefined);
     await closing;
     // Deja terminar la toma que estaba frenada: no debe quedar nada después.
     await wait(200);

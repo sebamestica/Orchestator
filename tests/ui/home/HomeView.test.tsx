@@ -32,7 +32,6 @@ function task(projectId: string, updatedAt: string): TaskRecord {
       dependsOn: [],
       acceptance: ['Criterio'],
       difficulty: 'low',
-      suggestedAgent: null,
       contextRefs: [],
       skillRefs: [],
     },

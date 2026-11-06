@@ -97,7 +97,7 @@ describe('compose: fábrica de adaptadores', () => {
     // `claude` es la mente (primer Claude habilitado): su clave paga también lo de `orquestador`.
     expect(await seen.get('claude')?.spentUsd?.()).toBe(15);
     expect(await seen.get('claude-b')?.spentUsd?.()).toBe(0);
-    const snap = await (await comp.quotaProviderFactory({ ...claude, quotaMethod: 'manual-budget' }, {}))?.read();
+    const snap = await (await comp.quotaProviderFactory({ ...claude, quotaMethod: 'manual-budget' }, async () => ({})))?.read();
     expect(snap?.buckets[0]).toMatchObject({ remainingUnits: { amount: 5, unit: 'usd' }, remainingFraction: 0.25 });
 
     // Lo que lleva en curso un proceso vivo (otra tarea o un chat) también se descuenta, hasta que termina.
