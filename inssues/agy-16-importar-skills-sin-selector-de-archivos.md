@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/settings/SkillsSection.tsx:93-100`, `src/ui/features/settings/SkillsSection.tsx:57-64`, `src/ui/features/chat/store.ts:52-58`, `apps/desktop/src/ipc.ts:39-44`, `apps/desktop/src/preload.ts:13-20`, `src/core/fs/folders.ts:422-437`, `src/core/app/f5-servidor.ts:166-177`, `src/core/server/app.ts:682-694`, `src/core/skills/hub.ts:255-302`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

@@ -1,8 +1,9 @@
 import { Button, Chip, Input, Spinner } from '@heroui/react';
-import { Check, PackagePlus, X } from 'lucide-react';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Check, FileArchive, FolderOpen, PackagePlus, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { z } from 'zod';
 import { api } from '../../api/client.ts';
+import { pickFolder } from '../chat/store.ts';
 import { errorText, isMissingRoute, Notice, SettingsCard } from './shared.tsx';
 
 /** Lo que muestra la interfaz de `GET /skills` (el núcleo lo manda como `unknown`). */
@@ -31,6 +32,7 @@ const quarantined = z.object({
 const importResponse = z.object({ result: quarantined });
 const quarantineResponse = z.object({ skills: z.array(quarantined) });
 type Quarantined = z.infer<typeof quarantined>;
+const pickedPath = z.object({ path: z.string().nullable() });
 
 const MAX_SHOWN = 200;
 
@@ -42,6 +44,7 @@ export function SkillsSection() {
   const [pending, setPending] = useState<Quarantined[]>([]);
   const [pendingError, setPendingError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const zipInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -65,6 +68,30 @@ export function SkillsSection() {
     void load();
     void loadPending();
   }, [load, loadPending]);
+
+  // Los selectores solo rellenan el campo: la persona ve la ruta antes de mandarla a cuarentena.
+  const fillFrom = async (pick: () => Promise<string | null>) => {
+    setMessage(null);
+    try {
+      const path = await pick();
+      if (path) setSource(path);
+    } catch (err) {
+      setMessage({ tone: 'error', text: errorText(err) });
+    }
+  };
+  // En escritorio, el <input type="file"> da la ruta real con `pathForFile`; en la web la elige el núcleo.
+  const pickZip = () => {
+    if (window.orq) zipInput.current?.click();
+    else void fillFrom(async () => pickedPath.parse(await api.post<unknown>('/fs/pick-zip')).path);
+  };
+  const onZipChosen = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const path = window.orq?.pathForFile(file) ?? null;
+    if (path) setSource(path);
+    else setMessage({ tone: 'error', text: 'No se pudo leer la ruta del .zip. Pégala en el campo.' });
+  };
 
   const doImport = async (e: FormEvent) => {
     e.preventDefault();
@@ -104,6 +131,15 @@ export function SkillsSection() {
       <SettingsCard title="Importar" description="Carpeta o .zip local. Entra en cuarentena: nada se ejecuta hasta que la apruebas.">
         <form className="flex items-center gap-2 p-4" onSubmit={(e) => void doImport(e)}>
           <Input aria-label="Ruta de la skill" placeholder="C:\Users\yo\Downloads\mi-skill.zip" value={source} onChange={(e) => setSource(e.target.value)} className="min-w-0 flex-1 font-mono" disabled={importing} />
+          <Button size="sm" variant="secondary" isDisabled={importing} onPress={() => void fillFrom(pickFolder)}>
+            <FolderOpen className="size-4" aria-hidden="true" />
+            Carpeta…
+          </Button>
+          <Button size="sm" variant="secondary" isDisabled={importing} onPress={pickZip}>
+            <FileArchive className="size-4" aria-hidden="true" />
+            Zip…
+          </Button>
+          <input ref={zipInput} type="file" accept=".zip,application/zip" hidden aria-label="Archivo .zip de la skill" onChange={onZipChosen} />
           <Button type="submit" size="sm" variant="primary" isPending={importing} isDisabled={source.trim() === ''}>
             <PackagePlus className="size-4" aria-hidden="true" />
             Importar

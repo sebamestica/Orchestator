@@ -17,7 +17,7 @@ import {
   type Settings,
   type TaskBrief,
 } from '../../shared/index.ts';
-import { createFolderPicker, FolderError, gateForWorkspace, inspectFolder, listFolder, listRoots, type FsEnv } from '../fs/folders.ts';
+import { createFolderPicker, createZipPicker, FolderError, gateForWorkspace, inspectFolder, listFolder, listRoots, type FsEnv } from '../fs/folders.ts';
 import { ApiError, apiSchemas, type RouteModule, type RouteModuleContext } from '../server/index.ts';
 import { staticUi } from '../server/static.ts';
 import { mindCandidates, mindSupport, settingsStoreFor, type SettingsStore } from '../settings/index.ts';
@@ -46,6 +46,8 @@ export interface F5ServerOptions {
   settings?: SettingsStore;
   /** Diálogo de carpetas (`POST /fs/pick-folder`). Sin él, la ruta responde 501. */
   pickFolder?: () => Promise<string | null>;
+  /** Diálogo de archivos `.zip` (`POST /fs/pick-zip`, para importar skills). Sin él, la ruta responde 501. */
+  pickZip?: () => Promise<string | null>;
   /** Carpeta de la interfaz compilada; sin ella no se sirve la interfaz (las rutas de la API siguen igual). */
   uiDir?: string;
   /** Plataforma, perfil y entorno para el explorador de carpetas (pruebas). */
@@ -171,6 +173,23 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
       async () => {
         const pick = opts.pickFolder;
         if (!pick) throw new ApiError(501, 'not_configured', 'El diálogo de carpetas no está configurado en este arranque');
+        return { path: await fsCall(pick) };
+      },
+    );
+    r.add(
+      {
+        method: 'post',
+        path: '/fs/pick-zip',
+        tag: 'Carpetas',
+        summary: 'Abre el diálogo de archivos de Windows filtrado a .zip y devuelve el elegido',
+        description:
+          'Para importar una skill desde la interfaz web (Electron usa su propio selector). Espera a que el usuario elija o cancele (`path: null`); con un diálogo ya abierto, la petición espera esa misma respuesta. 501 fuera de Windows.',
+        response: pickFolderResponse,
+        errors: [501],
+      },
+      async () => {
+        const pick = opts.pickZip;
+        if (!pick) throw new ApiError(501, 'not_configured', 'El diálogo de archivos no está configurado en este arranque');
         return { path: await fsCall(pick) };
       },
     );
@@ -301,6 +320,7 @@ export function f5Servidor(comp: Composition): RouteModule {
   return createF5ServerRoutes({
     settings,
     pickFolder: createFolderPicker({ powershellPath: comp.config.powershellPath }),
+    pickZip: createZipPicker({ powershellPath: comp.config.powershellPath }),
     uiDir: resolveUiDir(comp.deps.env),
   });
 }

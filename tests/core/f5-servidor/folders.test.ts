@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createFolderPicker,
+  createZipPicker,
   currentBranch,
   deduceGate,
   encodePowerShell,
@@ -289,6 +290,16 @@ function fakeSpawn(result: { stdout?: string; code?: number; stderr?: string }, 
   }) as unknown as SpawnFn;
 }
 
+describe('POST /fs/pick-zip', () => {
+  it('con el selector inyectado responde el .zip elegido o null; sin él, 501', async () => {
+    const answers = ['C:\\Descargas\\mi-skill.zip', null];
+    const t = makeF5App({ pickZip: async () => answers.shift() ?? null });
+    expect((await t.req('POST', '/fs/pick-zip')).json).toEqual({ path: 'C:\\Descargas\\mi-skill.zip' });
+    expect((await t.req('POST', '/fs/pick-zip')).json).toEqual({ path: null });
+    expect((await makeF5App().req('POST', '/fs/pick-zip')).status).toBe(501);
+  });
+});
+
 describe('POST /fs/pick-folder', () => {
   it('con el selector inyectado responde la carpeta elegida o null', async () => {
     const answers = ['C:\\dev\\Vetworld', null];
@@ -322,6 +333,18 @@ describe('POST /fs/pick-folder', () => {
     expect(await createFolderPicker({ powershellPath: 'powershell.exe', platform: 'win32', spawnFn: fakeSpawn({ stdout: '' }, calls) })()).toBeNull();
     await expect(createFolderPicker({ powershellPath: 'powershell.exe', platform: 'win32', spawnFn: fakeSpawn({ code: 1, stderr: 'Add-Type falló' }, calls) })()).rejects.toThrow(FolderError);
     await expect(createFolderPicker({ powershellPath: 'powershell.exe', platform: 'linux' })()).rejects.toMatchObject({ code: 'unsupported' });
+  });
+
+  it('selector de .zip: OpenFileDialog filtrado a *.zip, ruta normalizada o null al cancelar', async () => {
+    const calls: { cmd: string; args: readonly string[]; opts: unknown }[] = [];
+    const pick = createZipPicker({ powershellPath: 'C:\\PS\\powershell.exe', platform: 'win32', spawnFn: fakeSpawn({ stdout: '\uFEFFC:/Users/Yo/Descargas/mi-skill.zip\r\n' }, calls) });
+    expect(await pick()).toBe('C:\\Users\\Yo\\Descargas\\mi-skill.zip');
+    const encoded = calls[0]?.args[calls[0].args.indexOf('-EncodedCommand') + 1] ?? '';
+    const script = Buffer.from(encoded, 'base64').toString('utf16le');
+    expect(script).toContain('System.Windows.Forms.OpenFileDialog');
+    expect(script).toContain('|*.zip');
+    expect(await createZipPicker({ powershellPath: 'powershell.exe', platform: 'win32', spawnFn: fakeSpawn({ stdout: '' }, calls) })()).toBeNull();
+    await expect(createZipPicker({ powershellPath: 'powershell.exe', platform: 'linux' })()).rejects.toMatchObject({ code: 'unsupported' });
   });
 
   it('un solo diálogo a la vez: dos peticiones simultáneas comparten la respuesta', async () => {

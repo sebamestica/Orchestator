@@ -3584,6 +3584,52 @@
         }
       }
     },
+    "/fs/pick-zip": {
+      "post": {
+        "tags": [
+          "Carpetas"
+        ],
+        "summary": "Abre el diálogo de archivos de Windows filtrado a .zip y devuelve el elegido",
+        "operationId": "postFsPickZip",
+        "description": "Para importar una skill desde la interfaz web (Electron usa su propio selector). Espera a que el usuario elija o cancele (`path: null`); con un diálogo ya abierto, la petición espera esa misma respuesta. 501 fuera de Windows.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "path": "C:\\Users\\yo\\Downloads\\mi-skill.zip"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "501": {
+            "$ref": "#/components/responses/E501"
+          }
+        }
+      }
+    },
     "/projects/inspect": {
       "post": {
         "tags": [

@@ -4668,6 +4668,54 @@
               "body": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\"\n}"
             }
           ]
+        },
+        {
+          "name": "/fs/pick-zip",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/fs/pick-zip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "fs",
+                "pick-zip"
+              ]
+            },
+            "description": "Abre el diálogo de archivos de Windows filtrado a .zip y devuelve el elegido\n\nPara importar una skill desde la interfaz web (Electron usa su propio selector). Espera a que el usuario elija o cancele (`path: null`); con un diálogo ya abierto, la petición espera esa misma respuesta. 501 fuera de Windows."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/fs/pick-zip",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "fs",
+                    "pick-zip"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"path\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\"\n}"
+            }
+          ]
         }
       ]
     },

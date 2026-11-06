@@ -162,6 +162,7 @@ describe('rutas de ajustes', () => {
       ['GET', '/mind/candidates'],
       ['GET', '/fs/list'],
       ['POST', '/fs/pick-folder'],
+      ['POST', '/fs/pick-zip'],
       ['POST', '/projects/inspect'],
       ['POST', '/projects/from-folder'],
       ['POST', '/tasks/manual'],

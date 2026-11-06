@@ -192,6 +192,7 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
 
   'GET /fs/list': { responseExample: ex.fsList },
   'POST /fs/pick-folder': { responseExample: { path: 'C:\\dev\\Vetworld' } },
+  'POST /fs/pick-zip': { responseExample: { path: 'C:\\Users\\yo\\Downloads\\mi-skill.zip' } },
 
   'GET /plugins': { responseExample: { plugins: [chats.chromePlugin, chats.canvaPlugin] } },
   'POST /plugins/:id/connect': { paramVars: { id: 'pluginId' }, responseExample: { plugin: chats.chromePlugin } },

@@ -422,9 +422,8 @@ export function encodePowerShell(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-/** Script del diálogo `FolderBrowserDialog` (ventana dueña TopMost para que aparezca delante del navegador). */
-export function folderPickerScript(description = 'Elige la carpeta del proyecto'): string {
-  const text = description.replaceAll("'", "''");
+/** Envuelve un diálogo de Windows Forms: ventana dueña TopMost (para que aparezca delante del navegador) y UTF-8. */
+function dialogScript(dialog: readonly string[], chosen: string): string {
   return [
     "$ErrorActionPreference = 'Stop'",
     '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
@@ -433,14 +432,39 @@ export function folderPickerScript(description = 'Elige la carpeta del proyecto'
     '$owner = New-Object System.Windows.Forms.Form',
     '$owner.TopMost = $true',
     '$owner.ShowInTaskbar = $false',
-    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
-    `$dialog.Description = '${text}'`,
-    '$dialog.ShowNewFolderButton = $true',
-    "if (Test-Path -LiteralPath 'C:\\dev') { $dialog.SelectedPath = 'C:\\dev' }",
+    ...dialog,
     '$result = $dialog.ShowDialog($owner)',
-    'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($dialog.SelectedPath) }',
+    `if ($result -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write(${chosen}) }`,
     '$owner.Dispose()',
   ].join('\n');
+}
+
+/** Script del diálogo `FolderBrowserDialog`. */
+export function folderPickerScript(description = 'Elige la carpeta del proyecto'): string {
+  const text = description.replaceAll("'", "''");
+  return dialogScript(
+    [
+      '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+      `$dialog.Description = '${text}'`,
+      '$dialog.ShowNewFolderButton = $true',
+      "if (Test-Path -LiteralPath 'C:\\dev') { $dialog.SelectedPath = 'C:\\dev' }",
+    ],
+    '$dialog.SelectedPath',
+  );
+}
+
+/** Script del diálogo `OpenFileDialog` filtrado a `.zip` (para importar una skill). */
+export function zipPickerScript(): string {
+  return dialogScript(
+    [
+      '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
+      "$dialog.Title = 'Elige el .zip de la skill'",
+      "$dialog.Filter = 'Skill comprimida (*.zip)|*.zip'",
+      '$dialog.CheckFileExists = $true',
+      '$dialog.Multiselect = $false',
+    ],
+    '$dialog.FileName',
+  );
 }
 
 export type SpawnFn = typeof spawn;
@@ -459,6 +483,15 @@ export interface FolderPickerOptions {
  * `-WindowStyle Hidden`. Un solo diálogo a la vez: las llamadas mientras está abierto esperan la misma respuesta.
  */
 export function createFolderPicker(opts: FolderPickerOptions): () => Promise<string | null> {
+  return createDialogPicker(opts, folderPickerScript(), 'de carpetas');
+}
+
+/** Selector de un `.zip` para la web, con las mismas garantías que `createFolderPicker`. */
+export function createZipPicker(opts: FolderPickerOptions): () => Promise<string | null> {
+  return createDialogPicker(opts, zipPickerScript(), 'de archivos');
+}
+
+function createDialogPicker(opts: FolderPickerOptions, script: string, kind: string): () => Promise<string | null> {
   const platform = opts.platform ?? process.platform;
   const spawnFn = opts.spawnFn ?? spawn;
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
@@ -467,15 +500,15 @@ export function createFolderPicker(opts: FolderPickerOptions): () => Promise<str
   const run = () =>
     new Promise<string | null>((resolvePick, reject) => {
       if (platform !== 'win32') {
-        reject(new FolderError('unsupported', 'El diálogo de carpetas solo existe en Windows'));
+        reject(new FolderError('unsupported', `El diálogo ${kind} solo existe en Windows`));
         return;
       }
-      const args = ['-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodePowerShell(folderPickerScript())];
+      const args = ['-NoProfile', '-NonInteractive', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodePowerShell(script)];
       let child;
       try {
         child = spawnFn(opts.powershellPath, args, { shell: false, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch {
-        reject(new FolderError('failed', 'No se pudo abrir el diálogo de carpetas (PowerShell)'));
+        reject(new FolderError('failed', `No se pudo abrir el diálogo ${kind} (PowerShell)`));
         return;
       }
       let out = '';
@@ -496,7 +529,7 @@ export function createFolderPicker(opts: FolderPickerOptions): () => Promise<str
       timer.unref();
       child.once('error', () => {
         clearTimeout(timer);
-        reject(new FolderError('failed', 'No se pudo abrir el diálogo de carpetas (PowerShell)'));
+        reject(new FolderError('failed', `No se pudo abrir el diálogo ${kind} (PowerShell)`));
       });
       child.once('close', (code) => {
         clearTimeout(timer);
@@ -506,7 +539,7 @@ export function createFolderPicker(opts: FolderPickerOptions): () => Promise<str
         }
         if (code !== 0) {
           const detail = redactSecrets(err.trim().split(/\r?\n/)[0] ?? '').slice(0, 200);
-          reject(new FolderError('failed', `El diálogo de carpetas falló${detail ? `: ${detail}` : ''}`));
+          reject(new FolderError('failed', `El diálogo ${kind} falló${detail ? `: ${detail}` : ''}`));
           return;
         }
         const picked = out.replace(/^\uFEFF/, '').trim();
