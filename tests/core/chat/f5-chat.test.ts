@@ -5,7 +5,7 @@ import { compose, type Composition } from '../../../src/core/app/compose.ts';
 import { chatRouteModule, lazyFleetPort, type ChatWiring } from '../../../src/core/app/f5-chat.ts';
 import { ROUTE_MODULE_FACTORIES } from '../../../src/core/app/route-modules.ts';
 import type { ChatService } from '../../../src/core/chat/index.ts';
-import { PluginStateStore } from '../../../src/core/plugins/index.ts';
+import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, PluginStateStore } from '../../../src/core/plugins/index.ts';
 import { AgentRegistry } from '../../../src/core/registry/index.ts';
 import { EventHub, createApp, generateToken } from '../../../src/core/server/index.ts';
 import { MemoryVault } from '../../../src/core/vault/index.ts';
@@ -159,6 +159,11 @@ describe('f5-chat: cableado con la composición', () => {
     const first = s.q.calls[0]?.options as Options;
     expect(Object.keys(first.mcpServers ?? {})).toContain('chrome-personal');
     expect(first.allowedTools).toContain('mcp__chrome-personal__*');
+    // Con las reglas de la flota: pestaña propia, sin contraseñas, nunca otro navegador.
+    const rulesOf = (o: Options) => (o.systemPrompt as string[]).join('\n');
+    expect(rulesOf(first)).toContain(CHROME_TAB_NOTE);
+    expect(rulesOf(first)).toContain('no escribas contraseñas');
+    expect(rulesOf(first)).not.toContain(NO_BROWSER_NOTE);
 
     await s.comp.plugins.disconnect('chrome');
     // La sesión vieja deja de usarlo en el acto (p. ej. un subagente que sigue trabajando).
@@ -170,6 +175,8 @@ describe('f5-chat: cableado con la composición', () => {
     expect(Object.keys(second.mcpServers ?? {})).not.toContain('chrome-personal');
     expect(second.allowedTools).not.toContain('mcp__chrome-personal__*');
     expect(second.resume).toBe('sdk-1');
+    expect(rulesOf(second)).toContain(NO_BROWSER_NOTE);
+    expect(rulesOf(second)).not.toContain(CHROME_TAB_NOTE);
 
     // Al revés: conectarlo con el chat abierto lo entrega en el mensaje siguiente.
     chromeConnected(s.comp);

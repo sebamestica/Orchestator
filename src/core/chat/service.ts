@@ -91,6 +91,8 @@ export type ChatHub = Pick<EventHub, 'append' | 'publish' | 'publishTask'>;
 export interface MindPlugins {
   mcpServers: Readonly<Record<string, McpServerConfig>>;
   env: Readonly<Record<string, string>>;
+  /** Reglas de uso para el prompt (`pluginsSection`: pestaña propia, sin contraseñas, «sin navegador»…). */
+  rules?: string;
 }
 
 /** De dónde sale la mente: agentes registrados y su entorno (clave de la bóveda, solo en memoria). */
@@ -231,10 +233,10 @@ export function composeUserText(text: string, files: readonly Pick<Attachment, '
   return [text.trim() ? text : '', lines.join('\n')].filter(Boolean).join('\n\n');
 }
 
-/** Hash de los servidores y de su entorno (con los secretos): cambia si cambia cualquier valor, sin guardarlo. */
+/** Hash de los servidores, su entorno (con los secretos) y sus reglas: cambia si cambia cualquier valor, sin guardarlo. */
 function pluginsFingerprint(plugins: MindPlugins): string {
   const sorted = (o: Readonly<Record<string, unknown>>) => Object.keys(o).sort().map((k) => [k, o[k]]);
-  return createHash('sha256').update(JSON.stringify([sorted(plugins.mcpServers), sorted(plugins.env)])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([sorted(plugins.mcpServers), sorted(plugins.env), plugins.rules ?? ''])).digest('hex');
 }
 
 function titleFrom(text: string, attachments: readonly Attachment[]): string {
@@ -748,6 +750,7 @@ export class ChatService {
       ...(this.#deps.query ? { query: this.#deps.query } : {}),
       ...(sdkSessionId ? { resume: sdkSessionId } : {}),
       ...(Object.keys(plugins.mcpServers).length ? { mcpServers: { ...plugins.mcpServers } } : {}),
+      ...(plugins.rules ? { pluginRules: plugins.rules } : {}),
       ...(port.pluginLive ? { pluginLive: (server: string) => port.pluginLive?.(mind.id, server) ?? true } : {}),
       ...(left !== undefined ? { maxBudgetUsd: left } : {}),
       onStderr: (line) => this.#log(`chat ${chatId} (stderr): ${line.slice(0, 500)}`),

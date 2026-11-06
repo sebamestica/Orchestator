@@ -15,6 +15,7 @@ import { ClaudeSdkTranslator } from '../adapters/claude-sdk/index.ts';
 import { AttachmentStore, ChatService, conversationsRoot, registerChatRoutes, type MindPlugins, type MindPort } from '../chat/index.ts';
 import { CONDUCTOR_AGENT_ID, type ConductorQueryFn, type FleetPort, type FleetTaskStatus } from '../conductor/index.ts';
 import type { QueueEntry } from '../orchestrator/index.ts';
+import { pluginsSection } from '../plugins/index.ts';
 import type { RouteModule } from '../server/index.ts';
 import type { Composition } from './compose.ts';
 import { mindDenyPaths, plannerPort, projectSkillsPort, taskProjectOf, withTaskProjects } from './conductor.ts';
@@ -64,14 +65,17 @@ export function lazyFleetPort(comp: Pick<Composition, 'fleet'> & Partial<Pick<Co
 
 /**
  * Plugins de la composición para la mente (Claude), leídos en cada mensaje (`ChatService` decide con ellos si la
- * sesión viva sirve) y su estado de ahora para la guardia. Los valores secretos (token de Canva) van por variables de
- * entorno del proceso del SDK (`${VAR}` en la configuración), nunca en los argumentos.
+ * sesión viva sirve) y su estado de ahora para la guardia. Las reglas (notas del permiso e `instructions` de cada
+ * servidor, las mismas que recibe la flota) salen del mapa neutro, antes de `claudeMcpOptions`, que no las lleva. Los
+ * valores secretos (token de Canva) van por variables de entorno del proceso del SDK (`${VAR}` en la configuración),
+ * nunca en los argumentos.
  */
 function mindPlugins(comp: Composition): Required<Pick<MindPort, 'plugins' | 'pluginLive'>> {
   return {
     async plugins(agentId: string): Promise<MindPlugins> {
       try {
-        return claudeMcpOptions(await comp.plugins.mcpServersFor(agentId, 'claude-sdk'));
+        const neutral = await comp.plugins.forMind(agentId);
+        return { ...claudeMcpOptions(neutral.servers), rules: pluginsSection(neutral) };
       } catch {
         return { mcpServers: {}, env: {} };
       }

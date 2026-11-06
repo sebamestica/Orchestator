@@ -45,6 +45,24 @@ function optionsOf(q: ReturnType<typeof scriptedQuery>): Options {
   return first.options;
 }
 
+describe('ConductorSession: reglas de los plugins', () => {
+  it('pluginRules va como un bloque aparte al final del prompt de sistema; sin la opción, el prompt no cambia', () => {
+    const plain = session();
+    plain.s.send('hola');
+    const before = optionsOf(plain.q).systemPrompt as string[];
+    const rules = '## Plugins del orquestador\n- Regla X de los plugins';
+    const { s, q } = session({ pluginRules: rules });
+    s.send('hola');
+    const prompt = optionsOf(q).systemPrompt as string[];
+    expect(prompt).toHaveLength(before.length + 1);
+    expect(prompt.at(-1)).toBe(rules);
+    expect(prompt[0]).toBe(CONDUCTOR_PROMPT_PREFIX);
+    expect(before.join('\n')).not.toContain('Regla X');
+    plain.s.close();
+    s.close();
+  });
+});
+
 describe('ConductorSession: opciones del SDK', () => {
   it('arma herramientas propias, solo lectura y subagentes, sin Bash ni edición', () => {
     const { s, q } = session();

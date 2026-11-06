@@ -197,6 +197,11 @@ export interface ConductorSessionOptions {
   quotaFloor?: number;
   /** Notas del usuario para esta sesión (van al final del prompt de sistema). */
   notes?: string;
+  /**
+   * Reglas de los plugins (`pluginsSection`: pestaña propia en Chrome, sin contraseñas, «esta sesión no tiene
+   * navegador»…): un bloque aparte del prompt de sistema, también sin servidores (solo notas).
+   */
+  pluginRules?: string;
   /** Reanudar una sesión del SDK por su `session_id`. */
   resume?: string;
   sessionId?: string;
@@ -363,6 +368,7 @@ export class ConductorSession {
         }),
         // En chat no hay crear_tareas: el destino no se anota.
         ...(opts.recordDestination && !standalone && this.mode !== 'chat' ? [DESTINATION_PROMPT_TEXT] : []),
+        ...(opts.pluginRules?.trim() ? [redactSecrets(opts.pluginRules, this.#secrets)] : []),
       ],
       mcpServers: { ...Object.fromEntries(plugins), [this.tools.serverName]: this.tools.server },
       strictMcpConfig: true,

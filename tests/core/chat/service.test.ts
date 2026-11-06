@@ -5,6 +5,7 @@ import type { HookCallbackMatcher, Options, SDKMessage } from '@anthropic-ai/cla
 import { afterEach, describe, expect, it } from 'vitest';
 import { ChatError, ChatService, composeUserText, resolveMind } from '../../../src/core/chat/index.ts';
 import { ClaudeSdkTranslator } from '../../../src/core/adapters/claude-sdk/index.ts';
+import { CHROME_TAB_NOTE, NO_BROWSER_NOTE, chromeServerSpec, pluginsSection } from '../../../src/core/plugins/index.ts';
 import { DEFAULT_SETTINGS, agentConfigSchema } from '../../../src/shared/index.ts';
 import type { Chat } from '../../../src/shared/index.ts';
 import { MIND_KEY, PNG, bench, claudeAgent, closeBenches, echoTurn, sdkInit, sdkResult, sdkText, settleChat, tick, type ChatBench, type TurnFn } from './helpers.ts';
@@ -589,6 +590,31 @@ describe('ChatService: plugins para la mente', () => {
     expect(b.q.calls).toHaveLength(2);
     expect(optionsOf(b, 1).resume).toBe('sdk-1');
     expect(optionsOf(b, 1).env?.ORQ_MCP_CANVA_AUTHORIZATION).toBe(token);
+  });
+
+  it('las reglas de los plugins llegan al prompt de la mente (también solo notas, sin servidores) y cambiarlas recrea la sesión', async () => {
+    const chrome = chromeServerSpec({ command: 'cmd.exe', args: ['/c', 'chrome-personal.cmd'] }, { agent: 'claude', task: 'sesion', locksRoot: 'C:\\locks' });
+    let rules = pluginsSection({ servers: { 'chrome-personal': chrome }, notes: [] });
+    let mcpServers: Record<string, { type: 'stdio'; command: string; args: string[] }> = { 'chrome-personal': { type: 'stdio', command: 'node', args: ['puerta.mjs'] } };
+    const b = await bench({ plugins: async () => ({ mcpServers, env: {}, rules }) });
+    const chat = b.service.create({ projectId: 'demo' });
+    await turn(b, chat.id, 'navega');
+    const first = (optionsOf(b).systemPrompt as string[]).join('\n');
+    expect(first).toContain(CHROME_TAB_NOTE);
+    expect(first).toContain('no escribas contraseñas');
+    // Chrome desconectado: sin servidores, pero con la nota de que no hay navegador.
+    mcpServers = {};
+    rules = pluginsSection({ servers: {}, notes: [NO_BROWSER_NOTE] });
+    await turn(b, chat.id, 'abre una página');
+    expect(b.q.calls).toHaveLength(2);
+    const second = (optionsOf(b, 1).systemPrompt as string[]).join('\n');
+    expect(second).toContain(NO_BROWSER_NOTE);
+    expect(second).not.toContain(CHROME_TAB_NOTE);
+    // Solo cambia el texto de las reglas: cambia la forma y la sesión se recrea.
+    rules = pluginsSection({ servers: {}, notes: [NO_BROWSER_NOTE, 'Canva no está disponible en esta sesión.'] });
+    await turn(b, chat.id, 'tres');
+    expect(b.q.calls).toHaveLength(3);
+    expect((optionsOf(b, 2).systemPrompt as string[]).join('\n')).toContain('Canva no está disponible');
   });
 
   it('pluginLive: la guardia de la sesión viva niega en el acto un plugin que se desconectó', async () => {

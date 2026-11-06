@@ -172,6 +172,17 @@ describe('plugin Chrome: entrega a los agentes (una sola vía)', () => {
     expect(await h.service.mcpServersFor('api-main', 'api')).toEqual({});
   });
 
+  it('forMind: la mente recibe los servidores con sus instrucciones y, sin Chrome, la nota de no tener navegador', async () => {
+    const h = await chromeHarness('ok');
+    await h.service.connect('chrome', {});
+    const on = await h.service.forMind('claude-main');
+    expect(Object.keys(on.servers)).toEqual(['chrome-personal']);
+    expect(on.servers['chrome-personal']?.instructions).toContain(CHROME_TAB_NOTE);
+    expect(on.notes).toEqual([]);
+    await h.service.disconnect('chrome');
+    expect(await h.service.forMind('claude-main')).toEqual({ servers: {}, notes: [NO_BROWSER_NOTE] });
+  });
+
   it('ningún agente recibe un perfil aislado ni otro Chrome', async () => {
     const h = await chromeHarness('ok');
     await h.service.connect('chrome', {});

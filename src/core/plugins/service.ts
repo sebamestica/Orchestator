@@ -268,6 +268,14 @@ export class PluginService {
     return { ok: false, title: 'No se pudo conectar Canva', message: result.message };
   }
 
+  /**
+   * Servidores y notas para la mente (sin tarea), en forma neutra: con ellos se arman sus reglas (`pluginsSection`,
+   * que lee las `instructions` de cada servidor) antes de traducirlos al SDK.
+   */
+  forMind(agentId: string): Promise<Pick<McpGrant, 'servers' | 'notes'>> {
+    return this.#collect(agentId, 'claude-sdk');
+  }
+
   /** Servidores MCP para un agente (la mente: sin tarea). Para una ejecución, usar `grant`. */
   async mcpServersFor(agentId: string, kind: AgentKind, taskId?: string): Promise<McpServerMap> {
     return (await this.#collect(agentId, kind, taskId)).servers;

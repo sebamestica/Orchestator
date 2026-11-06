@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** media
 - **Archivos:** `src/core/plugins/service.ts:272`, `src/core/plugins/service.ts:273`, `src/core/plugins/service.ts:319`, `src/core/plugins/service.ts:335`, `src/core/plugins/service.ts:342`, `src/core/plugins/chrome.ts:59`, `src/core/plugins/chrome.ts:107`, `src/core/plugins/mcp.ts:96`, `src/core/plugins/mcp.ts:102`, `src/core/adapters/claude-sdk/adapter.ts:164`, `src/core/adapters/claude-sdk/adapter.ts:379`, `src/core/adapters/codex-cli/index.ts:172`, `src/core/app/f5-chat.ts:77`, `src/core/chat/service.ts:706`, `src/core/chat/service.ts:732`, `src/core/conductor/session.ts:288`, `src/core/conductor/session.ts:342`, `src/core/conductor/prompt.ts:127`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
