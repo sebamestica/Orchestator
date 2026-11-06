@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CoreSupervisor, type SpawnFn } from '../../apps/desktop/src/core-supervisor.ts';
 import { loadDesktopConfig, type DesktopConfig } from '../../apps/desktop/src/lib/config.ts';
 import type { FetchLike } from '../../apps/desktop/src/lib/core-client.ts';
-import { encodeSession, type Cipher } from '../../apps/desktop/src/lib/session-file.ts';
+import { decodeSession, encodeSession, type Cipher } from '../../apps/desktop/src/lib/session-file.ts';
 
 const FAKE_CORE = fileURLToPath(new URL('./fake-core.ts', import.meta.url));
 const PORT = 47899;
@@ -218,7 +219,7 @@ describe('CoreSupervisor', () => {
   it('un núcleo vivo sin sesión (p. ej. el de la flota) no se toca: la app explica qué pasa', async () => {
     const sup = supervisor({ fetch: fakeFetch({ up: true, running: 1 }) });
     const r = await sup.connect();
-    expect(r).toMatchObject({ ok: false, title: `Ya hay un núcleo en 127.0.0.1:${PORT} que no abrió Berland` });
+    expect(r).toMatchObject({ ok: false, title: `Berland no tiene el token del núcleo de 127.0.0.1:${PORT}` });
     expect(await sup.onAppClose()).toMatchObject({ stop: false });
     expect(killed).toEqual([]);
   });
@@ -281,6 +282,47 @@ describe('CoreSupervisor', () => {
     expect(await supervisor({ nodePath: null }).connect()).toMatchObject({ ok: false, title: 'No encuentro node.exe en el PATH' });
     config = { ...config, repoRoot: join(dir, 'no-existe') };
     expect(await supervisor().connect()).toMatchObject({ ok: false, title: 'No encuentro el núcleo' });
+  });
+
+  it('si el antivirus bloquea un instante el rename de la sesión, reintenta y no deja temporales', async () => {
+    let fails = 2;
+    const flaky = async (from: string, to: string) => {
+      if (fails-- > 0) throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+      await rename(from, to);
+    };
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}), rename: flaky });
+    const r = await sup.connect();
+    expect(r).toMatchObject({ ok: true, core: { sessionSaved: true } });
+    expect(decodeSession(readFileSync(config.sessionPath, 'utf8'), cipher)).toMatchObject({ token: TOKEN, port: PORT });
+    expect(readdirSync(config.dataDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('si la sesión no se guarda, no deja el temporal, avisa al cerrar con trabajo y la reapertura no culpa a una terminal', async () => {
+    const always = async () => {
+      throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+    };
+    const net = { up: false, running: 0 };
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}), fetch: fakeFetch(net), rename: always });
+    const r = await sup.connect();
+    expect(r).toMatchObject({ ok: true, core: { ownership: 'launched', sessionSaved: false } });
+    expect(readdirSync(config.dataDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    expect(existsSync(config.sessionPath)).toBe(false);
+
+    Object.assign(net, { up: true, running: 1 });
+    const d = await sup.onAppClose();
+    expect(d).toMatchObject({ stop: false, unsavedSession: true });
+    expect(killed).toEqual([]);
+
+    const again = await supervisor({ fetch: fakeFetch({ up: true, running: 1 }) }).connect();
+    expect(again.ok).toBe(false);
+    if (!again.ok) {
+      expect(again.hint).toContain('Administrador de tareas');
+      expect(again.detail).toContain('no pudo guardar su sesión');
+    }
+
+    // «Detener núcleo» en el aviso: se apaga aunque tenga trabajo.
+    expect(await sup.stopOwnCore()).toBe(true);
+    if (r.ok) expect(killed).toEqual([r.core.pid]);
   });
 
   it('sin safeStorage funciona igual pero no guarda la sesión', async () => {

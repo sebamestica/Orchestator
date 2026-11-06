@@ -1,8 +1,10 @@
 import { spawn as nodeSpawn, execFile, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { rename } from 'node:fs/promises';
 import { dirname, join, win32 } from 'node:path';
+import { renameWithRetry } from '../../../src/core/memory/safe-fs.ts';
 import { UI_DEV_ORIGIN, type DesktopConfig } from './lib/config.ts';
-import { probeCore, runningTasks, type FetchLike } from './lib/core-client.ts';
+import { probeCore, runningTasks, type FetchLike, type RunningCheck } from './lib/core-client.ts';
 import { childEnv } from './lib/node-path.ts';
 import { tailLines, waitForReady } from './lib/ready-line.ts';
 import { decodeSession, encodeSession, type Cipher, type CoreSession } from './lib/session-file.ts';
@@ -18,6 +20,8 @@ export interface ConnectedCore {
   ownership: CoreOwnership;
   /** PID del núcleo si lo abrió Berland (para apagarlo); `null` si es ajeno. */
   pid: number | null;
+  /** Solo en `launched`: `false` si no se pudo guardar la sesión (la próxima apertura no podrá reutilizarlo). */
+  sessionSaved?: boolean;
 }
 
 export type ConnectResult = { ok: true; core: ConnectedCore } | { ok: false; title: string; detail?: string; hint?: string };
@@ -37,6 +41,8 @@ export interface SupervisorDeps {
   spawn?: SpawnFn;
   killTree?: (pid: number) => Promise<void>;
   now?: () => Date;
+  /** `rename` del archivo de sesión (solo se cambia en pruebas). */
+  rename?: (from: string, to: string) => Promise<void>;
 }
 
 /** Tope del registro del núcleo lanzado por la app antes de rotarlo. */
@@ -84,6 +90,13 @@ const whenAborted = (signal?: AbortSignal) =>
     if (signal?.aborted) r();
     else signal?.addEventListener('abort', () => r(), { once: true });
   });
+
+/** Núcleo propio sin sesión guardada que queda vivo con trabajo: la próxima apertura no podrá usarlo ni apagarlo. */
+function withUnsavedSession(core: ConnectedCore, check: RunningCheck | null, decision: ShutdownDecision): ShutdownDecision {
+  const busy = check?.status === 'ok' && check.running > 0;
+  if (decision.stop || !busy || core.ownership !== 'launched' || core.sessionSaved !== false) return decision;
+  return { ...decision, reason: `${decision.reason}; su sesión no se guardó: la próxima apertura no podrá reutilizarlo`, unsavedSession: true };
+}
 
 /**
  * Busca, lanza, reutiliza y apaga el núcleo. No importa `electron` (el cifrador y `fetch` llegan inyectados).
@@ -196,9 +209,9 @@ export class CoreSupervisor {
     log(`núcleo ajeno en ${origin}: Berland no tiene su token`);
     return {
       ok: false,
-      title: `Ya hay un núcleo en 127.0.0.1:${port} que no abrió Berland`,
-      detail: 'Berland solo guarda el token (cifrado) de los núcleos que lanza ella misma, y ese núcleo se abrió de otra forma (por ejemplo con «iniciar» en una terminal).',
-      hint: 'Ciérralo (Ctrl+C en su terminal) y vuelve a abrir Berland para que lance el suyo, o abre la interfaz con el enlace que imprimió ese núcleo.',
+      title: `Berland no tiene el token del núcleo de 127.0.0.1:${port}`,
+      detail: 'Berland solo guarda el token (cifrado) de los núcleos que lanza ella misma. Ese núcleo lo abrió otro programa (por ejemplo «iniciar» en una terminal) o una apertura anterior de Berland que no pudo guardar su sesión.',
+      hint: 'Si lo abriste en una terminal, ciérralo con Ctrl+C. Si no, ciérralo en el Administrador de tareas (proceso node.exe) y vuelve a abrir Berland.',
     };
   }
 
@@ -250,9 +263,9 @@ export class CoreSupervisor {
       stdout.on('data', () => undefined);
       child.once('exit', (code) => this.onChildExit(code));
       const pid = child.pid ?? 0;
-      this.writeSession({ port, pid, token: ready.token, startedAt: (this.deps.now ?? (() => new Date()))().toISOString() });
+      const sessionSaved = await this.writeSession({ port, pid, token: ready.token, startedAt: (this.deps.now ?? (() => new Date()))().toISOString() });
       log(`núcleo listo en ${ready.origin} (pid ${pid})`);
-      return this.connected({ origin: ready.origin, wsUrl: ready.wsUrl, token: ready.token, port, ownership: 'launched', pid });
+      return this.connected({ origin: ready.origin, wsUrl: ready.wsUrl, token: ready.token, port, ownership: 'launched', pid, sessionSaved });
     } catch (err) {
       if (child.exitCode === null && child.pid) await this.killTree(child.pid);
       this.child = null;
@@ -295,15 +308,26 @@ export class CoreSupervisor {
     }
     const check = core.ownership === 'external' ? null : await runningTasks(core.origin, core.token, fetch, 3000, signal);
     if (signal?.aborted) return this.closeTimedOut();
-    const decision = decideOnClose(core.ownership, check);
+    const decision = withUnsavedSession(core, check, decideOnClose(core.ownership, check));
     log(`cierre: ${decision.reason}`);
-    if (decision.stop && core.pid) {
-      this.stopping = true;
-      await this.killTree(core.pid);
-      this.removeSession();
-      this.core = null;
-    }
+    if (decision.stop && core.pid) await this.stopCore(core.pid);
     return decision;
+  }
+
+  /** Apaga el núcleo que abrió Berland aunque tenga trabajo (el usuario lo pidió al cerrar) y borra la sesión. */
+  async stopOwnCore(): Promise<boolean> {
+    const core = this.core;
+    if (!core?.pid || core.ownership === 'external') return false;
+    await this.stopCore(core.pid);
+    this.deps.log(`núcleo detenido a pedido (pid ${core.pid})`);
+    return true;
+  }
+
+  private async stopCore(pid: number): Promise<void> {
+    this.stopping = true;
+    await this.killTree(pid);
+    this.removeSession();
+    this.core = null;
   }
 
   private closeTimedOut(): ShutdownDecision {
@@ -321,32 +345,44 @@ export class CoreSupervisor {
     }
   }
 
-  private writeSession(session: CoreSession): void {
+  /**
+   * Guarda la sesión cifrada (temporal + `rename`, con reintentos ante el antivirus de Windows). Devuelve `false` si
+   * no se pudo; entonces no queda ningún temporal con el token cifrado.
+   */
+  private async writeSession(session: CoreSession): Promise<boolean> {
     const { cipher, config, log } = this.deps;
     if (!cipher) {
       log('safeStorage no está disponible: la sesión no se guarda y la próxima apertura no podrá reutilizar este núcleo');
-      return;
+      return false;
     }
+    const tmp = `${config.sessionPath}.${process.pid}.tmp`;
     try {
       mkdirSync(dirname(config.sessionPath), { recursive: true });
-      const tmp = `${config.sessionPath}.${process.pid}.tmp`;
       const fd = openSync(tmp, 'w', 0o600);
       try {
         writeSync(fd, encodeSession(session, cipher));
       } finally {
         closeSync(fd);
       }
-      renameSync(tmp, config.sessionPath);
+      await renameWithRetry(tmp, config.sessionPath, 9, this.deps.rename ?? rename);
+      return true;
     } catch (err) {
+      this.removeFile(tmp);
       log(`no se pudo guardar la sesión: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     }
   }
 
   private removeSession(): void {
+    // Sin permiso o ya borrada: la próxima apertura la descarta al no validar el token.
+    this.removeFile(this.deps.config.sessionPath);
+  }
+
+  private removeFile(path: string): void {
     try {
-      rmSync(this.deps.config.sessionPath, { force: true });
+      rmSync(path, { force: true });
     } catch {
-      // Sin permiso o ya borrada: la próxima apertura la descarta al no validar el token.
+      // Sin permiso o ya borrado.
     }
   }
 }

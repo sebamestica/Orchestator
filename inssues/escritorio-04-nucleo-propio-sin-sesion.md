@@ -3,7 +3,7 @@
 - **Área:** Escritorio y arranque
 - **Severidad:** baja
 - **Archivos:** `apps/desktop/src/core-supervisor.ts:233`, `apps/desktop/src/core-supervisor.ts:294-313`, `apps/desktop/src/core-supervisor.ts:284-292`, `apps/desktop/src/core-supervisor.ts:162-184`, `apps/desktop/src/core-supervisor.ts:208-216`, `apps/desktop/src/core-supervisor.ts:229-230`, `apps/desktop/src/lib/shutdown-policy.ts:24-27`, `src/core/app/cli-commands.ts:121-124`, `src/core/memory/safe-fs.ts:77-91`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

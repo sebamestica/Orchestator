@@ -24,6 +24,21 @@ const DEV_RETRIES = 60;
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Núcleo propio con trabajo y sin sesión guardada: si queda vivo, ninguna apertura podrá usarlo ni apagarlo. */
+async function askStopUnsaved(): Promise<boolean> {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    title: APP_NAME,
+    message: 'Berland no pudo guardar la sesión de su núcleo',
+    detail: 'Hay trabajo en curso. Si el núcleo queda vivo, la próxima apertura no podrá reutilizarlo ni apagarlo (habría que cerrarlo en el Administrador de tareas). Puedes detenerlo ahora o dejarlo terminar.',
+    buttons: ['Detener núcleo', 'Dejarlo vivo'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return response === 0;
+}
+
 /** Abre una instancia nueva ya (no al terminar este proceso, como `app.relaunch`, que con la CPU ocupada tarda). */
 function openNewInstance(log: (line: string) => void): void {
   try {
@@ -202,6 +217,7 @@ async function run(config: DesktopConfig): Promise<void> {
       try {
         const d = await supervisor.onAppClose(deadline.signal);
         log(`ventana cerrada: ${d.reason}`);
+        if (d.unsavedSession && (await askStopUnsaved())) await supervisor.stopOwnCore();
       } catch (err) {
         log(`error al cerrar: ${message(err)}`);
       } finally {

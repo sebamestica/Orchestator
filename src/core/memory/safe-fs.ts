@@ -102,9 +102,9 @@ export async function retryWhileBusy<T>(op: () => Promise<T>, attempts = 9): Pro
   }
 }
 
-/** `rename` con los reintentos de `retryWhileBusy`. */
-export function renameWithRetry(from: string, to: string, attempts = 9): Promise<void> {
-  return retryWhileBusy(() => rename(from, to), attempts);
+/** `rename` con los reintentos de `retryWhileBusy`. `renameFn` solo se cambia en pruebas. */
+export function renameWithRetry(from: string, to: string, attempts = 9, renameFn: (from: string, to: string) => Promise<void> = rename): Promise<void> {
+  return retryWhileBusy(() => renameFn(from, to), attempts);
 }
 
 /** Escritura atómica dentro de `root`: temporal en el mismo directorio + `rename`. Crea las carpetas que falten. */

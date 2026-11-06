@@ -11,6 +11,8 @@ export type CoreOwnership = 'launched' | 'adopted' | 'external';
 export interface ShutdownDecision {
   stop: boolean;
   reason: string;
+  /** El núcleo propio queda vivo con trabajo, pero su sesión no se guardó: conviene preguntar si se detiene. */
+  unsavedSession?: boolean;
 }
 
 /** Se acabó el plazo del cierre antes de empezar a apagar: no se mata nada y la sesión queda para la próxima apertura. */
