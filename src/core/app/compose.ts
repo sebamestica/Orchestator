@@ -178,6 +178,7 @@ export function compose(opts: ComposeOptions = {}): Composition {
       ...(opts.workspaceProjects ? { projects: opts.workspaceProjects } : {}),
       storeProject: (id) => store.getProject(id),
       log,
+      secrets: () => env.secretValues(),
     });
     const loadAdapters = async (agentIds?: readonly string[]): Promise<AgentAdapter[]> => {
       const agents = agentIds ? agentIds.map((id) => registry.require(id)) : registry.list().filter((a) => a.config.enabled);

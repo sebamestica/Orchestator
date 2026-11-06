@@ -30,3 +30,10 @@ export function childEnv(
   for (const [name, value] of Object.entries(extra)) if (value !== undefined) env[name] = value;
   return env;
 }
+
+/**
+ * Para procesos de Claude Code (workers y mente con herramientas): Claude Code quita las credenciales
+ * (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` y nombres con forma de credencial) del entorno
+ * de sus subprocesos (Bash, PowerShell, hooks y servidores MCP stdio); su propio proceso las conserva.
+ */
+export const CLAUDE_SUBPROCESS_SCRUB_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' };

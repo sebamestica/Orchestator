@@ -7,7 +7,7 @@ import { ClaudeSdkAdapter, DEFAULT_CLAUDE_MODEL, installedSdkVersion } from '../
 import type { HintedRunContext } from '../../../../src/core/brief/reasoning.ts';
 import { renderBrief } from '../../../../src/core/brief/render-brief.ts';
 import { LiveSpend } from '../../../../src/core/quota/live-spend.ts';
-import { agentConfigSchema, type RunContext } from '../../../../src/shared/index.ts';
+import { agentConfigSchema, taskBriefSchema, type RunContext } from '../../../../src/shared/index.ts';
 import { FAKE_KEY, WORKTREE, collect, config, ctx, fakeQuery, loadJsonl, payload, task } from './helpers.ts';
 
 const subagentRun = loadJsonl('subagent-run.jsonl');
@@ -79,11 +79,22 @@ describe('ClaudeSdkAdapter.run', () => {
       ANTHROPIC_API_KEY: FAKE_KEY,
       ANTHROPIC_BASE_URL: 'https://proxy.example.com',
       CLAUDE_AGENT_SDK_CLIENT_APP: 'orquestador/0.1.0',
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
     });
 
     const fake2 = fakeQuery(subagentRun);
     await collect(new ClaudeSdkAdapter({ config: withUrl, query: fake2.query, baseEnv: {} }).run(task, ctx({ env: { ANTHROPIC_API_KEY: FAKE_KEY, ANTHROPIC_BASE_URL: 'http://152.0.0.1' } })));
     expect(fake2.calls[0]?.options.env?.ANTHROPIC_BASE_URL).toBe('http://152.0.0.1');
+  });
+
+  it('env: Bash y PowerShell del autor y del revisor no reciben la clave (scrub), y Claude Code sí', async () => {
+    const review = taskBriefSchema.parse({ ...task, id: 'revisar-x', ownedPaths: ['.orq/REVIEW.md'] });
+    for (const brief of [task, review]) {
+      const fake = fakeQuery(subagentRun);
+      await collect(new ClaudeSdkAdapter({ config, query: fake.query, baseEnv: {} }).run(brief, ctx({ env: { ANTHROPIC_API_KEY: FAKE_KEY, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0' } })));
+      expect(fake.calls[0]?.options.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, brief.id).toBe('1');
+      expect(fake.calls[0]?.options.env?.ANTHROPIC_API_KEY, brief.id).toBe(FAKE_KEY);
+    }
   });
 
   it('usa config.model y deja pasar opciones extra sin pisar las propias', async () => {

@@ -55,12 +55,15 @@ function checkMerge({ options, positionals }: ParsedForm): string | undefined {
 
 const READ_ONLY = { inUserCheckout: true } as const;
 
+/** Parche sin color ni programas externos (`diff.external`, `textconv`): el examen de secretos del commit. */
+const PLAIN_PATCH = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-prefix', '-U0'] as const;
+
 export const RULES: Readonly<Record<string, SubcommandRule>> = {
   'rev-parse': { ...READ_ONLY, flags: ['--verify', '--quiet', '-q', '--abbrev-ref', '--git-common-dir', '--show-toplevel'], valued: ['--git-path'], maxPositionals: 2 },
   status: { ...READ_ONLY, flags: ['--porcelain', '--porcelain=v1', '-z', '--untracked-files=all', '--untracked-files=no', '--untracked-files=normal'], maxPositionals: 0 },
-  diff: { ...READ_ONLY, flags: ['--name-only', '--diff-filter=U', '-z', '--cached', '--stat'], dashDash: true, maxPositionals: 2 },
+  diff: { ...READ_ONLY, flags: ['--name-only', '--diff-filter=U', '-z', '--cached', '--stat', ...PLAIN_PATCH], dashDash: true, maxPositionals: 2 },
   'check-ignore': { ...READ_ONLY, flags: ['-q', '--quiet', '--no-index', '-z', '-v'], dashDash: true, minPositionals: 1, maxPositionals: 1000 },
-  log: { ...READ_ONLY, flags: ['--oneline', '-1'], valued: ['-n'], prefixed: ['--format=', '--max-count='], maxPositionals: 1 },
+  log: { ...READ_ONLY, flags: ['--oneline', '-1', '-p', ...PLAIN_PATCH], valued: ['-n'], prefixed: ['--format=', '--max-count='], maxPositionals: 1 },
   'ls-files': { ...READ_ONLY, flags: ['-z'], dashDash: true, maxPositionals: 1000 },
   'rev-list': { ...READ_ONLY, flags: ['--count', '--merges', '--parents'], valued: ['-n'], maxPositionals: 2 },
   remote: { ...READ_ONLY, maxPositionals: 0 },

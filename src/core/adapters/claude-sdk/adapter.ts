@@ -12,6 +12,7 @@ import { redactSecrets } from '../../../shared/index.ts';
 import { briefHints, effortFor, runHints, taskRole, type TaskRole } from '../../brief/reasoning.ts';
 import { renderBrief } from '../../brief/render-brief.ts';
 import { assertRealInside } from '../../memory/safe-fs.ts';
+import { CLAUDE_SUBPROCESS_SCRUB_ENV } from '../../process/child-env.ts';
 import { mcpEnvName, mcpSecrets, pluginsSection, safeGrant, type McpGrant, type McpServerMap, type McpServerSource } from '../../plugins/mcp.ts';
 import type { LiveSpendEntry } from '../../quota/live-spend.ts';
 import { readSpentUsd, type SpentUsdFn } from '../../quota/manual-budget.ts';
@@ -226,7 +227,7 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     return { role, model, effort: this.#opts.extraOptions?.effort ?? effortFor(task, { retries }) };
   }
 
-  /** Entorno del subproceso: base (sin variables de una sesión de Claude Code anfitriona) + baseUrl + ctx.env. */
+  /** Entorno del subproceso: base (sin variables de una sesión de Claude Code anfitriona) + baseUrl + ctx.env + scrub. */
   buildEnv(ctxEnv: Readonly<Record<string, string>>): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(this.#opts.baseEnv ?? process.env)) if (v !== undefined) env[k] = v;
@@ -236,6 +237,8 @@ export class ClaudeSdkAdapter implements AgentAdapter {
     if (this.config.baseUrl) env.ANTHROPIC_BASE_URL = this.config.baseUrl;
     Object.assign(env, ctxEnv);
     env.CLAUDE_AGENT_SDK_CLIENT_APP = CLIENT_APP;
+    // La clave queda en el proceso de Claude Code, no en sus Bash y PowerShell (autoeval-reglas-05).
+    Object.assign(env, CLAUDE_SUBPROCESS_SCRUB_ENV);
     return env;
   }
 

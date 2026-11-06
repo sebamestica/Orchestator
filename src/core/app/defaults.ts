@@ -43,6 +43,8 @@ export interface WorkspacesInput {
   projects?: readonly unknown[];
   storeProject: (projectId: string) => ProjectRecord | undefined;
   log: (line: string) => void;
+  /** Claves que Berland entregó a los agentes: el commit de la flota se niega si aparecen en el trabajo. */
+  secrets?: () => readonly string[];
 }
 
 /** Worktrees de c3 por proyecto con el paso de commit de la flota (ownedPaths + commit antes de revisar). */
@@ -54,5 +56,5 @@ export function buildWorkspaces(input: WorkspacesInput): CommittingWorkspaces {
     : typeof (inner as { project?: unknown }).project === 'function'
       ? (id: string) => (inner as unknown as { project(id: string): { integrationBranch: string } }).project(id).integrationBranch
       : undefined;
-  return new CommittingWorkspaces({ inner, log: input.log, ...(branchOf ? { integrationBranch: branchOf } : {}) });
+  return new CommittingWorkspaces({ inner, log: input.log, ...(branchOf ? { integrationBranch: branchOf } : {}), ...(input.secrets ? { secrets: input.secrets } : {}) });
 }

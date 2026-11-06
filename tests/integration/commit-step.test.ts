@@ -2,8 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CommittingWorkspaces, GitIdentityError, isMissingIdentity, OwnedPathsError, outsideOwnedPaths, parsePorcelainZ } from '../../src/core/app/commit-step.ts';
-import { WorktreeManager } from '../../src/core/workspace/index.ts';
+import { commitTaskWork, CommittingWorkspaces, GitIdentityError, isMissingIdentity, OwnedPathsError, outsideOwnedPaths, parsePorcelainZ, SecretInWorkError } from '../../src/core/app/commit-step.ts';
+import { createGitRunner, WorktreeManager } from '../../src/core/workspace/index.ts';
 import { taskBriefSchema, type TaskBrief, type Workspace } from '../../src/shared/index.ts';
 import { cleanupDirs, tempDir } from './helpers.ts';
 
@@ -19,7 +19,7 @@ function task(id: string, ownedPaths: string[]): TaskBrief {
   return taskBriefSchema.parse({ id, projectId: 'demo', title: `Tarea ${id}`, objective: 'x', ownedPaths, dependsOn: [], acceptance: ['y'], difficulty: 'low' });
 }
 
-async function setup(opts: { ignoreOrq?: boolean } = {}) {
+async function setup(opts: { ignoreOrq?: boolean; secrets?: string[] } = {}) {
   const root = await tempDir('orq-commit-');
   const repo = join(root, 'repo');
   mkdirSync(join(repo, 'src'), { recursive: true });
@@ -33,7 +33,7 @@ async function setup(opts: { ignoreOrq?: boolean } = {}) {
   // Identidad del «usuario» en la config del repositorio (la heredan los worktrees): la flota confirma con ella.
   for (const args of [['config', 'user.name', 'Usuario Prueba'], ['config', 'user.email', 'usuario@prueba.local']]) expect(git(repo, ...args).status).toBe(0);
   const manager = new WorktreeManager({ projects: [{ id: 'demo', repoPath: repo, worktreesRoot: join(root, 'wt') }], removeRetryDelayMs: 200 });
-  const ws = new CommittingWorkspaces({ inner: manager, integrationBranch: (id) => manager.project(id).integrationBranch });
+  const ws = new CommittingWorkspaces({ inner: manager, integrationBranch: (id) => manager.project(id).integrationBranch, ...(opts.secrets ? { secrets: () => opts.secrets ?? [] } : {}) });
   const entry = { ws, created: [] as Workspace[] };
   managers.push(entry);
   const create = async (t: TaskBrief) => {
@@ -44,7 +44,7 @@ async function setup(opts: { ignoreOrq?: boolean } = {}) {
     return w;
   };
   const head = (cwd: string, ref = 'HEAD') => git(cwd, 'rev-parse', ref).stdout.trim();
-  return { repo, ws, create, head, mainBefore: head(repo, 'main') };
+  return { repo, ws, create, head, mainBefore: head(repo, 'main'), base: () => manager.project('demo').integrationBranch };
 }
 
 describe('paso de commit de la flota', () => {
@@ -154,6 +154,63 @@ describe('paso de commit de la flota', () => {
     expect(isMissingIdentity('Author identity unknown\n\n*** Please tell me who you are.')).toBe(true);
     expect(isMissingIdentity('fatal: empty ident name (for <x@y>) not allowed')).toBe(true);
     expect(isMissingIdentity('fatal: pathspec did not match')).toBe(false);
+  });
+
+  // autoeval-reglas-05: un secreto escrito en disco no entra a la historia a tu nombre.
+  const FAKE_ANTHROPIC = `sk-ant-${'a1B2c3D4e5'.repeat(4)}`;
+  const OPAQUE = 'valor-opaco-de-la-boveda-77';
+
+  it('clave con prefijo en un archivo propio: lanza SecretInWorkError sin el valor y no confirma', async () => {
+    const { ws, create, head, base } = await setup();
+    const t = task('tarea-sec', ['src/**', 'test/**']);
+    const w = await create(t);
+    const before = head(w.path);
+    mkdirSync(join(w.path, 'test', 'fixtures'), { recursive: true });
+    writeFileSync(join(w.path, 'test', 'fixtures', 'grabacion.json'), `{"x-api-key":"${FAKE_ANTHROPIC}"}\n`);
+    writeFileSync(join(w.path, 'src', 'a.mjs'), 'export const a = 5;\n');
+    const err = await commitTaskWork(createGitRunner(), w.path, t, base()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SecretInWorkError);
+    expect((err as Error).message).toMatch(/test\/fixtures\/grabacion\.json/);
+    expect((err as Error).message).not.toContain(FAKE_ANTHROPIC);
+    expect((err as Error).message).not.toMatch(/src\/a\.mjs/);
+    expect(head(w.path)).toBe(before);
+    const summary = await ws.reviewSummary(w);
+    expect(summary).toMatch(/^ATENCIÓN: La tarea tarea-sec escribió lo que parece una clave/);
+    expect(summary).not.toContain(FAKE_ANTHROPIC);
+    await expect(ws.integrate('demo', w)).rejects.toBeInstanceOf(SecretInWorkError);
+    expect(head(w.path)).toBe(before);
+  });
+
+  it('valor conocido sin prefijo (de la bóveda) en un archivo ya versionado: no confirma', async () => {
+    const { ws, create, head } = await setup({ secrets: [OPAQUE] });
+    const w = await create(task('tarea-opaca', ['src/a.mjs']));
+    const before = head(w.path);
+    writeFileSync(join(w.path, 'src', 'a.mjs'), `export const k = '${OPAQUE}';\n`);
+    const summary = await ws.reviewSummary(w);
+    expect(summary).toMatch(/^ATENCIÓN: .*src\/a\.mjs/);
+    expect(summary).not.toContain(OPAQUE);
+    expect(head(w.path)).toBe(before);
+  });
+
+  it('secreto en un commit del agente, borrado en el siguiente: sigue en la historia y se niega', async () => {
+    const { ws, create } = await setup();
+    const w = await create(task('tarea-hist', ['src/**']));
+    writeFileSync(join(w.path, 'src', 'k.mjs'), `export const k = '${FAKE_ANTHROPIC}';\n`);
+    expect(git(w.path, 'add', 'src/k.mjs').status).toBe(0);
+    expect(git(w.path, 'commit', '-q', '-m', 'con clave').status).toBe(0);
+    writeFileSync(join(w.path, 'src', 'k.mjs'), 'export const k = process.env.K;\n');
+    expect(git(w.path, 'commit', '-q', '-am', 'sin clave').status).toBe(0);
+    const summary = await ws.reviewSummary(w);
+    expect(summary).toMatch(/^ATENCIÓN: .*src\/k\.mjs.*rehacer la rama/);
+    await expect(ws.integrate('demo', w)).rejects.toThrow(/rehacer la rama/);
+  });
+
+  it('control: «authorization-service» y palabras con sk- pegado no bloquean', async () => {
+    const { ws, create } = await setup();
+    const w = await create(task('tarea-ok', ['src/**']));
+    writeFileSync(join(w.path, 'src', 'auth.mjs'), "export const authorization = 'authorization-service-client-v2'; // task-scheduler-abcdefghijklmnopqrstuvwxyz\n");
+    expect(await ws.reviewSummary(w)).toMatch(/^Cambios de la rama/);
+    expect((await ws.integrate('demo', w)).ok).toBe(true);
   });
 
   it('también revisa lo que el agente confirmó por su cuenta', async () => {

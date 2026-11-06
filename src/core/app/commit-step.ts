@@ -1,7 +1,7 @@
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace, WorkspaceManager } from '../../shared/index.ts';
-import { redactSecrets } from '../../shared/index.ts';
+import { PREFIXED_SECRET_PATTERNS, redactSecrets } from '../../shared/index.ts';
 import { normalizeOwnedPath, pathsOverlap, type ExecuteResult } from '../orchestrator/index.ts';
 import { createGitRunner, DEFAULT_INTEGRATION_BRANCH, GitError, isInside, type GitRunner } from '../workspace/index.ts';
 
@@ -36,6 +36,72 @@ export class OwnedPathsError extends Error {
     this.taskId = taskId;
     this.files = files;
   }
+}
+
+/** La tarea escribió una clave o un token: Berland no lo confirma ni lo integra. Nombra los archivos, nunca el valor. */
+export class SecretInWorkError extends Error {
+  override readonly name = 'SecretInWorkError';
+  readonly taskId: string;
+  readonly files: readonly string[];
+  /** El secreto ya está en un commit del propio agente: borrar el archivo no basta, hay que rehacer la rama. */
+  readonly committed: boolean;
+  constructor(taskId: string, files: readonly string[], committed: boolean) {
+    super(
+      `La tarea ${taskId} escribió lo que parece una clave o un token en: ${files.slice(0, 20).join(', ')}${files.length > 20 ? ` y ${files.length - 20} más` : ''}. Berland no lo confirma` +
+        (committed ? '. Ya está en un commit de la rama de la tarea: hay que rehacer la rama, no basta con borrar el archivo' : ''),
+    );
+    this.taskId = taskId;
+    this.files = files;
+    this.committed = committed;
+  }
+}
+
+/** Archivos nuevos más grandes que esto no se revisan (datos o binarios); los parches los corta el GitRunner (~1 MB). */
+const SCAN_FILE_LIMIT = 1_000_000;
+
+/** Un secreto conocido (8 caracteres o más) o una clave con prefijo propio. El patrón genérico no bloquea. */
+function hasSecret(text: string, secrets: readonly string[]): boolean {
+  return secrets.some((s) => s.length >= 8 && text.includes(s)) || PREFIXED_SECRET_PATTERNS.some((p) => text.search(p) >= 0);
+}
+
+/** Archivos de un parche (`--no-prefix`) con alguna línea agregada que tenga un secreto. */
+function patchFilesWithSecrets(patch: string, secrets: readonly string[]): string[] {
+  const files = new Set<string>();
+  let file = '';
+  let prev = '';
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') && prev.startsWith('--- ')) file = line.slice(4).trim();
+    else if (line.startsWith('+') && hasSecret(line.slice(1), secrets)) files.add(file);
+    prev = line;
+  }
+  return [...files];
+}
+
+/** Archivos sin seguimiento (`??`) de `git status --porcelain=v1 -z`. */
+function untrackedOf(status: string): string[] {
+  return status.split('\0').filter((e) => e.startsWith('?? ')).map((e) => e.slice(3));
+}
+
+async function fileHasSecret(path: string, secrets: readonly string[]): Promise<boolean> {
+  try {
+    if ((await stat(path)).size > SCAN_FILE_LIMIT) return false;
+    return hasSecret(await readFile(path, 'utf8'), secrets);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Busca secretos en lo que la tarea agrega: lo pendiente (diff contra HEAD y archivos nuevos) y lo que el agente ya
+ * confirmó desde `baseRef`, commit por commit (un secreto agregado y luego borrado sigue en la historia).
+ */
+async function secretsInWork(git: GitRunner, worktreePath: string, status: string, baseRef: string, secrets: readonly string[]): Promise<{ files: string[]; committed: boolean }> {
+  const patch = ['--no-color', '--no-ext-diff', '--no-textconv', '--no-prefix', '-U0'];
+  const history = await git(worktreePath, ['log', '-p', '--format=', ...patch, `${baseRef}..HEAD`]);
+  const committed = patchFilesWithSecrets(history.stdout, secrets);
+  const files = new Set([...committed, ...patchFilesWithSecrets((await git(worktreePath, ['diff', ...patch, 'HEAD'])).stdout, secrets)]);
+  for (const f of untrackedOf(status)) if (!isScratch(f) && (await fileHasSecret(join(worktreePath, f), secrets))) files.add(f);
+  return { files: [...files].filter((f) => !isScratch(f)), committed: committed.length > 0 };
 }
 
 /** Rutas de `git status --porcelain=v1 -z` (en renombres y copias, las dos). */
@@ -125,11 +191,12 @@ const ADD_BATCH = 100;
 
 /**
  * Comprueba que todo lo que cambió la tarea (sin confirmar y ya confirmado desde `baseRef`) está dentro de sus
- * `ownedPaths` y confirma lo pendiente en la rama de la tarea (`branch`). Lanza `OwnedPathsError` si algo queda fuera
- * y `TaskBranchError` si el worktree está o estuvo en otra rama (en los dos casos no confirma nada). Codex no puede hacer commits
- * en su sandbox y otros agentes lo olvidan.
+ * `ownedPaths` y no trae claves (`secrets` conocidos o con prefijo propio), y confirma lo pendiente en la rama de la
+ * tarea (`branch`). Lanza `OwnedPathsError` o `SecretInWorkError` si algo queda fuera o trae una clave, y
+ * `TaskBranchError` si el worktree está o estuvo en otra rama (en todos los casos no confirma nada). Codex no puede
+ * hacer commits en su sandbox y otros agentes lo olvidan.
  */
-export async function commitTaskWork(git: GitRunner, worktreePath: string, task: TaskBrief, baseRef: string, branch: string): Promise<CommitResult> {
+export async function commitTaskWork(git: GitRunner, worktreePath: string, task: TaskBrief, baseRef: string, branch: string, secrets: readonly string[] = []): Promise<CommitResult> {
   const current = (await git(worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
   if (current !== branch) throw new TaskBranchError(task.id, current, branch);
   const visited = await visitedBranches(git, worktreePath, branch);
@@ -139,6 +206,8 @@ export async function commitTaskWork(git: GitRunner, worktreePath: string, task:
   const committed = (await git(worktreePath, ['diff', '--name-only', '-z', `${baseRef}...HEAD`])).stdout.split('\0').filter(Boolean);
   const outside = outsideOwnedPaths([...pending, ...committed], task.ownedPaths);
   if (outside.length) throw new OwnedPathsError(task.id, outside);
+  const leaked = await secretsInWork(git, worktreePath, status.stdout, baseRef, secrets);
+  if (leaked.files.length) throw new SecretInWorkError(task.id, leaked.files, leaked.committed);
   if (pending.length === 0) return { files: [] };
   // Se agregan los archivos pendientes por nombre (sin `.orq`): un pathspec `:(exclude).orq` hace salir a
   // `git add` con 1 cuando `.orq` está en `.gitignore` (visto en vivo el 2026-11-04 en el repo del orquestador).
@@ -164,6 +233,8 @@ export interface CommittingWorkspacesOptions {
   integrationBranch?: (projectId: string, workspace: Workspace) => string;
   git?: GitRunner;
   log?: (line: string) => void;
+  /** Valores exactos de las claves que Berland entregó a los agentes (bóveda): si aparecen en el trabajo, no se confirma. */
+  secrets?: () => readonly string[];
 }
 
 /** Gestor interno que distingue el modo local (lo implementa `ProjectWorktrees`). */
@@ -200,6 +271,7 @@ export class CommittingWorkspaces implements WorkspaceManager {
   readonly #git: GitRunner;
   readonly #branch: (projectId: string, workspace: Workspace) => string;
   readonly #log: (line: string) => void;
+  readonly #secrets: () => readonly string[];
   readonly #tasks = new Map<string, { projectId: string; task: TaskBrief }>();
 
   constructor(opts: CommittingWorkspacesOptions) {
@@ -207,6 +279,7 @@ export class CommittingWorkspaces implements WorkspaceManager {
     this.#git = opts.git ?? createGitRunner();
     this.#branch = opts.integrationBranch ?? (() => DEFAULT_INTEGRATION_BRANCH);
     this.#log = opts.log ?? (() => undefined);
+    this.#secrets = opts.secrets ?? (() => []);
   }
 
   /** El workspace es la carpeta del usuario en modo local. */
@@ -240,7 +313,7 @@ export class CommittingWorkspaces implements WorkspaceManager {
     const entry = this.#tasks.get(taskKey(workspace));
     if (!entry) throw new OwnedPathsError(workspace.taskId, ['(tarea desconocida: no se puede comprobar ownedPaths)']);
     if (this.isLocal(workspace)) return { files: [] };
-    const result = await commitTaskWork(this.#git, workspace.path, entry.task, this.#branch(entry.projectId, workspace), workspace.branch);
+    const result = await commitTaskWork(this.#git, workspace.path, entry.task, this.#branch(entry.projectId, workspace), workspace.branch, this.#secrets());
     if (result.commit) this.#log(`${workspace.taskId}: commit ${result.commit.slice(0, 10)} a nombre del usuario (${result.files.length} archivos)`);
     return result;
   }
@@ -256,6 +329,9 @@ export class CommittingWorkspaces implements WorkspaceManager {
       await this.prepare(workspace);
     } catch (err) {
       if (err instanceof OwnedPathsError) return `ATENCIÓN: ${err.message}. Rechaza la tarea y pide deshacer esos cambios.`;
+      if (err instanceof SecretInWorkError) {
+        return `ATENCIÓN: ${err.message}. Rechaza la tarea y pide quitar la clave${err.committed ? ' y rehacer la rama sin ese commit' : ''}.`;
+      }
       throw err;
     }
     const entry = this.#tasks.get(taskKey(workspace));

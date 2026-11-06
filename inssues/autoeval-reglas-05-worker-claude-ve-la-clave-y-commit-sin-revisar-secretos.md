@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/prompt.ts:28`, `src/core/app/adapters.ts:60-65`, `src/core/app/env.ts:23-27`, `src/core/adapters/claude-sdk/adapter.ts:224-233`, `src/core/adapters/claude-sdk/adapter.ts:306-307`, `src/core/adapters/claude-sdk/adapter.ts:382-405`, `src/core/adapters/claude-sdk/translate.ts:185`, `src/core/plugins/service.ts:54-57`, `src/core/conductor/session.ts:70-73`, `src/core/conductor/session.ts:270`, `src/core/app/commit-step.ts:101-123`, `src/core/app/commit-step.ts:208-220`, `src/core/adapters/claude-sdk/shell-policy.ts:490-491`, `src/shared/redact.ts:6-25`, `tests/core/adapters/claude-sdk/adapter.test.ts:53-72`, `docs/plan/issues/08-bypass-autonomo.md:131-132`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `codex-04-secretos-mcp-mente-sin-tachado-por-valor.md` (tachado por valor de los tokens MCP de la mente), `servidor-05-tachado-falso-positivo-palabras-pegadas.md` (falsos positivos del patrón genérico), `autoeval-gasto-04-bajar-y-ejecutar-desde-internet.md`
 

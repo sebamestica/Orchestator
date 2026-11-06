@@ -17,6 +17,7 @@ import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentDefinition, EffortLevel, McpServerConfig, Options, SDKMessage, SDKUserMessage, SettingSource } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { idSchema, redactSecrets } from '../../shared/index.ts';
+import { CLAUDE_SUBPROCESS_SCRUB_ENV } from '../process/child-env.ts';
 import type { AgentEvent, MindMode } from '../../shared/index.ts';
 import { MCP_ENV_PREFIX, bearerToken } from '../plugins/mcp.ts';
 import { createToolGuard } from './guard.ts';
@@ -75,7 +76,7 @@ export function modeActs(mode: MindMode | undefined, standalone: boolean): boole
  * - el shell vuelve a la carpeta de la sesión después de cada comando. Sin esto, un `cd` a una raíz de lectura
  *   (`additionalDirectories`) se conserva y la guardia niega todo lo que sigue por trabajar fuera del proyecto.
  */
-export const BYPASS_ENV: Readonly<Record<string, string>> = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1' };
+export const BYPASS_ENV: Readonly<Record<string, string>> = { ...CLAUDE_SUBPROCESS_SCRUB_ENV, CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1' };
 
 /** Subagente propio: investiga en paralelo con las mismas herramientas de lectura. */
 export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {

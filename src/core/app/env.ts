@@ -134,6 +134,11 @@ export class AgentEnvironment {
     }
   }
 
+  /** Claves cargadas (sin la URL), para buscarlas en el trabajo antes de confirmarlo (`CommittingWorkspaces`). */
+  secretValues(): string[] {
+    return [...this.#cache.values()].flatMap((c) => Object.entries(c.env).filter(([k]) => k !== 'ANTHROPIC_BASE_URL').map(([, v]) => v));
+  }
+
   /** Agentes con entorno cargado (sin valores). */
   loaded(): string[] {
     return [...this.#cache.keys()];
