@@ -78,12 +78,12 @@ describe('crear_tareas', () => {
     expect(ports.planner.requests[0]).toMatchObject({ projectId: 'demo', planText: 'Agregar la API y luego la interfaz', knownTaskIds: ['previa'] });
   });
 
-  it('usa el proyecto indicado y tacha secretos del plan antes de mandarlo al planificador', async () => {
-    const planner = new FakePlanner({ ok: true, tasks: [brief('x1', { projectId: 'otro' })] });
+  it('tacha secretos del plan antes de mandarlo al planificador', async () => {
+    const planner = new FakePlanner({ ok: true, tasks: [brief('x1', { projectId: 'demo' })] });
     const { tools } = setup({ planner });
-    const result = await tools.call('crear_tareas', { plan: `Usa la clave ${FAKE_API_KEY} y ${SESSION_SECRET}`, proyecto: 'otro' });
+    const result = await tools.call('crear_tareas', { plan: `Usa la clave ${FAKE_API_KEY} y ${SESSION_SECRET}`, proyecto: 'demo' });
     expect(result.isError).toBeFalsy();
-    expect(planner.requests[0]?.projectId).toBe('otro');
+    expect(planner.requests[0]?.projectId).toBe('demo');
     expect(planner.requests[0]?.planText).not.toMatch(SECRET_PATTERN);
     expect(planner.requests[0]?.planText).toContain(REDACTED);
   });

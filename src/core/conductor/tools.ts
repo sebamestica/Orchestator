@@ -34,6 +34,8 @@ export const MAX_DESTINATION_CHARS = 2_000;
 const BRANCH_NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._/-]{1,200}$/;
 const MAX_LISTED_TASKS = 40;
 const MAX_ISSUES = 10;
+/** Cola de los rechazos por otro proyecto: el chat solo actúa sobre su proyecto. */
+const OTHER_PROJECT_HINT = 'Omite proyecto; para otro proyecto, el usuario debe abrir un chat de ese proyecto.';
 
 /** Nombre con el que el SDK expone la herramienta al modelo (y el que va en `allowedTools`). */
 export function mcpToolName(name: ConductorToolName): string {
@@ -186,7 +188,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
           .min(1)
           .max(MAX_PLAN_CHARS)
           .describe('Plan de implementación completo: objetivo, pasos, rutas propias por tarea, riesgos y verificación. Va íntegro a los agentes.'),
-        proyecto: idSchema.optional().describe('Id del proyecto; por omisión, el de la sesión.'),
+        proyecto: idSchema.optional().describe('Omítelo: las tareas son siempre del proyecto de esta sesión (otro proyecto da error).'),
         destino: z
           .strictObject({
             remoto: z
@@ -209,6 +211,10 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
         if (standalone) return noFleet('crear_tareas');
         const projectId = proyecto ?? defaultProjectId;
         if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
+        // Como escribir_memoria: un chat de A no propone (ni aprueba solo en auto y bypass) tareas de B.
+        if (defaultProjectId !== undefined && projectId !== defaultProjectId) {
+          return fail(`solo puedes crear tareas de este proyecto (${defaultProjectId}), no de ${projectId}. ${OTHER_PROJECT_HINT}`);
+        }
         const result = await ports.planner.plan({ projectId, planText: redact(plan), knownTaskIds: await knownTaskIds(projectId), signal: opts.signal });
         if (!result.ok) {
           const issues = result.issues.slice(0, MAX_ISSUES).map((i) => ({ codigo: i.code, mensaje: oneLine(i.message), tareas: i.taskIds }));
@@ -252,6 +258,10 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
         try {
           const entry = await ports.proposals.get(taskId);
           if (!entry) return fail(`no existe la tarea ${taskId}. Créala con crear_tareas y espera la aprobación del usuario.`);
+          // Una propuesta de otro proyecto (guardada antes de que crear_tareas lo impidiera) no llega a la flota.
+          if (defaultProjectId !== undefined && entry.task.projectId !== defaultProjectId) {
+            return fail(`la tarea ${taskId} no es de este proyecto (${defaultProjectId}): no se delega. Para otro proyecto, el usuario debe abrir un chat de ese proyecto.`);
+          }
           if (entry.approval === 'proposed') {
             return fail(`la tarea ${taskId} no está aprobada: está propuesta y espera la aprobación del usuario. Pídele que la revise y la apruebe; tú no puedes aprobarla.`);
           }
@@ -394,7 +404,7 @@ export function createConductorTools(ports: ConductorPorts, opts: ConductorTools
         const projectId = memoryProject(proyecto);
         if (!projectId) return fail('falta el proyecto: indícalo en `proyecto`.');
         if (defaultProjectId !== undefined && projectId !== defaultProjectId) {
-          return fail(`solo puedes escribir en la memoria de este proyecto (${defaultProjectId}), no en la de ${projectId}. Omite proyecto; para otro proyecto, el usuario debe abrir un chat de ese proyecto.`);
+          return fail(`solo puedes escribir en la memoria de este proyecto (${defaultProjectId}), no en la de ${projectId}. ${OTHER_PROJECT_HINT}`);
         }
         const at = now().toISOString();
         if (nota.tipo === 'decision') {

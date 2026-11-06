@@ -3,7 +3,7 @@
 - **Área:** Mente y chat
 - **Severidad:** media
 - **Archivos:** `src/core/conductor/tools.ts:189`, `src/core/conductor/tools.ts:210`, `src/core/conductor/tools.ts:219`, `src/core/conductor/tools.ts:223`, `src/core/conductor/tools.ts:253`, `src/core/conductor/tools.ts:288`, `src/core/conductor/tools.ts:311`, `src/core/conductor/tools.ts:396`, `src/core/conductor/prompt.ts:32`, `src/core/orchestrator/plan.ts:104`, `src/core/chat/proposals.ts:74`, `src/core/chat/service.ts:260`, `src/core/chat/service.ts:716`, `src/core/chat/service.ts:752`, `src/core/chat/service.ts:902`, `src/core/orchestrator/fleet.ts:364`, `src/core/workspace/manager.ts:87`, `tests/core/conductor/tools.test.ts:81`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Cada chat de Berland tiene un proyecto. La sesión de la mente recibe ese proyecto como `defaultProjectId`

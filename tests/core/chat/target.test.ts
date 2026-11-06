@@ -181,9 +181,10 @@ describe('crear_tareas con destino', () => {
     const chat = await openChat(b);
     b.ports.planner.result = { ok: true, tasks: [brief('ajena', { projectId: 'otro' })] };
     const foreign = await b.service.sessionOf(chat.id)?.tools.call('crear_tareas', { plan: 'plan', proyecto: 'otro', destino: { remoto: 'origin' } });
-    // Las tareas de otro proyecto se proponen, pero el destino es del chat (proyecto demo): no se anota.
-    expect(foreign?.isError).toBeFalsy();
-    expect(jsonOf(foreign ?? { content: [] }).destino).toMatchObject({ guardado: false, aviso: expect.stringMatching(/solo para su proyecto \(demo\)/) });
+    // Otro proyecto: crear_tareas lo rechaza antes de proponer, y el destino tampoco se anota.
+    expect(foreign?.isError).toBe(true);
+    expect(JSON.stringify(foreign)).toMatch(/solo puedes crear tareas de este proyecto \(demo\), no de otro/);
+    expect(b.service.proposals(chat.id)).toEqual([]);
     expect(targetRows(b)).toEqual([]);
     expect(b.sent('chat_target')).toEqual([]);
     await crearTareas(b, chat.id, { destino: { remoto: 'https://github.com/a/b' } }, 'borrar');

@@ -81,6 +81,55 @@ describe('crear_tareas: el planificador no ve ids de otros proyectos', () => {
   });
 });
 
+describe('crear_tareas: solo el proyecto de la sesión', () => {
+  function withMode(mode: 'auto' | 'bypass') {
+    const ports = fakePorts({ planner: new FakePlanner({ ok: true, tasks: [brief('campana', { projectId: 'marketing' })] }) });
+    const approved: string[][] = [];
+    const tools = createConductorTools(ports, {
+      defaultProjectId: 'orquestador',
+      now: () => NOW,
+      mode: () => mode,
+      autoApprove: (ids) => {
+        approved.push([...ids]);
+        return ports.proposals.approve(ids);
+      },
+    });
+    return { ports, tools, approved };
+  }
+
+  for (const mode of ['auto', 'bypass'] as const) {
+    it(`${mode}: otro proyecto da error sin planificar, proponer, aprobar ni delegar`, async () => {
+      const { ports, tools, approved } = withMode(mode);
+      const result = await tools.call('crear_tareas', { plan: 'Campaña de reels', proyecto: 'marketing' });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toMatch(/solo puedes crear tareas de este proyecto \(orquestador\), no de marketing/);
+      expect(ports.planner.requests).toEqual([]);
+      expect(approved).toEqual([]);
+      expect(ports.proposals.list()).toEqual([]);
+      expect(ports.fleet.delegated).toEqual([]);
+    });
+  }
+
+  it('con el proyecto de la sesión, o sin proyecto, sigue funcionando', async () => {
+    for (const proyecto of ['orquestador', undefined]) {
+      const { tools, ports } = setup();
+      const result = await tools.call('crear_tareas', { plan: 'Empaquetar Berland', ...(proyecto ? { proyecto } : {}) });
+      expect(result.isError, String(proyecto)).toBeFalsy();
+      expect(ports.planner.requests[0]?.projectId).toBe('orquestador');
+    }
+  });
+
+  it('delegar no entrega a la flota una propuesta de otro proyecto ya guardada', async () => {
+    const { ports, tools } = withMode('auto');
+    ports.proposals.propose([brief('ajena', { projectId: 'marketing' })]);
+    ports.proposals.approve(['ajena']);
+    const result = await tools.call('delegar', { taskId: 'ajena' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/la tarea ajena no es de este proyecto \(orquestador\)/);
+    expect(ports.fleet.delegated).toEqual([]);
+  });
+});
+
 describe('leer_memoria: la del proyecto de la sesión', () => {
   it('sin proyecto lee la de la sesión (el investigador no tiene que adivinar el id)', async () => {
     const { tools, ports } = setup();
