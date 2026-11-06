@@ -6,7 +6,7 @@ import { probeCore, runningTasks, type FetchLike } from './lib/core-client.ts';
 import { childEnv } from './lib/node-path.ts';
 import { tailLines, waitForReady } from './lib/ready-line.ts';
 import { decodeSession, encodeSession, type Cipher, type CoreSession } from './lib/session-file.ts';
-import { decideOnClose, type CoreOwnership, type ShutdownDecision } from './lib/shutdown-policy.ts';
+import { CLOSE_TIMED_OUT, decideOnClose, type CoreOwnership, type ShutdownDecision } from './lib/shutdown-policy.ts';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -78,6 +78,12 @@ function readTail(path: string, bytes = 8192): string {
 }
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+/** Se resuelve al abortar `signal` (nunca, sin señal): para cortar una espera con `Promise.race`. */
+const whenAborted = (signal?: AbortSignal) =>
+  new Promise<void>((r) => {
+    if (signal?.aborted) r();
+    else signal?.addEventListener('abort', () => r(), { once: true });
+  });
 
 /**
  * Busca, lanza, reutiliza y apaga el núcleo. No importa `electron` (el cifrador y `fetch` llegan inyectados).
@@ -268,10 +274,14 @@ export class CoreSupervisor {
   /**
    * Cierre de la ventana: aplica `decideOnClose` y, si toca, apaga el núcleo (y sus hijos) por PID.
    * Si el núcleo seguía arrancando, se detiene: todavía no puede tener tareas.
+   * `signal` es el plazo del cierre: si vence antes de empezar a apagar, no se mata nada (`CLOSE_TIMED_OUT`); si el
+   * apagado ya empezó, se espera a que termine y se borra la sesión, para que una apertura nueva no adopte un núcleo
+   * que se está muriendo.
    */
-  async onAppClose(): Promise<ShutdownDecision> {
+  async onAppClose(signal?: AbortSignal): Promise<ShutdownDecision> {
     const { fetch, log } = this.deps;
-    if (this.connecting) await Promise.race([this.connecting, delay(3000)]);
+    if (this.connecting) await Promise.race([this.connecting, delay(3000), whenAborted(signal)]);
+    if (signal?.aborted) return this.closeTimedOut();
     const core = this.core;
     if (!core) {
       const pid = this.child?.exitCode === null ? this.child.pid : undefined;
@@ -283,7 +293,8 @@ export class CoreSupervisor {
       }
       return decideOnClose(null, null);
     }
-    const check = core.ownership === 'external' ? null : await runningTasks(core.origin, core.token, fetch, 3000);
+    const check = core.ownership === 'external' ? null : await runningTasks(core.origin, core.token, fetch, 3000, signal);
+    if (signal?.aborted) return this.closeTimedOut();
     const decision = decideOnClose(core.ownership, check);
     log(`cierre: ${decision.reason}`);
     if (decision.stop && core.pid) {
@@ -293,6 +304,11 @@ export class CoreSupervisor {
       this.core = null;
     }
     return decision;
+  }
+
+  private closeTimedOut(): ShutdownDecision {
+    this.deps.log(`cierre: ${CLOSE_TIMED_OUT.reason}`);
+    return CLOSE_TIMED_OUT;
   }
 
   private readSession(): CoreSession | null {

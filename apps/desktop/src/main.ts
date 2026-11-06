@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, Menu, safeStorage, screen, session, shell } from 'electron';
@@ -7,6 +8,7 @@ import { APP_NAME, bridgeEndpoint, loadDesktopConfig, type DesktopConfig } from 
 import { allowedExternalUrl, classifyNavigation, isSameOrigin } from './lib/external-url.ts';
 import { createFileLog } from './lib/log.ts';
 import { resolveNodePath } from './lib/node-path.ts';
+import { onSecondInstance } from './lib/second-instance.ts';
 import type { Cipher } from './lib/session-file.ts';
 import { statusPageUrl, type StatusPage } from './lib/status-page.ts';
 import { MIN_SIZE, parseWindowState, placeWindow, serializeWindowState } from './lib/window-state.ts';
@@ -14,13 +16,24 @@ import { MIN_SIZE, parseWindowState, placeWindow, serializeWindowState } from '.
 const BACKGROUND = '#090909';
 /** Permisos que la interfaz puede pedir (copiar y pegar). Todo lo demás se deniega. */
 const ALLOWED_PERMISSIONS = new Set(['clipboard-read', 'clipboard-sanitized-write']);
-/** Tope del cierre: si el núcleo no contesta, la ventana se cierra igual y el núcleo sigue. */
+/** Plazo del cierre: si vence antes de apagar el núcleo, la ventana se cierra igual y el núcleo sigue. */
 const CLOSE_TIMEOUT_MS = 8000;
 /** En desarrollo, reintentos mientras arranca `npm run dev:ui`. */
 const DEV_RETRIES = 60;
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Abre una instancia nueva ya (no al terminar este proceso, como `app.relaunch`, que con la CPU ocupada tarda). */
+function openNewInstance(log: (line: string) => void): void {
+  try {
+    const child = spawn(process.execPath, process.argv.slice(1), { detached: true, stdio: 'ignore', cwd: process.cwd(), shell: false });
+    child.once('error', (err) => log(`no se pudo reabrir Berland: ${message(err)}`));
+    child.unref();
+  } catch (err) {
+    log(`no se pudo reabrir Berland: ${message(err)}`);
+  }
+}
 
 function readText(path: string): string | null {
   try {
@@ -166,31 +179,39 @@ async function run(config: DesktopConfig): Promise<void> {
     },
   });
 
+  // Cierre: se oculta la ventana enseguida y se aplica la regla del núcleo (ver CoreSupervisor.onAppClose).
+  let quitting = false;
+  let shuttingDown: Promise<void> | null = null;
+  let reopenRequested = false;
   app.on('second-instance', () => {
+    if (onSecondInstance({ shuttingDown: shuttingDown !== null }) === 'reopen-after-close') {
+      if (!reopenRequested) log('Berland se reabrió durante el cierre: se abrirá una ventana nueva al terminar');
+      reopenRequested = true;
+      return;
+    }
     if (win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
   });
-
-  // Cierre: se oculta la ventana enseguida y se aplica la regla del núcleo (ver CoreSupervisor.onAppClose).
-  let quitting = false;
-  let shuttingDown: Promise<void> | null = null;
   const shutdown = () => {
     shuttingDown ??= (async () => {
+      // El plazo no deja la decisión a medias: el candado se suelta con el núcleo vivo con su sesión, o muerto y sin ella.
+      const deadline = new AbortController();
+      const timer = setTimeout(() => deadline.abort(), CLOSE_TIMEOUT_MS);
       try {
-        const d = await Promise.race([
-          supervisor.onAppClose(),
-          delay(CLOSE_TIMEOUT_MS).then(() => ({ stop: false, reason: 'el cierre tardó demasiado: el núcleo sigue vivo' })),
-        ]);
+        const d = await supervisor.onAppClose(deadline.signal);
         log(`ventana cerrada: ${d.reason}`);
       } catch (err) {
         log(`error al cerrar: ${message(err)}`);
+      } finally {
+        clearTimeout(timer);
       }
       quitting = true;
       // Con la CPU ocupada, el desmontaje nativo de Electron puede tardar decenas de segundos tras
       // `quit`. Se suelta ya el candado para que reabrir Berland en ese rato abra una ventana nueva.
       app.releaseSingleInstanceLock();
+      if (reopenRequested) openNewInstance(log);
       app.quit();
     })();
   };

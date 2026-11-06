@@ -49,10 +49,12 @@ export type RunningCheck = { status: 'ok'; running: number } | { status: 'unauth
  * Trabajo en curso en el núcleo: tareas de la flota activas (`ready`, `running`, `review`, `handed_off`, de
  * `GET /tasks`) más los chats de la mente que están respondiendo o tienen subagentes trabajando en segundo plano
  * (`GET /chats`). Sirve también para validar un token: 401 = no es de este núcleo. El token va solo en el encabezado
- * `Authorization`. Si no se puede saber, `error` (y el núcleo no se apaga).
+ * `Authorization`. Si no se puede saber, `error` (y el núcleo no se apaga). `cancel` corta las dos peticiones (cierre
+ * de la ventana con plazo vencido).
  */
-export async function runningTasks(origin: string, token: string, fetchImpl: FetchLike, timeoutMs = 3000): Promise<RunningCheck> {
-  const get = (path: string) => fetchImpl(`${origin}${path}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeoutMs) });
+export async function runningTasks(origin: string, token: string, fetchImpl: FetchLike, timeoutMs = 3000, cancel?: AbortSignal): Promise<RunningCheck> {
+  const signal = () => (cancel ? AbortSignal.any([AbortSignal.timeout(timeoutMs), cancel]) : AbortSignal.timeout(timeoutMs));
+  const get = (path: string) => fetchImpl(`${origin}${path}`, { method: 'GET', headers: { Authorization: `Bearer ${token}` }, signal: signal() });
   try {
     const res = await get('/tasks');
     if (res.status === 401) return { status: 'unauthorized' };

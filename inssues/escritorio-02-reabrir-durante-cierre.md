@@ -3,7 +3,7 @@
 - **Área:** Escritorio y arranque (`apps/desktop`)
 - **Severidad:** media
 - **Archivos:** `apps/desktop/src/main.ts:169`, `apps/desktop/src/main.ts:179`, `apps/desktop/src/main.ts:182`, `apps/desktop/src/main.ts:184`, `apps/desktop/src/main.ts:193`, `apps/desktop/src/main.ts:197`, `apps/desktop/src/core-supervisor.ts:258`, `apps/desktop/src/core-supervisor.ts:272`, `apps/desktop/src/core-supervisor.ts:275`, `apps/desktop/src/core-supervisor.ts:59`, `apps/desktop/src/core-supervisor.ts:166`, `apps/desktop/src/core-supervisor.ts:231`, `apps/desktop/src/lib/core-client.ts:55`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

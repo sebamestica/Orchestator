@@ -46,10 +46,22 @@ const killTree = async (pid: number) => {
   }
 };
 
-/** `fetch` falso: núcleo caído hasta que «arranca»; luego /tasks con el token correcto. */
-function fakeFetch(state: { up: boolean; running: number; token?: string }): FetchLike {
+/** Espera `ms` como un `fetch` lento; si `signal` aborta antes, rechaza como `fetch`. */
+function slow(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    }, { once: true });
+  });
+}
+
+/** `fetch` falso: núcleo caído hasta que «arranca»; luego /tasks con el token correcto (con `delayMs`, lento). */
+function fakeFetch(state: { up: boolean; running: number; token?: string; delayMs?: number }): FetchLike {
   return async (url, init) => {
     if (!state.up) throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+    if (state.delayMs) await slow(state.delayMs, init.signal);
     const auth = init.headers?.Authorization;
     if (url.endsWith('/health')) return { status: 401, json: async () => ({ error: { code: 'unauthorized', message: 'x' } }) };
     if (url.endsWith('/tasks') || url.endsWith('/chats')) {
@@ -157,6 +169,38 @@ describe('CoreSupervisor', () => {
     expect(d).toEqual({ stop: false, reason: '2 trabajos en curso (tareas o la mente): el núcleo sigue vivo' });
     expect(killed).toEqual([]);
     expect(existsSync(config.sessionPath)).toBe(true);
+  });
+
+  it('si el plazo del cierre vence antes de apagar, no mata nada y la sesión queda', async () => {
+    const net = { up: false, running: 0, delayMs: 0 };
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}), fetch: fakeFetch(net) });
+    expect((await sup.connect()).ok).toBe(true);
+    Object.assign(net, { up: true, delayMs: 300 });
+    const d = await sup.onAppClose(AbortSignal.timeout(100));
+    expect(d).toEqual({ stop: false, reason: 'el cierre tardó demasiado: el núcleo sigue vivo' });
+    expect(killed).toEqual([]);
+    expect(existsSync(config.sessionPath)).toBe(true);
+  });
+
+  it('si el plazo vence con el apagado ya empezado, espera a que termine y borra la sesión', async () => {
+    const net = { up: false, running: 0, delayMs: 0 };
+    const deadline = new AbortController();
+    let killDone = false;
+    const slowKill = async (pid: number) => {
+      deadline.abort();
+      await new Promise((r) => setTimeout(r, 300));
+      await killTree(pid);
+      killDone = true;
+    };
+    const sup = supervisor({ spawn: fakeSpawn('ready', {}), fetch: fakeFetch(net), killTree: slowKill });
+    const r = await sup.connect();
+    if (!r.ok) throw new Error(r.title);
+    Object.assign(net, { up: true, delayMs: 50 });
+    const d = await sup.onAppClose(deadline.signal);
+    expect(killDone).toBe(true);
+    expect(d.stop).toBe(true);
+    expect(killed).toEqual([r.core.pid]);
+    expect(existsSync(config.sessionPath)).toBe(false);
   });
 
   it('con un núcleo vivo y una sesión válida lo reutiliza (y lo puede apagar luego)', async () => {

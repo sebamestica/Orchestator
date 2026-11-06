@@ -13,6 +13,9 @@ export interface ShutdownDecision {
   reason: string;
 }
 
+/** Se acabó el plazo del cierre antes de empezar a apagar: no se mata nada y la sesión queda para la próxima apertura. */
+export const CLOSE_TIMED_OUT: ShutdownDecision = { stop: false, reason: 'el cierre tardó demasiado: el núcleo sigue vivo' };
+
 /**
  * Regla al cerrar la ventana: el núcleo se apaga solo si lo abrió Berland **y** se sabe con certeza que
  * no hay tareas en curso. Con tareas en curso, sin respuesta del núcleo o si el núcleo es ajeno, sigue
