@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/usage-stats/summary.ts:318`, `src/core/usage-stats/summary.ts:327`, `src/core/usage-stats/summary.ts:208`, `src/core/usage-stats/summary.ts:210`, `src/core/store/schema.ts:75`, `src/core/store/store.ts:705`, `src/core/store/store.ts:627`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Cada evento `usage` que emiten los adaptadores (un `turn.completed` de Codex, cada resultado del SDK de Claude, cada paso de agy) se guarda como una fila en la tabla `usage` (`src/core/store/store.ts:568-584`). Ninguna parte del código borra filas de esa tabla, así que crece con todo el historial.

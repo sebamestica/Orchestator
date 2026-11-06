@@ -176,6 +176,15 @@ interface TaskInfo {
 const taskRowSchema = z.object({ id: z.string(), project_id: z.string(), agent_id: z.string().nullable(), first_agent: z.string().nullable() });
 const chatRowSchema = z.object({ session_id: z.string(), project_id: z.string().nullable() });
 
+/** Registros de uso entre dos días (`day` del almacén, ambos incluidos); usa el índice `usage_day`. */
+export const USAGE_RANGE_SQL = `SELECT u.agent_id, u.session_id, u.model, u.ts, u.input_tokens, u.output_tokens, u.cached_input_tokens,
+    u.reasoning_tokens, u.cost_usd, json_extract(e.payload_json, '$.cacheWriteTokens') AS cache_write, s.task_id
+  FROM usage u
+  LEFT JOIN events e ON e.id = u.event_id
+  LEFT JOIN sessions s ON s.id = u.session_id
+  WHERE u.day >= ? AND u.day <= ?
+  ORDER BY u.ts, u.id`;
+
 export class UsageStats {
   readonly #store: UsageSource;
   readonly #db: DatabaseSync;
@@ -317,17 +326,7 @@ export class UsageStats {
   /** Registros de uso de `from` a `to` (días en la zona de `fmt`). */
   #load(from: string, to: string, fmt: Intl.DateTimeFormat): UsageEntry[] {
     // La columna `day` está en la zona del almacén: se lee con margen y se filtra por el día en la zona pedida.
-    const rows = this.#db
-      .prepare(
-        `SELECT u.agent_id, u.session_id, u.model, u.ts, u.input_tokens, u.output_tokens, u.cached_input_tokens,
-           u.reasoning_tokens, u.cost_usd, json_extract(e.payload_json, '$.cacheWriteTokens') AS cache_write, s.task_id
-         FROM usage u
-         LEFT JOIN events e ON e.id = u.event_id
-         LEFT JOIN sessions s ON s.id = u.session_id
-         WHERE u.day >= ? AND u.day <= ?
-         ORDER BY u.ts, u.id`,
-      )
-      .all(addDays(from, -2), addDays(to, 2));
+    const rows = this.#db.prepare(USAGE_RANGE_SQL).all(addDays(from, -2), addDays(to, 2));
     const out: UsageEntry[] = [];
     for (const raw of rows) {
       const r = rawRowSchema.parse(raw);

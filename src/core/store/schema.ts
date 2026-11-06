@@ -95,4 +95,8 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE tasks ADD COLUMN detail TEXT;
   ALTER TABLE tasks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
   `,
+  // v4: índice por día para el resumen de uso y GET /usage con rango y sin agente (usage_agent_day empieza por agent_id).
+  `
+  CREATE INDEX usage_day ON usage(day);
+  `,
 ];
