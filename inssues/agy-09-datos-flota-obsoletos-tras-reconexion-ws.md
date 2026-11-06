@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** media
 - **Archivos:** `src/ui/app/App.tsx:53-57`, `src/ui/store/app.ts:51`, `src/ui/store/app.ts:54-67`, `src/ui/store/app.ts:81-101`, `src/ui/api/live.ts:98-101`, `src/ui/api/live.ts:112-119`, `src/core/server/ws.ts:48-49`, `src/ui/features/chat/use-chat-live.ts:54-58`, `src/ui/features/chat/target-line.ts:97-99`, `src/ui/features/agents-panel/AgentsPanel.tsx:23`, `src/ui/features/agents-panel/AgentsPanel.tsx:61-68`, `src/ui/features/agents-panel/AgentsPanel.tsx:30-39`, `src/ui/features/agents-panel/model.ts:91-95`, `src/ui/store/app.ts:98-99`, `src/core/server/hub.ts:71-73`, `src/ui/features/board/BoardView.tsx:18-39`, `src/ui/features/board/TaskCard.tsx:22`, `src/ui/features/board/TaskCard.tsx:129`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 - **Fusiona:** `ui-resto-03-reconexion-ws-no-recarga-estado.md` (revisión de la interfaz: tablero, panel, ajustes), que
   describía el mismo fallo y agregaba cómo se ve en el Tablero y en el panel. Ese archivo se borró; lo que aportaba está

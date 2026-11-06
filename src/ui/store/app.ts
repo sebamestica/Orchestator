@@ -23,10 +23,13 @@ interface AppState {
   quotas: Record<string, QuotaRecord>;
   tasks: Record<string, TaskRecord>;
   setCore(core: CoreStatus, error?: string): void;
+  /** Guarda el estado de `/ws` y, al quedar abierto, vuelve a pedir la foto (el núcleo no repite lo perdido). */
   setLive(live: LiveStatus): void;
   toggleSidebar(): void;
   togglePanel(open?: boolean): void;
   loadAll(): Promise<void>;
+  /** `loadAll` sin errores y de a una: si se pide con otra en vuelo, se repite una vez al terminar. */
+  resync(): Promise<void>;
   refreshProjects(): Promise<void>;
   refreshAgents(): Promise<void>;
   refreshTasks(): Promise<void>;
@@ -35,6 +38,35 @@ interface AppState {
 }
 
 const ignore = () => undefined;
+
+/**
+ * Une la foto HTTP con lo que `/ws` trajo mientras se pedía. Manda la foto, salvo los registros que cambiaron en
+ * vuelo (ya no son los de `before`): esos se quedan si son más nuevos que los de la foto o si la foto aún no los tiene,
+ * y los que se borraron en vuelo no vuelven.
+ */
+function mergeSnapshot<T extends { updatedAt: string }>(
+  snapshot: readonly T[],
+  current: readonly T[],
+  before: readonly T[],
+  idOf: (record: T) => string,
+): T[] {
+  const merged = new Map(snapshot.map((r) => [idOf(r), r] as const));
+  const untouched = new Set(before);
+  for (const r of current) {
+    if (untouched.has(r)) continue;
+    const snap = merged.get(idOf(r));
+    if (!snap || r.updatedAt > snap.updatedAt) merged.set(idOf(r), r);
+  }
+  const alive = new Set(current.map(idOf));
+  for (const r of before) if (!alive.has(idOf(r))) merged.delete(idOf(r));
+  return [...merged.values()];
+}
+
+const taskId = (t: TaskRecord) => t.task.id;
+const agentId = (a: AgentRecord) => a.config.id;
+
+let resyncing: Promise<void> | null = null;
+let resyncAgain = false;
 
 export const useApp = create<AppState>((set, get) => ({
   core: 'starting',
@@ -48,7 +80,10 @@ export const useApp = create<AppState>((set, get) => ({
   quotas: {},
   tasks: {},
   setCore: (core, error) => set({ core, coreError: error ?? null }),
-  setLive: (live) => set({ live }),
+  setLive: (live) => {
+    set({ live });
+    if (live === 'open') void get().resync();
+  },
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   togglePanel: (open) => set((s) => ({ panelOpen: open ?? !s.panelOpen })),
   async loadAll() {
@@ -65,17 +100,34 @@ export const useApp = create<AppState>((set, get) => ({
       api.get<{ settings: Settings }>('/settings').then((r) => set({ settings: r.settings }), ignore),
     ]);
   },
+  resync() {
+    if (resyncing) {
+      resyncAgain = true;
+      return resyncing;
+    }
+    resyncing = (async () => {
+      do {
+        resyncAgain = false;
+        await get().loadAll().catch(ignore);
+      } while (resyncAgain);
+    })().finally(() => {
+      resyncing = null;
+    });
+    return resyncing;
+  },
   async refreshProjects() {
     const r = await api.get<{ projects: ProjectRecord[] }>('/projects');
     set({ projects: r.projects });
   },
   async refreshAgents() {
+    const before = get().agents;
     const r = await api.get<{ agents: AgentRecord[] }>('/agents');
-    set({ agents: r.agents });
+    set((s) => ({ agents: mergeSnapshot(r.agents, s.agents, before, agentId) }));
   },
   async refreshTasks() {
+    const before = Object.values(get().tasks);
     const r = await api.get<{ tasks: TaskRecord[] }>('/tasks');
-    set({ tasks: Object.fromEntries(r.tasks.map((t) => [t.task.id, t])) });
+    set((s) => ({ tasks: Object.fromEntries(mergeSnapshot(r.tasks, Object.values(s.tasks), before, taskId).map((t) => [taskId(t), t])) }));
   },
   setSettings: (settings) => set({ settings }),
   applyLive(message) {
