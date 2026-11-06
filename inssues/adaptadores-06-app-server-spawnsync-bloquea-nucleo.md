@@ -3,7 +3,7 @@
 - **Área:** Adaptadores de agentes (app-server de Codex y cupo de Codex)
 - **Severidad:** baja
 - **Archivos:** `src/core/adapters/codex-cli/app-server.ts:24-36`, `src/core/adapters/codex-cli/app-server.ts:41`, `src/core/quota/codex.ts:90`, `src/core/main.ts:109-118`, `src/core/orchestrator/router.ts:345-358`, `src/core/quota/monitor.ts:46`, `src/core/quota/monitor.ts:68`, `src/core/process/run-jsonl.ts:39-48`, `tests/core/adapters/codex-cli/app-server.test.ts:6-10`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

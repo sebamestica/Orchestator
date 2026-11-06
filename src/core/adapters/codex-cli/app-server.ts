@@ -1,10 +1,27 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import { resolveCodexExecutable } from './executable.ts';
 import type { CodexExecutable } from './executable.ts';
 import { childEnv } from '../../process/child-env.ts';
 import { systemExe } from '../../process/system-exe.ts';
+
+/**
+ * Termina el app-server sin bloquear el bucle de eventos del núcleo. En Windows el lanzador npm tiene un `codex.exe`
+ * nativo como hijo: `taskkill /T` recorre el árbol y solo cuando termina se mata al lanzador, porque si muere antes
+ * `taskkill` ya no encuentra el PID y el nativo queda huérfano.
+ */
+function stopTree(child: ChildProcess): void {
+  const alive = () => child.exitCode === null && child.signalCode === null;
+  if (!alive()) return;
+  if (process.platform !== 'win32' || !child.pid) { child.kill(); return; }
+  const fallback = () => { if (alive()) child.kill(); };
+  const killer = spawn(systemExe('taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  // Sin oyente de 'error', un fallo al lanzar taskkill sería una excepción sin capturar en el núcleo.
+  killer.once('error', fallback);
+  killer.once('exit', fallback);
+  killer.unref();
+}
 
 const responseSchema = z.object({ id: z.union([z.number(), z.string()]).optional(), result: z.unknown().optional(),
   error: z.object({ code: z.number(), message: z.string() }).optional() });
@@ -27,12 +44,9 @@ export async function readCodexAppServer(executable: CodexExecutable = resolveCo
       clearTimeout(timer);
       lines.close();
       child.stdin.end();
-      if (process.platform === 'win32' && child.pid) {
-        // El lanzador npm tiene un hijo nativo; terminar todo el árbol.
-        spawnSync(systemExe('taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 3000, stdio: 'ignore' });
-      }
-      child.kill();
+      // El resultado ya está leído: entregarlo sin esperar a que el árbol termine.
       if (error) reject(error); else resolve(value);
+      stopTree(child);
     };
     const timer = setTimeout(() => finish(new Error('Timeout de Codex app-server')), timeoutMs);
     const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`);
