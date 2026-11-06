@@ -2509,6 +2509,89 @@
         }
       }
     },
+    "/skills/quarantine": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Lista las skills en cuarentena con su informe de revisión",
+        "operationId": "getSkillsQuarantine",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillsResponse"
+                },
+                "example": {
+                  "skills": [
+                    {
+                      "version": 1,
+                      "id": "revisar-pr-20261101-214500-a1b2c3",
+                      "name": "revisar-pr",
+                      "description": "Revisa un PR y deja comentarios en español.",
+                      "importedAt": "2026-11-01T21:45:00.000Z",
+                      "source": {
+                        "kind": "zip",
+                        "path": "C:\\Users\\yo\\Downloads\\mi-skill.zip",
+                        "sha256": "6f9bde7b3c3c90f1692c4071a3f1cb69709f7ee04531239a31442abd601ee4eb",
+                        "topFolder": "revisar-pr"
+                      },
+                      "fileCount": 2,
+                      "totalBytes": 3120,
+                      "treeHash": "sha256:1ed65407c3d185c563d8e9a03dae30ba597254417dee0f5d6243249819acfd1c",
+                      "files": [
+                        {
+                          "path": "SKILL.md",
+                          "size": 2048,
+                          "sha256": "ee8be1e7c5ca51b32e7a824690c5369c0025cf9e8961ca92d417965003607812"
+                        },
+                        {
+                          "path": "scripts/check.sh",
+                          "size": 1072,
+                          "sha256": "f334e3a73256c1be8daa684df566fa56f4037e392ea8fa4a80f05b031233994e",
+                          "script": [
+                            "extensión",
+                            "shebang"
+                          ]
+                        }
+                      ],
+                      "scripts": [
+                        {
+                          "path": "scripts/check.sh",
+                          "reasons": [
+                            "extensión",
+                            "shebang"
+                          ]
+                        }
+                      ],
+                      "license": {
+                        "declared": "MIT",
+                        "files": []
+                      },
+                      "skipped": [],
+                      "warnings": [],
+                      "skillMdPreview": "---\nname: revisar-pr\ndescription: Revisa un PR y deja comentarios en español.\nlicense: MIT\n---\n# Revisar PR",
+                      "path": "C:\\dev\\agent-hub\\skills-entrantes\\revisar-pr-20261101-214500-a1b2c3"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "501": {
+            "$ref": "#/components/responses/E501"
+          }
+        }
+      }
+    },
     "/skills/import": {
       "post": {
         "tags": [

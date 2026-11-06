@@ -179,6 +179,7 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'GET /attachments/:id': { paramVars: { id: 'attachmentId' } },
 
   'GET /skills': { responseExample: { skills: ex.skillsList } },
+  'GET /skills/quarantine': { responseExample: { skills: [ex.skillImport] } },
   'POST /skills/import': { responseExample: { result: ex.skillImport } },
   'POST /skills/:name/approve': { paramVars: skillName, responseExample: { result: ex.skillApproved } },
   'POST /skills/:name/reject': { paramVars: skillName, responseExample: { result: ex.skillRejected } },

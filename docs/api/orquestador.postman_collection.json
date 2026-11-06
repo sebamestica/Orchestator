@@ -4040,6 +4040,54 @@
           ]
         },
         {
+          "name": "/skills/quarantine",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/skills/quarantine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "skills",
+                "quarantine"
+              ]
+            },
+            "description": "Lista las skills en cuarentena con su informe de revisión"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/skills/quarantine",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "skills",
+                    "quarantine"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"skills\": [\n    {\n      \"version\": 1,\n      \"id\": \"revisar-pr-20261101-214500-a1b2c3\",\n      \"name\": \"revisar-pr\",\n      \"description\": \"Revisa un PR y deja comentarios en español.\",\n      \"importedAt\": \"2026-11-01T21:45:00.000Z\",\n      \"source\": {\n        \"kind\": \"zip\",\n        \"path\": \"C:\\\\Users\\\\yo\\\\Downloads\\\\mi-skill.zip\",\n        \"sha256\": \"6f9bde7b3c3c90f1692c4071a3f1cb69709f7ee04531239a31442abd601ee4eb\",\n        \"topFolder\": \"revisar-pr\"\n      },\n      \"fileCount\": 2,\n      \"totalBytes\": 3120,\n      \"treeHash\": \"sha256:1ed65407c3d185c563d8e9a03dae30ba597254417dee0f5d6243249819acfd1c\",\n      \"files\": [\n        {\n          \"path\": \"SKILL.md\",\n          \"size\": 2048,\n          \"sha256\": \"ee8be1e7c5ca51b32e7a824690c5369c0025cf9e8961ca92d417965003607812\"\n        },\n        {\n          \"path\": \"scripts/check.sh\",\n          \"size\": 1072,\n          \"sha256\": \"f334e3a73256c1be8daa684df566fa56f4037e392ea8fa4a80f05b031233994e\",\n          \"script\": [\n            \"extensión\",\n            \"shebang\"\n          ]\n        }\n      ],\n      \"scripts\": [\n        {\n          \"path\": \"scripts/check.sh\",\n          \"reasons\": [\n            \"extensión\",\n            \"shebang\"\n          ]\n        }\n      ],\n      \"license\": {\n        \"declared\": \"MIT\",\n        \"files\": []\n      },\n      \"skipped\": [],\n      \"warnings\": [],\n      \"skillMdPreview\": \"---\\nname: revisar-pr\\ndescription: Revisa un PR y deja comentarios en español.\\nlicense: MIT\\n---\\n# Revisar PR\",\n      \"path\": \"C:\\\\dev\\\\agent-hub\\\\skills-entrantes\\\\revisar-pr-20261101-214500-a1b2c3\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
           "name": "/skills/import",
           "request": {
             "method": "POST",

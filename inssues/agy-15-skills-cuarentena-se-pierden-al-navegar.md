@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** media
 - **Archivos:** `src/ui/features/settings/SkillsSection.tsx:41-42`, `src/ui/features/settings/SkillsSection.tsx:65`, `src/ui/features/settings/SkillsSection.tsx:103`, `src/ui/features/settings/SettingsView.tsx:29-42`, `src/core/server/app.ts:30-35`, `src/core/server/app.ts:674-703`, `src/core/skills/hub.ts:437-457`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

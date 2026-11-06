@@ -244,6 +244,13 @@ describe('rutas: skills, memoria y WebSocket en proceso', () => {
     expect((await makeTestApp({ withServices: false }).req('GET', '/skills')).status).toBe(501);
   });
 
+  it('skills: GET /skills/quarantine lista lo que espera revisión (501 sin hub)', async () => {
+    const res = await makeTestApp().req('GET', '/skills/quarantine');
+    expect(res.status).toBe(200);
+    expect(res.json.skills).toEqual([{ id: 'nueva-20261104-105000-abc123', name: 'nueva', fileCount: 1 }]);
+    expect((await makeTestApp({ withServices: false }).req('GET', '/skills/quarantine')).status).toBe(501);
+  });
+
   it('memoria: contexto del proyecto o de una tarea, con presupuesto', async () => {
     const t = makeTestApp();
     expect((await t.req('GET', '/memory/proyecto-1/context')).status).toBe(404);

@@ -105,6 +105,9 @@ export function fakeSkills(): SkillsService {
     async reject(name) {
       return { name, rejected: true };
     },
+    async quarantine() {
+      return [{ id: 'nueva-20261104-105000-abc123', name: 'nueva', fileCount: 1 }];
+    },
   };
 }
 

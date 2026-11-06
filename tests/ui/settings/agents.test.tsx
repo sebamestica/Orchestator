@@ -226,11 +226,18 @@ describe('Memoria', () => {
 describe('Skills', () => {
   it('lista, importa a cuarentena y aprueba', async () => {
     let installed = [{ name: 'redaccion', folder: 'redaccion', root: 'C:\\skills', description: 'Escribe bien', valid: true, problems: [] }];
+    const review = { id: 'pdf-20261104-105000-abc123', name: 'pdf', description: 'Lee PDFs', fileCount: 3, scripts: [{ path: 'run.sh', reasons: ['extensión'] }], warnings: [], license: { files: [] } };
+    let pending: (typeof review)[] = [];
     const calls = fakeCore({
       'GET /skills': () => ({ body: { skills: installed } }),
-      'POST /skills/import': () => ({ status: 201, body: { result: { id: 'pdf-20261104-105000-abc123', name: 'pdf', description: 'Lee PDFs', fileCount: 3, scripts: [{ path: 'run.sh', reasons: ['extensión'] }], warnings: [], license: { files: [] } } } }),
+      'GET /skills/quarantine': () => ({ body: { skills: pending } }),
+      'POST /skills/import': () => {
+        pending = [review];
+        return { status: 201, body: { result: review } };
+      },
       'POST /skills/pdf-20261104-105000-abc123/approve': () => {
         installed = [...installed, { name: 'pdf', folder: 'pdf', root: 'C:\\skills', description: 'Lee PDFs', valid: true, problems: [] }];
+        pending = [];
         return { body: { result: {} } };
       },
     });
@@ -241,8 +248,17 @@ describe('Skills', () => {
     expect(await screen.findByText(/Ejecutables: run.sh/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Aprobar/ }));
     expect(await screen.findByText(/«pdf» instalada/)).toBeTruthy();
-    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /skills', 'POST /skills/import', 'POST /skills/pdf-20261104-105000-abc123/approve', 'GET /skills']);
-    expect(calls[1]?.body).toEqual({ source: 'C:\\Descargas\\pdf.zip' });
+    await waitFor(() => expect(screen.queryByText('En cuarentena')).toBeNull());
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'GET /skills',
+      'GET /skills/quarantine',
+      'POST /skills/import',
+      'GET /skills/quarantine',
+      'POST /skills/pdf-20261104-105000-abc123/approve',
+      'GET /skills/quarantine',
+      'GET /skills',
+    ]);
+    expect(calls[2]?.body).toEqual({ source: 'C:\\Descargas\\pdf.zip' });
   });
 
   it('sin hub de skills (501) avisa', async () => {

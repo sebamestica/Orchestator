@@ -3,7 +3,7 @@ import { Check, PackagePlus, X } from 'lucide-react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { z } from 'zod';
 import { api } from '../../api/client.ts';
-import { errorText, Notice, SettingsCard } from './shared.tsx';
+import { errorText, isMissingRoute, Notice, SettingsCard } from './shared.tsx';
 
 /** Lo que muestra la interfaz de `GET /skills` (el núcleo lo manda como `unknown`). */
 const skillEntry = z.object({
@@ -18,7 +18,7 @@ const skillEntry = z.object({
 const skillsResponse = z.object({ skills: z.array(skillEntry) });
 type SkillEntry = z.infer<typeof skillEntry>;
 
-/** Informe de cuarentena que devuelve `POST /skills/import`. */
+/** Informe de cuarentena que devuelven `POST /skills/import` y `GET /skills/quarantine`. */
 const quarantined = z.object({
   id: z.string(),
   name: z.string(),
@@ -29,6 +29,7 @@ const quarantined = z.object({
   license: z.object({ declared: z.string().optional(), detected: z.string().optional() }).optional(),
 });
 const importResponse = z.object({ result: quarantined });
+const quarantineResponse = z.object({ skills: z.array(quarantined) });
 type Quarantined = z.infer<typeof quarantined>;
 
 const MAX_SHOWN = 200;
@@ -38,8 +39,8 @@ export function SkillsSection() {
   const [source, setSource] = useState('');
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<{ tone: 'error' | 'info'; text: string } | null>(null);
-  // La cuarentena solo se conoce por la respuesta de importar (no hay ruta que la liste).
   const [pending, setPending] = useState<Quarantined[]>([]);
+  const [pendingError, setPendingError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -50,9 +51,20 @@ export function SkillsSection() {
       setList({ status: 'error', message: errorText(err) });
     }
   }, []);
+  // La cuarentena vive en el disco del núcleo: se vuelve a pedir en vez de recordarla aquí.
+  const loadPending = useCallback(async () => {
+    try {
+      setPending(quarantineResponse.parse(await api.get<unknown>('/skills/quarantine')).skills);
+      setPendingError(null);
+    } catch (err) {
+      // Sin hub (501) ya lo avisa «Instaladas»; no se repite aquí.
+      setPendingError(isMissingRoute(err) ? null : errorText(err));
+    }
+  }, []);
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadPending();
+  }, [load, loadPending]);
 
   const doImport = async (e: FormEvent) => {
     e.preventDefault();
@@ -62,9 +74,9 @@ export function SkillsSection() {
     setMessage(null);
     try {
       const r = importResponse.parse(await api.post<unknown>('/skills/import', { source: path }));
-      setPending((p) => [r.result, ...p.filter((q) => q.id !== r.result.id)]);
       setSource('');
       setMessage({ tone: 'info', text: `«${r.result.name}» quedó en cuarentena. Revísala y apruébala o recházala.` });
+      await loadPending();
     } catch (err) {
       setMessage({ tone: 'error', text: errorText(err) });
     } finally {
@@ -77,9 +89,8 @@ export function SkillsSection() {
     setMessage(null);
     try {
       await api.post(`/skills/${encodeURIComponent(q.id)}/${action}`);
-      setPending((p) => p.filter((x) => x.id !== q.id));
       setMessage({ tone: 'info', text: action === 'approve' ? `«${q.name}» instalada.` : `«${q.name}» descartada.` });
-      if (action === 'approve') await load();
+      await Promise.all([loadPending(), action === 'approve' ? load() : null]);
     } catch (err) {
       setMessage({ tone: 'error', text: errorText(err) });
     } finally {
@@ -100,8 +111,13 @@ export function SkillsSection() {
         </form>
       </SettingsCard>
 
-      {pending.length > 0 ? (
+      {pending.length > 0 || pendingError ? (
         <SettingsCard title="En cuarentena">
+          {pendingError ? (
+            <div className="p-4">
+              <Notice>{pendingError}</Notice>
+            </div>
+          ) : null}
           {pending.map((q) => (
             <div key={q.id} className="flex items-start gap-3 px-4 py-3.5">
               <div className="min-w-0 flex-1">

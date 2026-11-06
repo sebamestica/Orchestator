@@ -33,6 +33,8 @@ export interface SkillsService {
   importSkill(source: string): Promise<unknown>;
   approve(name: string): Promise<unknown>;
   reject(name: string): Promise<unknown>;
+  /** Skills en cuarentena con su informe de revisión. */
+  quarantine(): Promise<unknown>;
 }
 
 /** Ganchos para la orquestación (cola de tareas). */
@@ -713,6 +715,10 @@ export function createApp(deps: AppDeps): CoreApp {
   r.add({ method: 'get', path: '/skills', tag: 'Skills', summary: 'Lista las skills instaladas', response: s.skillsResponse, errors: [501] }, async () => ({
     skills: await callService('skills', () => skills().list()),
   }));
+  r.add(
+    { method: 'get', path: '/skills/quarantine', tag: 'Skills', summary: 'Lista las skills en cuarentena con su informe de revisión', response: s.skillsResponse, errors: [501] },
+    async () => ({ skills: await callService('skills', () => skills().quarantine()) }),
+  );
   r.add(
     {
       method: 'post',
