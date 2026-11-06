@@ -466,6 +466,49 @@ describe('estado vacío y primer mensaje', () => {
     expect(screen.queryByTestId('target-line')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  it('doble clic en una sugerencia crea un solo chat y envía un solo mensaje', async () => {
+    const { state, calls } = fakeCore({ chats: [] });
+    render(<ChatView projectId="demo" />);
+    const pick = await screen.findByRole('button', { name: 'Revisa el estado del proyecto y propón los siguientes pasos' });
+    fireEvent.click(pick);
+    fireEvent.click(pick);
+    await waitFor(() => expect(posts(calls)).toEqual(['/chats', '/chats/chat_new001/messages']));
+    expect(state.chats).toHaveLength(1);
+    expect(window.location.hash).toBe('#/p/demo/c/chat_new001');
+  });
+
+  it('Conversaciones: clic en dos sugerencias seguidas crea un solo chat', async () => {
+    const { state, calls } = fakeCore({ chats: [] });
+    render(<ChatView projectId={null} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Explícame qué hay en esta carpeta y cómo está organizada' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Revisa el código y sugiere mejoras concretas' }));
+    await waitFor(() => expect(posts(calls)).toEqual(['/chats', '/chats/chat_new001/messages']));
+    expect(state.chats).toHaveLength(1);
+    expect(window.location.hash).toBe('#/conversaciones/chat_new001');
+  });
+
+  it('mientras se crea el chat, las sugerencias se ven apagadas', async () => {
+    const { calls } = fakeCore({ chats: [] });
+    const core = globalThis.fetch;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (init?.method === 'POST' && new URL(href).pathname === '/chats') await gate;
+      return core(input, init);
+    });
+    render(<ChatView projectId="demo" />);
+    const first = await screen.findByRole('button', { name: 'Revisa el estado del proyecto y propón los siguientes pasos' });
+    const list = first.closest('ul');
+    fireEvent.click(first);
+    await waitFor(() => expect([...(list?.querySelectorAll('button') ?? [])].map((b) => b.disabled)).toEqual([true, true, true]));
+    fireEvent.click(first);
+    release();
+    await waitFor(() => expect(posts(calls)).toEqual(['/chats', '/chats/chat_new001/messages']));
+  });
 });
 
 describe('adjuntos', () => {

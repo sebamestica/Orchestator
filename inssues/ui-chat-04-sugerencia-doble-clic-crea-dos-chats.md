@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** media
 - **Archivos:** `src/ui/features/chat/ChatView.tsx:280`, `src/ui/features/chat/ChatView.tsx:146`, `src/ui/features/chat/ChatView.tsx:148-161`, `src/ui/features/chat/components/EmptyChat.tsx:25`, `src/ui/features/chat/components/EmptyChat.tsx:46-47`, `src/ui/features/chat/store.ts:298-324`, `src/ui/features/chat/store.ts:400-415`, `src/ui/features/composer/Composer.tsx:66`, `src/ui/features/composer/Composer.tsx:146-161`, `src/core/chat/service.ts:306`, `src/core/chat/service.ts:418-421`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

@@ -146,17 +146,29 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
   /** Crea el chat. Una conversación sin proyecto no pide carpeta: el núcleo le da una interna. */
   const createChat = useCallback((): Promise<Chat | null> => useChat.getState().createChat(), []);
 
+  // Un envío a la vez, venga del Composer o de una sugerencia: el `ref` corta el segundo clic antes de que React
+  // vuelva a pintar (si no, dos clics ven `chat === null` y crean dos chats); `starting` apaga las sugerencias.
+  const sending = useRef(false);
+  const [starting, setStarting] = useState(false);
   const onSubmit = useCallback(
     async (turn: { text: string; attachments: Attachment[] }): Promise<boolean> => {
-      let current = useChat.getState().chat;
-      if (!current) {
-        current = await createChat();
-        if (!current) return false;
-        toChat(current.id, true);
+      if (sending.current) return false;
+      sending.current = true;
+      setStarting(true);
+      try {
+        let current = useChat.getState().chat;
+        if (!current) {
+          current = await createChat();
+          if (!current) return false;
+          toChat(current.id, true);
+        }
+        // Un chat recién creado ya heredó el esfuerzo del borrador.
+        const store = useChat.getState();
+        return await store.send(current.id, turn.text, turn.attachments, effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort);
+      } finally {
+        sending.current = false;
+        setStarting(false);
       }
-      // Un chat recién creado ya heredó el esfuerzo del borrador.
-      const store = useChat.getState();
-      return store.send(current.id, turn.text, turn.attachments, effortIn(store.efforts, current.id) ?? useApp.getState().settings.mind.effort);
     },
     [createChat, toChat],
   );
@@ -279,7 +291,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
       </div>
     );
   } else if (empty) {
-    body = <EmptyChat projectName={projectName} onPick={(text) => void onSubmit({ text, attachments: [] })} />;
+    body = <EmptyChat projectName={projectName} isDisabled={starting} onPick={(text) => void onSubmit({ text, attachments: [] })} />;
   } else {
     body = (
       <MessageList
