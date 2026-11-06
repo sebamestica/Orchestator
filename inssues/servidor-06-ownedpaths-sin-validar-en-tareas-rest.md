@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** baja
 - **Archivos:** `src/shared/api.ts:531`, `src/shared/tasks.ts:11`, `src/core/server/schemas.ts:48`, `src/core/server/app.ts:529-535`, `src/core/app/f5-servidor.ts:254-268`, `src/core/orchestrator/paths.ts:33-43`, `src/core/orchestrator/plan.ts:130-133`, `src/core/app/commit-step.ts:83-85`, `src/core/app/commit-step.ts:105-106`, `src/core/app/commit-step.ts:208-214`, `src/core/orchestrator/fleet.ts:430-458`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

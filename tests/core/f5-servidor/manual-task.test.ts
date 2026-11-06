@@ -67,4 +67,18 @@ describe('POST /tasks/manual', () => {
     }
     expect(t.store.listTasks()).toEqual([]);
   });
+
+  it.each([['C:\\dev\\x\\**'], ['../y/**'], ['!src'], ['/src/**'], ['@(a|b)/**']])(
+    'ruta propia inválida %s → 400 sin crear ni aprobar nada',
+    async (bad) => {
+      const t = setup();
+      const res = await t.req('POST', '/tasks/manual', { body: { ...body, ownedPaths: ['src/citas/**', bad] } });
+      expect(res.status, res.text).toBe(400);
+      const { error } = apiSchemas.errorResponse.parse(res.json);
+      expect(error.code).toBe('invalid_request');
+      expect(error.message).toContain(`«${bad}»`);
+      expect(t.store.listTasks()).toEqual([]);
+      expect(t.approved).toEqual([]);
+    },
+  );
 });

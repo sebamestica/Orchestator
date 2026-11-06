@@ -8,7 +8,6 @@ import { z } from 'zod';
 import {
   folderInspectionSchema,
   fsListResponse,
-  manualTaskBody,
   mindCandidateSchema,
   projectFromFolderBody,
   redactSecrets,
@@ -238,7 +237,7 @@ export function createF5ServerRoutes(opts: F5ServerOptions = {}): RouteModule {
         tag: 'Planes y tareas',
         summary: 'Crea una tarea a mano (y la aprueba, salvo `approve: false`)',
         description: `El núcleo completa el encargo: id \`manual-<fecha>-<6 hex>\`, sin dependencias, dificultad \`medium\`, el agente elegido como sugerido y, si no hay aceptación, «${MANUAL_DEFAULT_ACCEPTANCE}». Con \`approve\` (por defecto) se aprueba igual que \`POST /tasks/:id/approve\`.`,
-        body: manualTaskBody,
+        body: apiSchemas.manualTaskBody,
         response: apiSchemas.taskResponse,
         status: 201,
         errors: [400, 404, 409, 413, 415],

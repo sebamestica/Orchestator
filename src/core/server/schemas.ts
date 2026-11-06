@@ -3,6 +3,7 @@ import {
   agentConfigSchema,
   agentEventSchema,
   idSchema,
+  manualTaskBody as manualTaskInput,
   probeResultSchema,
   quotaMethodSchema,
   quotaSnapshotSchema,
@@ -10,6 +11,7 @@ import {
   taskBriefSchema,
   taskStateSchema,
 } from '../../shared/index.ts';
+import { ownedPathProblem } from '../orchestrator/paths.ts';
 import { addAgentFromKeySchema, agentInputSchema, agentPatchSchema } from '../registry/index.ts';
 import { projectInputSchema } from '../store/index.ts';
 import { API_ERROR_CODES } from './errors.ts';
@@ -45,7 +47,15 @@ export const tasksQuery = z.strictObject({
   state: taskStateSchema.optional(),
   planId: idSchema.optional(),
 });
-export const taskBody = taskBriefSchema;
+/** Misma regla que `validatePlan`: sin rutas absolutas, «..», negaciones ni extglobs (si no, la tarea nunca integra). */
+function refineOwnedPaths(t: { ownedPaths: readonly string[] }, ctx: z.RefinementCtx): void {
+  t.ownedPaths.forEach((path, i) => {
+    const problem = ownedPathProblem(path);
+    if (problem) ctx.addIssue({ code: 'custom', path: ['ownedPaths', i], message: `ruta propia inválida ${problem}` });
+  });
+}
+export const taskBody = taskBriefSchema.superRefine(refineOwnedPaths);
+export const manualTaskBody = manualTaskInput.superRefine(refineOwnedPaths);
 export const approveTaskBody = z.strictObject({ agentId: idSchema.optional() });
 export const cancelTaskBody = z.strictObject({ reason: z.string().trim().min(1).max(500).optional() });
 export const sessionsQuery = z.strictObject({
