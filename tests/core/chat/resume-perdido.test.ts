@@ -1,19 +1,20 @@
 /**
- * La transcripción del SDK de un chat ya no existe (issue mente-04): el CLI sale con «No conversation found with
- * session ID». El chat olvida ese id, avisa y reintenta el turno una vez sin `resume`, en vez de quedar roto.
+ * La transcripción del SDK de un chat ya no existe (issue mente-04): el SDK lo dice por stderr, entrega un `result`
+ * `error_during_execution` con «No conversation found with session ID» y lanza. El chat olvida ese id, avisa y
+ * reintenta el turno una vez sin `resume`, en vez de quedar roto.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { bench, closeBenches, echoTurn, tick, type ChatBench, type TurnFn } from './helpers.ts';
+import { bench, closeBenches, echoTurn, sdkErrorExit, sdkLostResume, tick, type ChatBench, type TurnContext, type TurnFn, type TurnOutput } from './helpers.ts';
 
 afterEach(closeBenches);
 
-const LOST = 'Claude Code process exited with code 1\nNo conversation found with session ID: sdk-1';
+type Failure = (ctx: TurnContext) => TurnOutput[];
 
-/** `echoTurn`, salvo al reanudar `sdk-1`: ahí el proceso del SDK muere con `failure`. */
-const failingResume = (failure: string): TurnFn => (message, ctx) => {
-  if (ctx.options.resume === 'sdk-1') throw new Error(failure);
-  return echoTurn(message, ctx);
-};
+/** Lo que hace el SDK real cuando ya no tiene la transcripción de `sdk-1`. */
+const LOST: Failure = (ctx) => sdkLostResume('sdk-1', ctx);
+
+/** `echoTurn`, salvo al reanudar `sdk-1`: ahí el proceso del SDK falla con `failure`. */
+const failingResume = (failure: Failure): TurnFn => (message, ctx) => (ctx.options.resume === 'sdk-1' ? failure(ctx) : echoTurn(message, ctx));
 
 async function turn(b: ChatBench, chatId: string, text: string): Promise<void> {
   await b.service.send(chatId, { text });
@@ -21,7 +22,7 @@ async function turn(b: ChatBench, chatId: string, text: string): Promise<void> {
 }
 
 /** Primer turno (guarda `sdk-1`) y cierre de la sesión ociosa: el mensaje siguiente reanuda con `resume`. */
-async function resumable(failure: string) {
+async function resumable(failure: Failure) {
   const b = await bench({ idleMs: 50, turn: failingResume(failure) });
   const chat = b.service.create({ projectId: 'demo' });
   await turn(b, chat.id, 'uno');
@@ -90,11 +91,21 @@ describe('ChatService: reanudar una sesión del SDK que ya no existe', () => {
   });
 
   it('otro error al reanudar (p. ej. falta el ejecutable) no borra el id ni reintenta', async () => {
-    const { b, chat } = await resumable('spawn ENOENT');
+    const { b, chat } = await resumable(() => [new Error('spawn ENOENT')]);
     await turn(b, chat.id, 'dos');
 
     expect(b.q.calls).toHaveLength(2);
     expect(storedSdkId(b, chat.id)).toBe('sdk-1');
     expect(b.service.get(chat.id).state).toBe('error');
+  });
+
+  it('un resultado de error al reanudar que no es la transcripción perdida no borra el id ni reintenta', async () => {
+    const { b, chat } = await resumable((ctx) => sdkErrorExit('sdk-1', 'API Error: 500 Internal Server Error', ctx));
+    await turn(b, chat.id, 'dos');
+
+    expect(b.q.calls).toHaveLength(2);
+    expect(storedSdkId(b, chat.id)).toBe('sdk-1');
+    expect(b.service.get(chat.id).state).toBe('error');
+    expect(b.events(chat.sessionId).some((e) => e.type === 'status' && /No se pudo reanudar/.test(e.payload.detail ?? ''))).toBe(false);
   });
 });

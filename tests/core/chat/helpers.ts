@@ -75,8 +75,11 @@ export interface TurnContext {
   stopped: Promise<void>;
 }
 
+/** Lo que entrega un turno: mensajes del SDK en orden y, si el proceso muere, el error con que lo hace (el stream lanza ahí). */
+export type TurnOutput = SDKMessage | Error;
+
 /** Guion de un turno: los mensajes de una vez, o un iterable asíncrono que puede esperar a mitad de turno. */
-export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<SDKMessage[]> | SDKMessage[] | AsyncIterable<SDKMessage>;
+export type TurnFn = (message: SDKUserMessage, ctx: TurnContext) => Promise<TurnOutput[]> | TurnOutput[] | AsyncIterable<TurnOutput>;
 
 export interface ChatQuery {
   fn: ConductorQueryFn;
@@ -104,7 +107,10 @@ export function chatQuery(turn: TurnFn, opts: { flags?: boolean } = {}): ChatQue
       for await (const message of prompt) {
         state.received.push(message);
         const out = await turn(message, { index: index++, process, options, stopped });
-        for await (const m of out) yield m;
+        for await (const m of out) {
+          if (m instanceof Error) throw m;
+          yield m;
+        }
         stopped = new Promise<void>((r) => { stop = r; });
       }
     })();
@@ -175,6 +181,22 @@ export function meteredTurn(plan: readonly MeteredProcess[]): TurnFn {
     out.push({ ...sdkResult(own ? 'eco' : '', sid, cost), modelUsage } as unknown as SDKMessage);
     return out;
   };
+}
+
+/**
+ * Proceso del SDK que termina con un `result` de error (`errors`) y luego lanza, como el SDK real: primero lo dice por
+ * stderr (si se pasa `stderr`), entrega el `result` con el id pedido y después el proceso muere.
+ */
+export function sdkErrorExit(sessionId: string, error: string, ctx: TurnContext, stderr?: string): TurnOutput[] {
+  if (stderr !== undefined) ctx.options.stderr?.(`${stderr}\n`);
+  const result = { ...sdkResult(undefined, sessionId, 0, 'error_during_execution'), errors: [error], modelUsage: {} } as unknown as SDKMessage;
+  return [result, new Error(`Claude Code returned an error result: ${error}`)];
+}
+
+/** Reanudar una sesión cuya transcripción ya no existe, como lo hace el SDK real (stderr, `result` de error y error). */
+export function sdkLostResume(sessionId: string, ctx: TurnContext): TurnOutput[] {
+  const text = `No conversation found with session ID: ${sessionId}`;
+  return sdkErrorExit(sessionId, text, ctx, text);
 }
 
 export interface ChatBench {

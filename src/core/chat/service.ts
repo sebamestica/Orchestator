@@ -163,7 +163,7 @@ interface Turn {
   retried?: boolean;
 }
 
-/** Sesión abierta con `resume`: el id pedido y si el CLI avisó por stderr que ya no tiene su transcripción. */
+/** Sesión abierta con `resume`: el id pedido y si el SDK avisó (stderr, `result` o error) que ya no tiene su transcripción. */
 interface Resume {
   id: string;
   lost: boolean;
@@ -171,6 +171,14 @@ interface Resume {
 
 /** El CLI no encontró la transcripción de la sesión que se le pidió reanudar (la limpió Claude Code o se borró). */
 const RESUME_LOST = /No conversation found with session ID/i;
+
+const errorResultSchema = z.object({ type: z.literal('result'), subtype: z.literal('error_during_execution'), errors: z.array(z.string()) }).loose();
+
+/** `result` de error con el que el SDK avisa que no encontró la transcripción a reanudar (después lanza el error). */
+function isLostResumeResult(message: unknown): boolean {
+  const parsed = errorResultSchema.safeParse(message);
+  return parsed.success && parsed.data.errors.some((e) => RESUME_LOST.test(e));
+}
 
 interface Live {
   proposals: ChatProposals;
@@ -898,14 +906,19 @@ export class ChatService {
   async #read(chatId: string, live: Live, session: ConductorSession, billTo: string, resume?: Resume): Promise<void> {
     let known = this.#repo.get(chatId)?.sdkSessionId ?? undefined;
     let warned = false;
+    // Si el SDK ya no tiene la transcripción, lo dice antes de cualquier otro mensaje (stderr, un `result` de error y
+    // el error del proceso): ese `result` no es un turno de la mente y no cuenta como mensaje visto.
     let seen = false;
-    let retry: Turn | undefined;
     const spend = this.#deps.mind.liveSpend?.(billTo);
     // Lo que el proceso ya tenía gastado en su último `result` (lo que sigue no está guardado en SQLite).
     let settled = 0;
     let lastSpent = 0;
     try {
       for await (const update of session.stream()) {
+        if (resume && !seen && isLostResumeResult(update.message)) {
+          resume.lost = true;
+          continue;
+        }
         seen = true;
         const sdkId = sdkSessionIdOf(update.message);
         if (sdkId && sdkId !== known) {
@@ -929,9 +942,10 @@ export class ChatService {
         lastSpent = spent;
       }
     } catch (err) {
-      const lost = resume !== undefined && !seen && (resume.lost || RESUME_LOST.test(err instanceof Error ? err.message : String(err)));
-      if (lost) retry = this.#forgetLostResume(chatId, live, session, resume.id);
-      else if (this.#repo.get(chatId) && live.turn?.session === session && !live.turn.interrupted) {
+      if (resume && !seen && RESUME_LOST.test(err instanceof Error ? err.message : String(err))) resume.lost = true;
+      // Con la transcripción perdida no es un corte: `finally` olvida el id y repite el turno.
+      const lost = resume?.lost === true && !seen;
+      if (!lost && this.#repo.get(chatId) && live.turn?.session === session && !live.turn.interrupted) {
         this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message: `La conversación con la mente se cortó: ${oneLine(err)}` } });
         warned = true;
       }
@@ -947,6 +961,7 @@ export class ChatService {
           this.#emit(chatId, live, { type: 'error', payload: { code: 'crash', message } });
         }
       }
+      const retry = resume?.lost === true && !seen ? this.#forgetLostResume(chatId, live, session, resume.id) : undefined;
       const turn = live.turn;
       if (turn && turn === retry) void this.#retryLostResume(chatId, live, turn);
       else if (turn?.session === session) this.#finishTurn(chatId, live, turn, undefined);
