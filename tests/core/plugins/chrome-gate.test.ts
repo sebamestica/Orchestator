@@ -28,12 +28,12 @@ async function gate(root: string, over: Partial<GateOptions> = {}, locks?: Pick<
   const toClient: string[] = [];
   const logs: string[] = [];
   const g = new ChromeGate(
-    { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20, ...over },
+    { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20, pages: 'own', ...over },
     { toServer: (l) => toServer.push(l), toClient: (l) => toClient.push(l), log: (l) => logs.push(l), ...(locks ? { locks } : {}) },
   );
   cleanups.push(() => g.close());
-  const call = (id: number, name = 'new_page') => g.onClientLine(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: {} } }));
-  const reply = (id: number) => g.onServerLine(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'ok' }] } }));
+  const call = (id: number, name = 'new_page', args: Record<string, unknown> = {}) => g.onClientLine(JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }));
+  const reply = (id: number, text = 'ok') => g.onServerLine(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } }));
   const forwarded = () => toServer.map((l) => JSON.parse(l) as { id?: number; method?: string });
   const answers = () => toClient.map((l) => JSON.parse(l) as { id?: number; result?: { isError?: boolean; content?: { text?: string }[] } });
   return { g, toServer, toClient, logs, call, reply, forwarded, answers };
@@ -56,7 +56,7 @@ describe('puerta MCP del Chrome personal: argumentos', () => {
     const args = chromeGateArgs({ command: 'C:\\Windows\\System32\\cmd.exe', args: ['/c', 'C:\\x\\chrome-personal.cmd'] }, { agent: 'codex-main', task: 't-1', locksRoot: 'C:\\dev\\agent-hub\\locks', waitMs: 1000, idleMs: 2000 });
     expect(args[0]).toBe(CHROME_GATE_SCRIPT);
     expect(parseGateArgs(args.slice(1))).toEqual({
-      lock: 'chrome-personal', agent: 'codex-main', task: 't-1', locksRoot: 'C:\\dev\\agent-hub\\locks', waitMs: 1000, idleMs: 2000, retryMs: 1000,
+      lock: 'chrome-personal', agent: 'codex-main', task: 't-1', locksRoot: 'C:\\dev\\agent-hub\\locks', waitMs: 1000, idleMs: 2000, retryMs: 1000, pages: 'own',
       command: 'C:\\Windows\\System32\\cmd.exe', args: ['/c', 'C:\\x\\chrome-personal.cmd'],
     });
     expect(() => parseGateArgs(['--lock', 'chrome-personal'])).toThrow(/-- <comando>/);
@@ -65,6 +65,8 @@ describe('puerta MCP del Chrome personal: argumentos', () => {
     expect(() => parseGateArgs(['--lock', 'chrome-personal', ...who, '--locks-root', 'relativa', '--', 'x'])).toThrow(/absoluta/);
     expect(() => parseGateArgs(['--lock', 'chrome-personal', ...who, '--locks-root', 'C:\\l', '--otro', '1', '--', 'x'])).toThrow(/desconocido/);
     expect(() => parseGateArgs(['--lock', 'chrome-personal', ...who, '--locks-root', 'C:\\l', '--wait-ms', '-1', '--', 'x'])).toThrow(/≥ 0/);
+    expect(parseGateArgs(['--lock', 'chrome-personal', ...who, '--locks-root', 'C:\\l', '--pages', 'all', '--', 'x']).pages).toBe('all');
+    expect(() => parseGateArgs(['--lock', 'chrome-personal', ...who, '--locks-root', 'C:\\l', '--pages', 'otra', '--', 'x'])).toThrow(/own o all/);
     expect(() => parseGateArgs(['--lock', '../fuera', ...who, '--locks-root', 'C:\\l', '--', 'x'])).toThrow();
     expect(() => parseGateArgs(['--lock', 'chrome-personal', '--agent', 'Con Espacios', '--task', 'tarea-t', '--locks-root', 'C:\\l', '--', 'x'])).toThrow();
   });
@@ -226,7 +228,7 @@ describe('puerta MCP del Chrome personal: candado perezoso', () => {
 function gateWith(root: string, locks: Pick<LockManager, 'acquire' | 'releaseAbandoned'>) {
   const toServer: string[] = [];
   const g = new ChromeGate(
-    { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20 },
+    { lock: CHROME_LOCK, agent: 'claude-main', task: 'tarea-a', locksRoot: root, waitMs: 2000, idleMs: 60_000, retryMs: 20, pages: 'own' },
     { toServer: (l) => toServer.push(l), toClient: () => undefined, locks },
   );
   cleanups.push(() => g.close());
@@ -337,13 +339,84 @@ describe('puerta MCP del Chrome personal: soltar que falla', () => {
   });
 });
 
+const PAGES = '## Pages\n1: Recibidos (https://mail.test/)\n2: A (https://a.test/) [selected]';
+
+describe('puerta MCP del Chrome personal: solo tus pestañas', () => {
+  /** Puerta con una pestaña propia (2) abierta con `new_page`; la 1 es del usuario. */
+  async function withOwnTab(over: Partial<GateOptions> = {}) {
+    const t = await gate(await tempDir('orq-gate-'), over);
+    t.call(1, 'new_page', { url: 'https://a.test' });
+    await until(() => t.toServer.length === 1);
+    t.reply(1, PAGES);
+    const text = (id: number) => t.answers().find((a) => a.id === id)?.result?.content?.[0]?.text;
+    const sent = (id: number) => t.forwarded().some((m) => m.id === id);
+    return { ...t, text, sent };
+  }
+
+  it('new_page anota la pestaña nueva y la respuesta oculta las ajenas', async () => {
+    const t = await withOwnTab();
+    expect(t.text(1)).toBe('## Pages\n1: (pestaña que no abriste)\n2: A (https://a.test/) [selected]');
+  });
+
+  it('rechaza sin pasarlas al servidor las llamadas con el pageId de una pestaña ajena', async () => {
+    const t = await withOwnTab();
+    t.call(2, 'take_snapshot', { pageId: 2 });
+    await until(() => t.sent(2));
+    t.reply(2);
+    t.call(3, 'take_snapshot', { pageId: 1 });
+    t.call(4, 'select_page', { pageId: 1 });
+    t.call(5, 'close_page', { pageId: 1 });
+    t.call(6, 'evaluate_script', { pageId: 1, function: '() => 1' });
+    t.call(7, 'evaluate_script', { pageId: 0, function: '() => 1' });
+    await wait(50);
+    for (const id of [3, 4, 5, 6, 7]) {
+      expect(t.sent(id)).toBe(false);
+      expect(t.answers().find((a) => a.id === id)?.result?.isError).toBe(true);
+      expect(t.text(id)).toContain('no la abriste');
+    }
+  });
+
+  it('list_pages pasa y llega con las ajenas ocultas; tras close_page la propia pasa a ser ajena', async () => {
+    const t = await withOwnTab();
+    t.call(2, 'list_pages');
+    await until(() => t.sent(2));
+    t.reply(2, PAGES);
+    expect(t.text(2)).toBe('## Pages\n1: (pestaña que no abriste)\n2: A (https://a.test/) [selected]');
+    t.call(3, 'close_page', { pageId: 2 });
+    await until(() => t.sent(3));
+    t.reply(3, '## Pages\n1: Recibidos (https://mail.test/) [selected]');
+    expect(t.text(3)).toBe('## Pages\n1: (pestaña que no abriste)');
+    t.call(4, 'take_snapshot', { pageId: 2 });
+    expect(t.sent(4)).toBe(false);
+    expect(t.text(4)).toContain('no la abriste');
+  });
+
+  it('«Page ids have changed» vacía las pestañas propias', async () => {
+    const t = await withOwnTab();
+    t.call(2, 'list_pages');
+    await until(() => t.sent(2));
+    t.reply(2, 'Note: the browser was restarted or reconnected since the last call. Page ids have changed. Call list_pages to see open pages.');
+    t.call(3, 'take_snapshot', { pageId: 2 });
+    expect(t.sent(3)).toBe(false);
+    expect(t.text(3)).toContain('no la abriste');
+  });
+
+  it('con --pages all todo pasa como antes', async () => {
+    const t = await withOwnTab({ pages: 'all' });
+    expect(t.text(1)).toBe(PAGES);
+    t.call(2, 'take_snapshot', { pageId: 1 });
+    await until(() => t.sent(2));
+  });
+});
+
 describe('puerta MCP del Chrome personal: proceso real', () => {
   it('node chrome-gate.ts … -- <MCP>: el agente ve las herramientas, list_pages pasa y al cerrar stdin suelta el candado', async () => {
     const root = await tempDir('orq-gate-');
     const fake = fakeLauncher('ok');
     const args = chromeGateArgs(fake, { agent: 'codex-main', task: 't-e2e', locksRoot: root, waitMs: 2000, idleMs: 60_000 });
     const result = await probeStdioMcp({ command: process.execPath, args, startTimeoutMs: 20_000, call: { name: 'list_pages', timeoutMs: 10_000 }, closeGraceMs: 5000 });
-    expect(result).toMatchObject({ ok: true, callText: expect.stringContaining('about:blank') });
+    // La pestaña del MCP falso no la abrió este agente: llega oculta.
+    expect(result).toMatchObject({ ok: true, callText: '## Pages\n1: (pestaña que no abriste)' });
     expect(result.tools).toHaveLength(32);
     await until(async () => !(await exists(join(root, CHROME_LOCK))), 8000);
   }, 30_000);

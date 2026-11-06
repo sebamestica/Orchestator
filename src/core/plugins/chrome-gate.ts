@@ -4,9 +4,13 @@
  * `chrome-personal`; el núcleo lo arma en `chromeServerSpec`.
  *
  *   node chrome-gate.ts --lock chrome-personal --agent <id> --task <id> --locks-root <carpeta>
- *                       [--wait-ms N] [--idle-ms N] [--retry-ms N] -- <comando> [args…]
+ *                       [--wait-ms N] [--idle-ms N] [--retry-ms N] [--pages own|all] -- <comando> [args…]
  *
- * - Todo pasa tal cual en las dos direcciones (JSON-RPC delimitado por saltos de línea), salvo `tools/call`.
+ * - Todo pasa tal cual en las dos direcciones (JSON-RPC delimitado por saltos de línea), salvo `tools/call` y, con
+ *   `--pages own` (por defecto), la lista `## Pages` de las respuestas.
+ * - Con `--pages own` el agente solo maneja las pestañas que abrió con `new_page` en esta sesión: una llamada con el
+ *   `pageId` de otra se responde con error sin pasarla al servidor, y en las listas de pestañas las ajenas aparecen
+ *   sin título ni dirección (pueden ser del usuario: su correo, su banco). `--pages all` lo apaga (depurar).
  * - En la primera `tools/call` toma el candado `--lock` de `--locks-root` (el de la skill `local-compute-scheduling`,
  *   `C:\dev\agent-hub\locks`). Si otro lo tiene, la llamada **espera** hasta `--wait-ms`; si sigue ocupado, responde
  *   esa llamada con un error claro (quién lo tiene, «no abras otro navegador») sin pasarla al servidor.
@@ -39,12 +43,14 @@ export interface GateOptions {
   waitMs: number;
   idleMs: number;
   retryMs: number;
+  /** `own`: solo las pestañas que abrió el agente; `all`: todas (depurar). */
+  pages: 'own' | 'all';
   command: string;
   args: string[];
 }
 
 export const GATE_USAGE =
-  'Uso: node chrome-gate.ts --lock <candado> --agent <id> --task <id> --locks-root <carpeta> [--wait-ms N] [--idle-ms N] [--retry-ms N] -- <comando> [args…]';
+  'Uso: node chrome-gate.ts --lock <candado> --agent <id> --task <id> --locks-root <carpeta> [--wait-ms N] [--idle-ms N] [--retry-ms N] [--pages own|all] -- <comando> [args…]';
 
 /** Lee los argumentos de la puerta. Lanza `Error` con el motivo si falta o sobra algo. */
 export function parseGateArgs(argv: readonly string[]): GateOptions {
@@ -71,7 +77,7 @@ export function parseGateArgs(argv: readonly string[]): GateOptions {
     if (!Number.isFinite(n) || n < 0) throw new Error(`--${k} debe ser un número ≥ 0`);
     return n;
   };
-  const known = new Set(['lock', 'agent', 'task', 'locks-root', 'wait-ms', 'idle-ms', 'retry-ms']);
+  const known = new Set(['lock', 'agent', 'task', 'locks-root', 'wait-ms', 'idle-ms', 'retry-ms', 'pages']);
   for (const k of values.keys()) if (!known.has(k)) throw new Error(`argumento desconocido: --${k}`);
   const lock = lockNameSchema.parse(need('lock'));
   const agent = idSchema.parse(need('agent'));
@@ -79,7 +85,9 @@ export function parseGateArgs(argv: readonly string[]): GateOptions {
   const locksRoot = need('locks-root');
   if (!isAbsolute(locksRoot)) throw new Error('--locks-root debe ser una ruta absoluta');
   if (!command) throw new Error('falta el comando');
-  return { lock, agent, task, locksRoot, waitMs: ms('wait-ms', DEFAULT_GATE_WAIT_MS), idleMs: ms('idle-ms', DEFAULT_GATE_IDLE_MS), retryMs: ms('retry-ms', 1000), command, args };
+  const pages = values.get('pages') ?? 'own';
+  if (pages !== 'own' && pages !== 'all') throw new Error('--pages debe ser own o all');
+  return { lock, agent, task, locksRoot, waitMs: ms('wait-ms', DEFAULT_GATE_WAIT_MS), idleMs: ms('idle-ms', DEFAULT_GATE_IDLE_MS), retryMs: ms('retry-ms', 1000), pages, command, args };
 }
 
 /** Texto para el agente cuando el Chrome sigue ocupado tras la espera. */
@@ -93,7 +101,8 @@ type RpcId = string | number;
 interface RpcLike {
   id?: RpcId | null;
   method?: string;
-  params?: { requestId?: RpcId };
+  params?: { requestId?: RpcId; name?: unknown; arguments?: unknown };
+  result?: { content?: unknown; isError?: unknown };
 }
 
 function parseRpc(line: string): RpcLike | undefined {
@@ -106,6 +115,57 @@ function parseRpc(line: string): RpcLike | undefined {
 }
 
 const idKey = (id: RpcId) => `${typeof id}:${String(id)}`;
+
+/** Lo que la puerta necesita saber de una `tools/call` en curso. */
+interface ToolCall {
+  name: string | undefined;
+  pageId: unknown;
+}
+
+function toolCall(msg: RpcLike): ToolCall {
+  const args = msg.params?.arguments;
+  const pageId = typeof args === 'object' && args !== null && 'pageId' in args ? args.pageId : undefined;
+  return { name: typeof msg.params?.name === 'string' ? msg.params.name : undefined, pageId };
+}
+
+const FOREIGN_PAGE = '(pestaña que no abriste)';
+/** Aviso de `chrome-devtools-mcp` al reconectarse a Chrome: renumera todas las pestañas. */
+const PAGE_IDS_CHANGED = 'Page ids have changed';
+
+function foreignPageText(pageId: unknown): string {
+  return `La pestaña ${String(pageId)} no la abriste tú en esta sesión: puede ser del usuario o de otro agente. Abre la tuya con \`new_page\` y trabaja solo en ella.`;
+}
+
+/** Aplica `fn` a cada línea de pestaña (`<id>: <título> (<url>)[ [selected]]…`) de las secciones `## Pages`. */
+function mapPageLines(text: string, fn: (id: number, line: string) => string): string {
+  let inPages = false;
+  return text.split('\n').map((line) => {
+    if (line.startsWith('## ')) {
+      inPages = line.trim() === '## Pages' || line.trim() === '## Extension Pages';
+      return line;
+    }
+    const m = inPages ? /^(\d+): /.exec(line) : null;
+    return m ? fn(Number(m[1]), line) : line;
+  }).join('\n');
+}
+
+/** La pestaña seleccionada de la lista: tras `new_page`, la nueva (el servidor la selecciona antes de listar). */
+function selectedPageId(text: string): number | undefined {
+  let found: number | undefined;
+  mapPageLines(text, (id, line) => {
+    if (/ \[selected\](?: isolatedContext=\S+)?$/.test(line)) found = id;
+    return line;
+  });
+  return found;
+}
+
+/** Oculta título y dirección de las pestañas que no están en `own`. */
+function maskForeignPages(text: string, own: ReadonlySet<number>): string {
+  return mapPageLines(text, (id, line) => (own.has(id) ? line : `${id}: ${FOREIGN_PAGE}`));
+}
+
+const isTextItem = (v: unknown): v is { type: 'text'; text: string } =>
+  typeof v === 'object' && v !== null && 'type' in v && v.type === 'text' && 'text' in v && typeof v.text === 'string';
 
 /** Reintentos de soltar el candado tras un error pasajero (Defender, un lector con `owner` abierto). */
 const RELEASE_RETRY_MS = 500;
@@ -131,7 +191,9 @@ export class ChromeGate {
   readonly #deps: ChromeGateDeps;
   readonly #locks: Pick<LockManager, 'acquire' | 'releaseAbandoned'>;
   readonly #stop = new AbortController();
-  readonly #inFlight = new Set<string>();
+  readonly #inFlight = new Map<string, ToolCall>();
+  /** Pestañas que abrió este agente (`--pages own`). */
+  readonly #ownPages = new Set<number>();
   /** Llamadas que esperan el candado (para descartarlas si el cliente las cancela). */
   readonly #waiting = new Map<string, { cancelled: boolean }>();
   #held: LockHandle | undefined;
@@ -171,13 +233,51 @@ export class ChromeGate {
       this.#deps.toServer(line);
       return;
     }
-    void this.#call(msg.id, line);
+    const call = toolCall(msg);
+    if (this.#opts.pages === 'own' && call.pageId !== undefined && !(typeof call.pageId === 'number' && this.#ownPages.has(call.pageId))) {
+      this.#answerError(msg.id, foreignPageText(call.pageId));
+      return;
+    }
+    void this.#call(msg.id, line, call);
   }
 
   onServerLine(line: string): void {
     const msg = parseRpc(line);
-    if (msg && msg.method === undefined && msg.id !== undefined && msg.id !== null && this.#inFlight.delete(idKey(msg.id))) this.#armIdle();
-    this.#deps.toClient(line);
+    if (!msg || msg.method !== undefined || msg.id === undefined || msg.id === null) {
+      this.#deps.toClient(line);
+      return;
+    }
+    const key = idKey(msg.id);
+    const call = this.#inFlight.get(key);
+    if (this.#inFlight.delete(key)) this.#armIdle();
+    this.#deps.toClient(this.#opts.pages === 'own' ? this.#ownPagesOnly(msg, line, call) : line);
+  }
+
+  /** `--pages own` en una respuesta: anota las pestañas que abrió o cerró el agente y oculta las ajenas. */
+  #ownPagesOnly(msg: RpcLike, line: string, call: ToolCall | undefined): string {
+    const result = msg.result;
+    if (!result || !Array.isArray(result.content)) return line;
+    const items: unknown[] = result.content;
+    const text = items.filter(isTextItem).map((item) => item.text).join('\n');
+    if (text.includes(PAGE_IDS_CHANGED)) this.#ownPages.clear();
+    if (call && result.isError !== true) {
+      const opened = call.name === 'new_page' ? selectedPageId(text) : undefined;
+      if (opened !== undefined) this.#ownPages.add(opened);
+      if (call.name === 'close_page' && typeof call.pageId === 'number') this.#ownPages.delete(call.pageId);
+    }
+    let changed = false;
+    const content = items.map((item) => {
+      if (!isTextItem(item)) return item;
+      const masked = maskForeignPages(item.text, this.#ownPages);
+      if (masked === item.text) return item;
+      changed = true;
+      return { ...item, text: masked };
+    });
+    return changed ? JSON.stringify({ ...msg, result: { ...result, content } }) : line;
+  }
+
+  #answerError(id: RpcId, text: string): void {
+    this.#deps.toClient(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }], isError: true } }));
   }
 
   /** Suelta el candado y corta las esperas. Idempotente. */
@@ -191,7 +291,7 @@ export class ChromeGate {
     await this.#release('cierre');
   }
 
-  async #call(id: RpcId, line: string): Promise<void> {
+  async #call(id: RpcId, line: string, call: ToolCall): Promise<void> {
     const key = idKey(id);
     const entry = { cancelled: false };
     this.#waiting.set(key, entry);
@@ -203,11 +303,11 @@ export class ChromeGate {
       return;
     }
     if (!got.ok) {
-      this.#deps.toClient(JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: got.text }], isError: true } }));
+      this.#answerError(id, got.text);
       this.#armIdle();
       return;
     }
-    this.#inFlight.add(key);
+    this.#inFlight.set(key, call);
     this.#deps.toServer(line);
   }
 

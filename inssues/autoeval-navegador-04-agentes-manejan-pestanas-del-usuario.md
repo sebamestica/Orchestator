@@ -3,7 +3,7 @@
 - **Área:** Plugins y navegador
 - **Severidad:** media
 - **Archivos:** `src/core/plugins/chrome.ts:60`, `src/core/plugins/chrome.ts:85`, `src/core/plugins/chrome.ts:107`, `src/core/plugins/mcp.ts:97`, `src/core/plugins/chrome-gate.ts:9`, `src/core/plugins/chrome-gate.ts:55`, `src/core/plugins/chrome-gate.ts:73`, `src/core/plugins/chrome-gate.ts:92`, `src/core/plugins/chrome-gate.ts:127`, `src/core/plugins/chrome-gate.ts:155`, `src/core/plugins/chrome-gate.ts:162`, `src/core/plugins/chrome-gate.ts:177`, `src/core/plugins/chrome-gate.ts:194`, `src/core/conductor/guard.ts:135`, `src/core/conductor/guard.ts:184`, `src/core/plugins/service.ts:54`, `src/core/adapters/agy-cli/index.ts:67`, `tests/core/plugins/chrome.test.ts:160`, `C:\dev\agent-hub\tools\browser\node_modules\chrome-devtools-mcp\build\src\config\mcp-options.js:22` (fuera del repo), `…\tools\ToolDefinition.js:16`, `…\tools\pages.js:30`, `…\tools\pages.js:60`, `…\tools\script.js:72`, `…\tools\script.js:164`, `…\McpContext.js:23`, `…\McpContext.js:208`, `…\McpResponse.js:568`, `…\McpResponse.js:698`, `…\McpResponse.js:1226`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `plugins-03` (la regla de pestañas no llega a la mente; este issue es la barrera técnica, que hace falta también para la flota, que sí la recibe), `autoeval-navegador-03` (acciones en tu propia pestaña con tus sesiones), `autoeval-navegador-01` (inyección), `mente-01` (otra regla sobre los argumentos de Chrome; menciona filtrar en la puerta como opción), `plugins-01`, `codex-06` y `plugins-07` (la puerta y su candado)
 
