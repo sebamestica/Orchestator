@@ -1,7 +1,7 @@
-import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { appendFile, lstat, mkdir, readdir, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace } from '../../shared/index.ts';
-import { redactSecrets } from '../../shared/index.ts';
+import { idSchema, PLAN_FILES, redactSecrets } from '../../shared/index.ts';
 import { deduceGate, gateForWorkspace } from '../fs/folders.ts';
 import { createGitRunner, pushBlockEnv, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
 
@@ -14,6 +14,11 @@ export const LOCAL_BRANCH = '(local)';
 const SCRATCH = '.orq';
 /** Marca de que `.orq/` la creó el modo local (y por tanto se puede borrar al terminar). */
 export const LOCAL_MARKER = join(SCRATCH, '.berland-local');
+/** Estado apartado de las tareas que no terminaron bien: `.orq/tareas/<id>/` (su plan y su HANDOFF). */
+const PARKED = join(SCRATCH, 'tareas');
+/** Archivos de `.orq/` que son de cada tarea (la flota reescribe BRIEF y PLAN antes de cada intento). */
+const TASK_STATE = [basename(PLAN_FILES.taskPlan), basename(PLAN_FILES.handoff)];
+const MARKER_TEXT = 'Carpeta de trabajo de Berland en modo local: se borra al terminar bien cada tarea.';
 /** Línea que se agrega a `info/exclude` del repositorio (nunca al `.gitignore` del usuario). */
 const EXCLUDE_LINE = '/.orq/';
 
@@ -66,6 +71,10 @@ async function defaultGateFor(dir: string): Promise<CommandSpec[] | null> {
  *   tarea revisada. Nunca confirma nada.
  * - `remove` borra solo `.orq/`, y solo si la creó el modo local.
  *
+ * `.orq/` es una por carpeta, pero el plan (`PLAN-TAREA.md`) y el `HANDOFF.md` son de cada tarea: la marca guarda qué
+ * tarea es dueña del estado. Al empezar otra, el de la anterior (una fallida) se aparta en `.orq/tareas/<id>/` y vuelve
+ * a su sitio cuando esa tarea se reintenta; `remove` no borra lo apartado.
+ *
  * Dos tareas de la misma carpeta no deben correr a la vez (se pisarían `.orq/BRIEF.md` y los archivos): la flota lo
  * evita con `exclusiveKey`.
  */
@@ -109,7 +118,13 @@ export class LocalWorkspaces {
     const scratch = join(project.repoPath, SCRATCH);
     const ours = !(await exists(scratch)) || (await exists(join(project.repoPath, LOCAL_MARKER)));
     await mkdir(scratch, { recursive: true });
-    if (ours) await writeFile(join(project.repoPath, LOCAL_MARKER), 'Carpeta de trabajo de Berland en modo local: se borra al terminar bien cada tarea.\n', 'utf8');
+    if (ours) {
+      try {
+        await this.#takeState(project.repoPath, task.id);
+      } catch (err) {
+        this.#log(redactSecrets(`${task.id}: no se pudo apartar el estado de otra tarea en .orq/ (${err instanceof Error ? err.message : String(err)})`));
+      }
+    }
     await this.#excludeScratch(project);
     const workspace: Workspace = { taskId: task.id, path: project.repoPath, branch: LOCAL_BRANCH };
     // Solo corre una tarea a la vez por carpeta: lo que quede de esta carpeta es de una tarea fallida (la flota
@@ -154,7 +169,34 @@ export class LocalWorkspaces {
     // Otra tarea viva de la misma carpeta aún usa `.orq/` (no debería pasar: la flota las serializa).
     const folder = LocalWorkspaces.key(project.repoPath);
     if ([...this.#live.values()].some((live) => LocalWorkspaces.key(live.project.repoPath) === folder)) return;
-    if (await exists(join(project.repoPath, LOCAL_MARKER))) await rm(join(project.repoPath, SCRATCH), { recursive: true, force: true });
+    if (!(await exists(join(project.repoPath, LOCAL_MARKER)))) return;
+    const scratch = join(project.repoPath, SCRATCH);
+    if (!(await hasEntries(join(project.repoPath, PARKED)))) return rm(scratch, { recursive: true, force: true });
+    // Queda estado apartado de otras tareas: se borra solo lo de esta (todo lo demás de `.orq/`).
+    for (const name of await readdir(scratch)) {
+      if (name !== basename(PARKED) && name !== basename(LOCAL_MARKER)) await rm(join(scratch, name), { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Deja `.orq/` con el estado de `taskId`: aparta el plan y el HANDOFF de la tarea anterior (si era otra) en
+   * `.orq/tareas/<anterior>/`, devuelve los de `taskId` si estaban apartados y la anota como dueña en la marca.
+   */
+  async #takeState(dir: string, taskId: string): Promise<void> {
+    const scratch = join(dir, SCRATCH);
+    const owner = parseOwner(await readFile(join(dir, LOCAL_MARKER), 'utf8').catch(() => ''));
+    if (owner !== taskId) {
+      // Sin dueño (marca de antes de esta versión) no se sabe de quién es: se deja donde está.
+      const out = owner ? await parkedDir(dir, owner) : undefined;
+      if (out) await moveFiles(scratch, out);
+      const back = await parkedDir(dir, taskId);
+      if (back && (await isDir(back))) {
+        await moveFiles(back, scratch);
+        await rm(back, { recursive: true, force: true });
+        await rmdir(join(dir, PARKED)).catch(() => undefined); // solo si quedó vacía
+      }
+    }
+    await writeFile(join(dir, LOCAL_MARKER), `${MARKER_TEXT}\ntarea: ${taskId}\n`, 'utf8');
   }
 
   /** git de solo lectura, con la guardia que protege la carpeta del usuario. */
@@ -180,6 +222,35 @@ export class LocalWorkspaces {
       this.#log(redactSecrets(`proyecto ${project.id}: no se pudo excluir .orq/ en git (${err instanceof Error ? err.message : String(err)})`));
     }
   }
+}
+
+/** Tarea dueña del estado de `.orq/` según la marca (solo un id válido: la marca está al alcance del agente). */
+function parseOwner(marker: string): string | undefined {
+  const id = /^tarea: (.+)$/m.exec(marker)?.[1]?.trim();
+  return id && idSchema.safeParse(id).success ? id : undefined;
+}
+
+/** `.orq/tareas/<id>` si es una carpeta de verdad o aún no existe; `undefined` si hay un enlace en medio (llevaría fuera). */
+async function parkedDir(dir: string, id: string): Promise<string | undefined> {
+  for (const p of [join(dir, PARKED), join(dir, PARKED, id)]) {
+    const st = await lstat(p).catch(() => undefined);
+    if (st && !st.isDirectory()) return undefined;
+  }
+  return join(dir, PARKED, id);
+}
+
+/** Mueve el plan y el HANDOFF de una tarea de `from` a `to` (los que existan). */
+async function moveFiles(from: string, to: string): Promise<void> {
+  for (const name of TASK_STATE) {
+    if (!(await exists(join(from, name)))) continue;
+    await mkdir(to, { recursive: true });
+    await rm(join(to, name), { force: true });
+    await rename(join(from, name), join(to, name));
+  }
+}
+
+async function hasEntries(dir: string): Promise<boolean> {
+  return (await readdir(dir).catch(() => [])).length > 0;
 }
 
 function liveKey(workspace: Workspace): string {

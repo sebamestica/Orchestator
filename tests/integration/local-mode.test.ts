@@ -89,15 +89,55 @@ describe('modo local: carpeta sin git', () => {
     await expect(ws.create(id, task('t1', id, ['src/**']))).rejects.toThrow(/la carpeta .* no existe/);
   });
 
-  it('tras una tarea fallida (su .orq se conserva), la siguiente de la misma carpeta limpia al terminar bien', async () => {
+  it('tras una tarea fallida, la siguiente no hereda su plan ni su HANDOFF y al terminar bien no los borra; el reintento los recupera', async () => {
     const root = await tempDir('orq-local-');
     const folder = join(root, 'proyecto');
     mkdirSync(folder, { recursive: true });
     const { id, ws } = localSetup(folder);
+    const orq = (...p: string[]) => join(folder, '.orq', ...p);
     await ws.create(id, task('fallida', id, ['src/**'])); // la flota no llama a remove de una fallida
-    writeFileSync(join(folder, '.orq', 'HANDOFF.md'), '# traspaso\n');
-    const w2 = await ws.create(id, task('reintento', id, ['src/**']));
+    writeFileSync(orq('PLAN-TAREA.md'), '- [x] paso de A\n');
+    writeFileSync(orq('HANDOFF.md'), '# Traspaso de A\n');
+
+    const w2 = await ws.create(id, task('otra', id, ['src/**']));
+    expect(existsSync(orq('PLAN-TAREA.md'))).toBe(false);
+    expect(existsSync(orq('HANDOFF.md'))).toBe(false);
+    writeFileSync(orq('BRIEF.md'), '# encargo de otra\n');
     await ws.remove(w2);
+    expect(readFileSync(orq('tareas', 'fallida', 'HANDOFF.md'), 'utf8')).toBe('# Traspaso de A\n');
+    expect(existsSync(orq('BRIEF.md'))).toBe(false);
+
+    const w1 = await ws.create(id, task('fallida', id, ['src/**']));
+    expect(readFileSync(orq('HANDOFF.md'), 'utf8')).toBe('# Traspaso de A\n');
+    expect(readFileSync(orq('PLAN-TAREA.md'), 'utf8')).toBe('- [x] paso de A\n');
+    expect(existsSync(orq('tareas'))).toBe(false);
+    await ws.remove(w1);
+    expect(existsSync(join(folder, '.orq'))).toBe(false);
+  });
+
+  it('una marca con un dueño que no es un id válido no aparta nada fuera de .orq/tareas', async () => {
+    const root = await tempDir('orq-local-');
+    const folder = join(root, 'proyecto');
+    mkdirSync(join(folder, '.orq'), { recursive: true });
+    writeFileSync(join(folder, LOCAL_MARKER), 'x\ntarea: ../../fuera\n');
+    writeFileSync(join(folder, '.orq', 'HANDOFF.md'), '# traspaso\n');
+    const { id, ws } = localSetup(folder);
+    const w = await ws.create(id, task('t1', id, ['src/**']));
+    expect(existsSync(join(root, 'fuera'))).toBe(false);
+    expect(existsSync(join(folder, '.orq', 'tareas'))).toBe(false);
+    await ws.remove(w);
+  });
+
+  it('el reintento de la misma tarea, sin otra en medio, conserva su plan y su HANDOFF', async () => {
+    const root = await tempDir('orq-local-');
+    const folder = join(root, 'proyecto');
+    mkdirSync(folder, { recursive: true });
+    const { id, ws } = localSetup(folder);
+    await ws.create(id, task('fallida', id, ['src/**']));
+    writeFileSync(join(folder, '.orq', 'HANDOFF.md'), '# traspaso\n');
+    const w = await ws.create(id, task('fallida', id, ['src/**']));
+    expect(readFileSync(join(folder, '.orq', 'HANDOFF.md'), 'utf8')).toBe('# traspaso\n');
+    await ws.remove(w);
     expect(existsSync(join(folder, '.orq'))).toBe(false);
   });
 

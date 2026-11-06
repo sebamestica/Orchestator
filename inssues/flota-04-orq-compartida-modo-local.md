@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** media
 - **Archivos:** `src/core/app/local-workspaces.ts:102-112`, `src/core/app/local-workspaces.ts:142-151`, `src/core/orchestrator/fleet.ts:265-279`, `src/core/orchestrator/fleet.ts:376-385`, `src/core/orchestrator/fleet.ts:408`, `src/core/orchestrator/fleet.ts:536`, `src/core/orchestrator/fleet.ts:611-635`, `src/core/orchestrator/fleet.ts:669-677`, `src/core/orchestrator/fleet.ts:753-760`, `src/core/orchestrator/fleet.ts:801`, `src/core/orchestrator/fleet.ts:833`, `src/core/orchestrator/supervisor.ts:399-405`, `src/core/orchestrator/task-plan.ts:116-120`, `src/core/brief/render-brief.ts:46`, `src/core/app/fleet-port.ts:69-82`, `tests/integration/local-mode.test.ts:92-102`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 En modo local (issue 1), una tarea trabaja directamente en la carpeta del proyecto. La carpeta de trabajo de Berland,
