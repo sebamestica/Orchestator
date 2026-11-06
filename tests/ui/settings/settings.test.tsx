@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS, mindModeSchema, type MindCandidate } from '../../../src/shared/api.ts';
+import { DEFAULT_SETTINGS, effortSchema, mindModeSchema, type MindCandidate } from '../../../src/shared/api.ts';
+import { EFFORT_LABELS } from '../../../src/ui/components/EffortSlider.tsx';
 import { MODE_INFO } from '../../../src/ui/features/chat/format.ts';
 import SettingsView from '../../../src/ui/features/settings/SettingsView.tsx';
 import { useApp } from '../../../src/ui/store/app.ts';
@@ -59,6 +60,17 @@ describe('Mente y subagentes', () => {
     fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Modo inicial' })).getByRole('radio', { name: /Bypass/ }));
     await waitFor(() => expect(useApp.getState().settings.defaultMode).toBe('bypass'));
     expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ mind: { effort: 'max' } }, { defaultMode: 'bypass' }]);
+  });
+
+  it('Ajustes › Mente nombra el esfuerzo como la barra del chat', async () => {
+    fakeCore({ 'GET /mind/candidates': () => ({ body: { candidates } }) });
+    render(<SettingsView section="mente" />);
+    await screen.findByRole('radiogroup', { name: 'Mente' });
+    const group = screen.getByRole('radiogroup', { name: 'Esfuerzo' });
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(effortSchema.options.map((e) => EFFORT_LABELS[e]));
+    expect(useApp.getState().settings.mind.effort).toBe('medium');
+    expect(within(group).getByRole('radio', { name: 'Equilibrado' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(group).queryByRole('radio', { name: 'Medio' })).toBeNull();
   });
 
   it('la descripción de Bypass avisa que edita y ejecuta sin preguntar', async () => {

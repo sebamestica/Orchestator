@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/settings/MindSection.tsx:12-13`, `src/ui/features/settings/MindSection.tsx:132-133`, `src/ui/components/EffortSlider.tsx:15-21`, `src/ui/components/EffortSlider.tsx:108-119`, `src/ui/features/chat/ChatView.tsx:96-98`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

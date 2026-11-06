@@ -2,16 +2,16 @@ import { Chip, ListBox, ListBoxItem, Select, Spinner } from '@heroui/react';
 import { Check, Brain } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { effortSchema, mindCandidateSchema, mindModeSchema, type Effort, type MindCandidate } from '../../../shared/api.ts';
+import { effortSchema, mindCandidateSchema, mindModeSchema, type MindCandidate } from '../../../shared/api.ts';
 import { api } from '../../api/client.ts';
+import { EFFORT_LABELS } from '../../components/EffortSlider.tsx';
 import { useApp } from '../../store/app.ts';
 import { MODE_INFO } from '../chat/format.ts';
 import { errorText, isMissingRoute, KIND_LABEL, Notice, Segmented, SettingsCard, SettingsRow, ToggleField, useSaveSettings } from './shared.tsx';
 
 const candidatesResponse = z.object({ candidates: z.array(mindCandidateSchema) });
 
-const EFFORT_LABEL: Record<Effort, string> = { low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };
-const EFFORTS = effortSchema.options.map((value) => ({ value, label: EFFORT_LABEL[value] }));
+const EFFORTS = effortSchema.options.map((value) => ({ value, label: EFFORT_LABELS[value] }));
 
 /** Clave del Select para «sin modelo fijo» (usa el del agente). */
 const AGENT_MODEL = '__agente__';
