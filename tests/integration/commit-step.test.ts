@@ -168,7 +168,7 @@ describe('paso de commit de la flota', () => {
     mkdirSync(join(w.path, 'test', 'fixtures'), { recursive: true });
     writeFileSync(join(w.path, 'test', 'fixtures', 'grabacion.json'), `{"x-api-key":"${FAKE_ANTHROPIC}"}\n`);
     writeFileSync(join(w.path, 'src', 'a.mjs'), 'export const a = 5;\n');
-    const err = await commitTaskWork(createGitRunner(), w.path, t, base()).catch((e: unknown) => e);
+    const err = await commitTaskWork(createGitRunner(), w.path, t, base(), w.branch).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SecretInWorkError);
     expect((err as Error).message).toMatch(/test\/fixtures\/grabacion\.json/);
     expect((err as Error).message).not.toContain(FAKE_ANTHROPIC);
