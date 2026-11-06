@@ -1,10 +1,13 @@
-import { CircleUserRound, Folder, KanbanSquare, MessageSquarePlus, MoreHorizontal, Plus, Puzzle, Settings } from 'lucide-react';
+import { Button, Popover } from '@heroui/react';
+import { CircleUserRound, Folder, FolderX, KanbanSquare, MessageSquarePlus, MoreHorizontal, Plus, Puzzle, Settings } from 'lucide-react';
 import { useState } from 'react';
+import type { ProjectRecord } from '../api/types.ts';
 import { IconButton } from '../components/IconButton.tsx';
 import { NavItem } from '../components/NavItem.tsx';
 import { AddProjectDialog } from '../features/projects/AddProjectDialog.tsx';
+import { RemoveProjectDialog } from '../features/projects/RemoveProjectDialog.tsx';
 import { useApp } from '../store/app.ts';
-import { PROFILE_HASH, routeHash, type Route } from './routes.ts';
+import { navigate, PROFILE_HASH, routeHash, type Route } from './routes.ts';
 
 function StatusDot() {
   const core = useApp((s) => s.core);
@@ -19,10 +22,45 @@ function StatusDot() {
   );
 }
 
+const menuItem = 'flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[0.8125rem] text-foreground transition-colors duration-quick hover:bg-foreground/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground';
+
+/** Menú «…» de un proyecto: solo lo que el núcleo permite hoy (ver en Ajustes y quitar). */
+function ProjectMenu({ project, onRemove }: { project: ProjectRecord; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const label = `Opciones de ${project.name}`;
+  return (
+    <Popover isOpen={open} onOpenChange={setOpen}>
+      <Button variant="ghost" size="sm" isIconOnly aria-label={label} className="size-7 min-w-0 rounded-md text-muted hover:bg-foreground/[0.08] hover:text-foreground">
+        <MoreHorizontal className="size-3.5" aria-hidden="true" />
+      </Button>
+      <Popover.Content placement="bottom end" className="w-48">
+        <Popover.Dialog aria-label={label} className="flex flex-col gap-0.5 p-1.5">
+          <a href={routeHash({ name: 'settings', section: 'proyectos' })} onClick={() => setOpen(false)} className={menuItem}>
+            <Settings className="size-4 text-muted" aria-hidden="true" />
+            Ver en Ajustes
+          </a>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onRemove();
+            }}
+            className={menuItem}
+          >
+            <FolderX className="size-4 text-muted" aria-hidden="true" />
+            Quitar…
+          </button>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
+  );
+}
+
 export function Sidebar({ route }: { route: Route }) {
   const collapsed = useApp((s) => s.sidebarCollapsed);
   const projects = useApp((s) => s.projects);
   const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<ProjectRecord | null>(null);
   const projectId = route.name === 'project' || route.name === 'board' ? route.projectId : undefined;
 
   return (
@@ -57,9 +95,7 @@ export function Sidebar({ route }: { route: Route }) {
                   <a href={routeHash({ name: 'board', projectId: p.id })} aria-label={`Tablero de ${p.name}`} title="Tablero" className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-foreground/[0.08] hover:text-foreground">
                     <KanbanSquare className="size-3.5" aria-hidden="true" />
                   </a>
-                  <a href={routeHash({ name: 'settings', section: 'proyectos' })} aria-label={`Opciones de ${p.name}`} title="Opciones" className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-foreground/[0.08] hover:text-foreground">
-                    <MoreHorizontal className="size-3.5" aria-hidden="true" />
-                  </a>
+                  <ProjectMenu project={p} onRemove={() => setRemoving(p)} />
                 </>
               }
             />
@@ -76,6 +112,14 @@ export function Sidebar({ route }: { route: Route }) {
         </div>
       </div>
       <AddProjectDialog open={adding} onClose={() => setAdding(false)} />
+      <RemoveProjectDialog
+        project={removing}
+        onClose={() => setRemoving(null)}
+        // Quitar el proyecto abierto (su chat o su tablero) no deja la app en una ruta que ya no existe.
+        onRemoved={(p) => {
+          if (p.id === projectId) navigate({ name: 'home' }, { replace: true });
+        }}
+      />
     </aside>
   );
 }

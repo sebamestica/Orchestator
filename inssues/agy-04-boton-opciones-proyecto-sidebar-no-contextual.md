@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/app/Sidebar.tsx:60-62`, `src/ui/app/Sidebar.tsx:26`, `src/ui/app/Sidebar.tsx:74`, `src/ui/app/routes.ts:15`, `src/ui/app/routes.ts:39-41`, `src/ui/features/settings/ProjectsSection.tsx:47-68`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre
