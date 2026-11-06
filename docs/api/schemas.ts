@@ -7,9 +7,20 @@
  * comprueba en compilación que ambos coinciden).
  */
 import { z } from 'zod';
+import {
+  approvalResponse,
+  attachmentResponse,
+  chatResponse,
+  chatsResponse,
+  messageResponse,
+  messagesResponse,
+  proposalsResponse,
+} from '../../src/core/chat/index.ts';
+import { pluginResponse, pluginsResponse } from '../../src/core/plugins/index.ts';
 import { addAgentFromKeySchema, agentInputSchema } from '../../src/core/registry/index.ts';
 import { apiSchemas as s, clientMessageSchema, type HubMessage } from '../../src/core/server/index.ts';
 import {
+  attachmentSchema,
   agentConfigSchema,
   agentEventSchema,
   changesTargetSchema,
@@ -142,6 +153,21 @@ const outputs: readonly [z.ZodType, string][] = [
   [s.skillsResponse, 'SkillsResponse'],
   [s.skillResultResponse, 'SkillResultResponse'],
   [s.memoryContextResponse, 'MemoryContextResponse'],
+  // Chats, adjuntos y plugins (F5)
+  [chatSchema, 'Chat'],
+  [chatMessageSchema, 'ChatMessage'],
+  [proposalSchema, 'Proposal'],
+  [attachmentSchema, 'Attachment'],
+  [pluginSchema, 'Plugin'],
+  [chatResponse, 'ChatResponse'],
+  [chatsResponse, 'ChatsResponse'],
+  [messageResponse, 'ChatMessageResponse'],
+  [messagesResponse, 'ChatMessagesResponse'],
+  [proposalsResponse, 'ProposalsResponse'],
+  [approvalResponse, 'ProposalApprovalResponse'],
+  [attachmentResponse, 'AttachmentResponse'],
+  [pluginResponse, 'PluginResponse'],
+  [pluginsResponse, 'PluginsResponse'],
   [wsServerMessageSchema, 'WsServerMessage'],
 ];
 for (const [schema, id] of outputs) outputComponents.add(schema, { id });
@@ -190,6 +216,12 @@ export const componentDescriptions: Readonly<Record<string, string>> = {
   UsageSummary: 'Resumen de uso y gasto (issue 5): periodos fijos (hoy, 7 días, mes calendario) y el rango pedido por modelo, día, rol y proyecto. Codex y agy van como suscripción, sin costo.',
   UsageRate: 'Multiplicador de tu tarifa para un modelo sobre los precios públicos (un modelo sin fila vale 1).',
   PatchUsageRatesRequest: 'Multiplicador por modelo (0–10); `null` lo borra y el modelo vuelve a 1.',
+  Chat: 'Chat con la mente (src/shared/api.ts). Sus eventos llegan por `/ws` con `sessionId`.',
+  ChatMessage: 'Mensaje de un chat, del usuario o de la mente (src/shared/api.ts).',
+  Proposal: 'Tarea propuesta por la mente y su aprobación (src/shared/api.ts).',
+  Attachment: 'Adjunto de un mensaje: copia subida o archivo local referido por ruta (src/shared/api.ts).',
+  Plugin: 'Plugin de los agentes (Chrome o Canva) y su estado (src/shared/api.ts). Nunca trae un token.',
+  ProposalApprovalResponse: 'Propuestas tras aprobar: `delivered`, las que la flota aceptó; `failed`, las aprobadas que no se entregaron.',
   WsServerMessage: 'Mensaje que el servidor envía por `/ws`.',
   WsClientMessage: 'Mensaje que el cliente envía por `/ws`.',
 };

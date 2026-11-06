@@ -362,7 +362,7 @@ export const usageRates: UsageRate[] = [{ model: 'claude-opus-5-5', multiplier: 
 
 // --------------------------------------------------------------------- almacenamiento (issue 13)
 
-const DATA_DIR = 'C:\\Users\\yo\\AppData\\Local\\orquestador';
+export const DATA_DIR = 'C:\\Users\\yo\\AppData\\Local\\orquestador';
 const MB = 1024 * 1024;
 
 /** `GET /storage`: 38 adjuntos (31 imágenes), 24 chats, 6 carpetas de conversaciones y la base con su WAL. */

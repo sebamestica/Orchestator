@@ -7,7 +7,7 @@ Esta carpeta documenta la API REST + WebSocket del núcleo, que escucha solo en 
 | `orquestador.postman_collection.json` | Colección de Postman v2.1, con las peticiones agrupadas por tema, ejemplos de cuerpo y de respuesta, y autenticación `Bearer {{token}}` definida en la colección. |
 | `openapi.json` | Especificación OpenAPI 3.1, con los esquemas de entrada y salida, los errores y los ejemplos. |
 | `generate.ts` | Script que genera los dos archivos anteriores. |
-| `source.ts` | Lee las rutas reales del servidor: `createApp(...).routes` de `src/core/server/`, con SQLite y bóveda en memoria, sin escuchar en ningún puerto. |
+| `source.ts` | Lee las rutas reales del servidor: `createApp(...).routes` de `src/core/server/` con los mismos módulos que `routeModulesFor` (ajustes y carpetas, chats y adjuntos, plugins, uso y almacenamiento), sobre una composición con SQLite y bóveda en memoria y una carpeta de datos temporal, sin escuchar en ningún puerto ni salir del proceso. |
 | `routes.ts` | Lo que solo necesita la documentación: valores de los parámetros de ruta, respuestas de ejemplo y scripts de Postman. Tiene una entrada por cada ruta del servidor, y la generación falla si alguna sobra o falta. |
 | `schemas.ts`, `examples.ts`, `build.ts` | Ids de componente y descripciones para los esquemas Zod del servidor (que usan los contratos de `src/shared/`), los datos de ejemplo (cada uno se valida contra el esquema del servidor) y el armado de los dos archivos con `z.toJSONSchema`. |
 
@@ -20,7 +20,7 @@ scripts/win.sh "node docs/api/generate.ts --check"   # falla si no están al dí
 
 En PowerShell, desde la raíz del repo, el comando es `node docs/api/generate.ts`. El aviso `ExperimentalWarning: SQLite` que aparece al ejecutarlo es normal.
 
-Pruebas: `tests/docs/api.test.ts` compara los dos JSON con el generador y `openapi.json` con `createApp(...).routes`. `tests/docs/postman-run.test.ts` ejecuta cada petición de la colección contra el servidor real en proceso.
+Pruebas: `tests/docs/api.test.ts` compara los dos JSON con el generador y `openapi.json` con `createApp(...).routes`. `tests/docs/api-cobertura.test.ts` los compara con las rutas del núcleo real (`routeModulesFor`), así que un módulo de rutas nuevo sin documentar la hace fallar. `tests/docs/postman-run.test.ts` ejecuta cada petición de la colección contra el servidor real en proceso.
 
 ## 1. Importar en Postman
 
@@ -29,7 +29,7 @@ Pruebas: `tests/docs/api.test.ts` compara los dos JSON con el generador y `opena
    - `baseUrl` vale `http://127.0.0.1:47811`. Cámbiala solo si arrancas el núcleo con otro puerto (`ORQ_PORT`).
    - `token` empieza vacía. Lo que va ahí se explica en el paso 2.
    - `apiKey` empieza vacía y solo se usa en `POST /agents`.
-   - `agentId`, `projectId`, `planId`, `taskId`, `sessionId` y `skillName` son los valores de los parámetros de ruta (`/agents/:id`, …). `POST /agents`, `POST /plans` y `POST /tasks` los actualizan solos con el id que devuelve el servidor.
+   - `agentId`, `projectId`, `planId`, `taskId`, `sessionId`, `skillName`, `chatId`, `attachmentId` y `pluginId` son los valores de los parámetros de ruta (`/agents/:id`, …). `POST /agents`, `POST /plans`, `POST /tasks`, `POST /chats` y `POST /attachments` los actualizan solos con el id que devuelve el servidor.
 
 No hace falta importar `openapi.json` para usar la colección. Si lo importas, Postman crea una segunda colección con las mismas rutas.
 
@@ -57,7 +57,7 @@ En Postman abre **Sistema → /health** y pulsa **Send**. La respuesta esperada 
 { "ok": true, "version": "0.1.0", "startedAt": "2026-11-01T21:30:00.000Z", "uptimeMs": 93500 }
 ```
 
-Como todas las rutas, `/health` exige el token. Un `200` confirma a la vez que el núcleo está arriba y que el token es válido. Si responde `401 unauthorized`, el token falta o es de un arranque anterior. Si no responde nada, el núcleo no está corriendo o usa otro puerto.
+Como todas las rutas salvo la vuelta de OAuth de Canva (`GET /plugins/canva/callback`, que abre el navegador), `/health` exige el token. Un `200` confirma a la vez que el núcleo está arriba y que el token es válido. Si responde `401 unauthorized`, el token falta o es de un arranque anterior. Si no responde nada, el núcleo no está corriendo o usa otro puerto.
 
 Lo mismo con `curl.exe` en PowerShell:
 
@@ -102,7 +102,7 @@ La forma de cada mensaje está en `openapi.json`, en los esquemas `WsServerMessa
 
 ## 6b. Interfaz web
 
-`GET /`, `/index.html` y `/assets/*` sirven la interfaz compilada (`dist/ui`, o la carpeta de `ORQ_UI_DIR`) **sin token**: solo archivos estáticos, sin listar carpetas ni seguir `..`. Todo lo demás sigue exigiendo el token. `node src/core/app/cli.ts iniciar` imprime el enlace `web: http://127.0.0.1:47811/#t=<token>` (con `--abrir` lo abre en el navegador predeterminado): la interfaz toma el token del fragmento, lo borra de la barra y lo guarda solo en `sessionStorage`. Si la interfaz no está compilada, `/` responde 404 con el aviso de ejecutar `npm run build:ui`.
+`GET /`, `/index.html` y `/assets/*` sirven la interfaz compilada (`dist/ui`, o la carpeta de `ORQ_UI_DIR`) **sin token**: solo archivos estáticos, sin listar carpetas ni seguir `..`. Todo lo demás sigue exigiendo el token, salvo `GET /plugins/canva/callback`. `node src/core/app/cli.ts iniciar` imprime el enlace `web: http://127.0.0.1:47811/#t=<token>` (con `--abrir` lo abre en el navegador predeterminado): la interfaz toma el token del fragmento, lo borra de la barra y lo guarda solo en `sessionStorage`. Si la interfaz no está compilada, `/` responde 404 con el aviso de ejecutar `npm run build:ui`.
 
 ## 7. Errores
 

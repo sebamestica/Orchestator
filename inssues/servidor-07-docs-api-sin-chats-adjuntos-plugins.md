@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** baja
 - **Archivos:** `docs/api/source.ts:39`, `docs/api/routes.ts:72`, `docs/api/routes.ts:160`, `docs/api/README.md:11`, `docs/api/README.md:14`, `docs/api/README.md:23`, `tests/docs/api.test.ts:382`, `tests/docs/api.test.ts:342`, `tests/docs/postman-run.test.ts:101`, `src/core/app/route-modules.ts:22`, `src/core/app/route-modules.ts:24`, `src/core/chat/routes.ts:88`, `src/core/plugins/routes.ts:65`, `src/core/plugins/routes.ts:103`, `src/core/server/app.ts:214`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 `docs/api/` genera `openapi.json` y la colección de Postman a partir de la tabla de rutas de una app armada en memoria

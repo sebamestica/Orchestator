@@ -150,6 +150,7 @@ export function checkRouteExamples(route: DocRoute): void {
   }
   if (route.query) check(route.query, route.queryExample ?? {}, `${where} (consulta)`);
   else if (route.queryExample) throw new Error(`${where}: queryExample sin query`);
+  if (route.rawBody && route.body) throw new Error(`${where}: rawBody con esquema de cuerpo JSON`);
   if (route.body) {
     if (route.example === undefined && !route.bodyOptional) throw new Error(`${where}: falta el ejemplo del cuerpo`);
     if (route.example !== undefined) check(route.body, route.example, `${where} (cuerpo)`);
@@ -223,7 +224,8 @@ function errorResponses(): JsonObject {
 }
 
 function errorCodesOf(route: DocRoute): number[] {
-  const codes = new Set<number>([401, 403, ...(route.errors ?? [])]);
+  // Una ruta pública (sin token) nunca responde 401.
+  const codes = new Set<number>([...(route.public ? [] : [401]), 403, ...(route.errors ?? [])]);
   for (const c of codes) if (!ERROR_DOCS[c]) throw new Error(`${routeKey(route)}: falta ERROR_DOCS[${c}]`);
   return [...codes].sort((a, b) => a - b);
 }
@@ -267,6 +269,9 @@ function openApiOperation(route: DocRoute): JsonObject {
     if (route.example !== undefined) media.example = toJson(route.example);
     op.requestBody = { required: !route.bodyOptional, content: { 'application/json': media } };
   }
+  if (route.rawBody) {
+    op.requestBody = { description: `Bytes del archivo con su \`Content-Type\` (p. ej. \`${route.rawBody.contentType}\`).`, required: true, content: { '*/*': {} } };
+  }
   const status = route.status ?? 200;
   const success: JsonObject = { description: SUCCESS_TEXT[status] ?? 'OK' };
   if (route.response) {
@@ -275,6 +280,7 @@ function openApiOperation(route: DocRoute): JsonObject {
   const responses: JsonObject = { [String(status)]: success };
   for (const code of errorCodesOf(route)) responses[String(code)] = { $ref: `#/components/responses/E${code}` };
   op.responses = responses;
+  if (route.public) op.security = [];
   if (route.websocket) {
     op['x-websocket'] = true;
     op['x-websocket-messages'] = { server: schemaFor(wsServerMessageSchema, 'output'), client: schemaFor(wsClientMessageSchema, 'input') };
@@ -302,7 +308,7 @@ export function buildOpenApi(routeList: readonly DocRoute[] = docRoutes()): Json
       version: API_VERSION,
       summary: 'REST + WebSocket del núcleo del orquestador (solo 127.0.0.1).',
       description: [
-        'API local del núcleo. Escucha solo en `127.0.0.1` y exige `Authorization: Bearer <token>` en todas las rutas (también `/health` y el WebSocket `/ws`); el token es aleatorio y lo imprime el núcleo al arrancar.',
+        'API local del núcleo. Escucha solo en `127.0.0.1` y exige `Authorization: Bearer <token>` en todas las rutas (también `/health` y el WebSocket `/ws`) salvo `GET /plugins/canva/callback`, la vuelta de OAuth de Canva que abre el navegador; el token es aleatorio y lo imprime el núcleo al arrancar.',
         '',
         'La interfaz web (`GET /`, `/index.html` y `/assets/*`, archivos de `dist/ui`) se sirve sin token y no es parte de esta API: abre el enlace `web: http://127.0.0.1:47811/#t=<token>` que imprime `iniciar` (el token va en el fragmento, que el navegador no envía). Las peticiones del navegador solo se aceptan desde el propio origen del núcleo o los de `ORQ_ALLOWED_ORIGINS`.',
         '',
@@ -357,7 +363,7 @@ function collectionDescription(): string {
     'API local del núcleo del orquestador (REST + WebSocket, solo `127.0.0.1`). Generada por `docs/api/generate.ts` desde las rutas del servidor (`createApp(...).routes`) y sus esquemas Zod: no la edites a mano; vuelve a importarla tras regenerar.',
     '',
     '1. Arranca el núcleo y copia el `token` de la línea JSON que imprime.',
-    '2. Pégalo en la variable de colección `token` (columna «Current value»). La autenticación `Bearer {{token}}` está definida en la colección y la heredan todas las peticiones.',
+    '2. Pégalo en la variable de colección `token` (columna «Current value»). La autenticación `Bearer {{token}}` está definida en la colección y la heredan todas las peticiones, salvo `GET /plugins/canva/callback` (sin token: la abre el navegador al volver de Canva).',
     '3. Prueba `GET /health`: si responde `200`, el núcleo está arriba y el token es válido.',
     '',
     'Errores: `{"error":{"code","message"}}`. Ninguna respuesta incluye claves: en `POST /agents` la clave va en el cuerpo (`{{apiKey}}`) y la respuesta solo trae `secretRef`.',
@@ -400,6 +406,11 @@ function postmanRequest(route: DocRoute): JsonObject {
     request.header = [{ key: 'Content-Type', value: 'application/json' }];
     request.body = postmanBody(body);
   }
+  if (route.rawBody) {
+    request.header = [{ key: 'Content-Type', value: route.rawBody.contentType }];
+    request.body = { mode: 'file', file: { src: '' } };
+  }
+  if (route.public) request.auth = { type: 'noauth' };
   return request;
 }
 

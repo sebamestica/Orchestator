@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6f0c2a7e-3b1d-4e8a-9c55-0d7b8e41a2f3",
     "name": "Orquestador — API local",
-    "description": "API local del núcleo del orquestador (REST + WebSocket, solo `127.0.0.1`). Generada por `docs/api/generate.ts` desde las rutas del servidor (`createApp(...).routes`) y sus esquemas Zod: no la edites a mano; vuelve a importarla tras regenerar.\n\n1. Arranca el núcleo y copia el `token` de la línea JSON que imprime.\n2. Pégalo en la variable de colección `token` (columna «Current value»). La autenticación `Bearer {{token}}` está definida en la colección y la heredan todas las peticiones.\n3. Prueba `GET /health`: si responde `200`, el núcleo está arriba y el token es válido.\n\nErrores: `{\"error\":{\"code\",\"message\"}}`. Ninguna respuesta incluye claves: en `POST /agents` la clave va en el cuerpo (`{{apiKey}}`) y la respuesta solo trae `secretRef`.\n\n## WebSocket `/ws`\n\nPostman v2.1 no guarda peticiones WebSocket en colecciones: crea una a mano (New → WebSocket) con:\n\n- URL: `ws://127.0.0.1:47811/ws`\n- Encabezado: `Authorization: Bearer {{token}}`\n\nEl token va en el encabezado del handshake, nunca en la URL. El `WebSocket` del navegador no puede mandar encabezados: la interfaz lo envía como subprotocolo (`Sec-WebSocket-Protocol: orq, orq.bearer.<token>`, con `orq` primero) y el servidor responde `orq`. Electron (proceso principal), Node (`ws`) y Postman usan el encabezado `Authorization`.\n\nMensajes del servidor (esquema `WsServerMessage` en openapi.json): `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error`, `settings`, `chat`, `chat_message`, `chat_deleted`, `proposals`, `plugin`, `chat_target`.\nMensajes del cliente (esquema `WsClientMessage`): `replay`, `ping`. Ejemplo: `{\"type\":\"replay\",\"sessionId\":\"01a198bb-df05-7741-818d-3f0a16dd05ae\",\"since\":-1}`.\n\nTras reconectar, pide `replay` con el último `seq` recibido y descarta duplicados por `seq`: los eventos en vivo pueden llegar antes que la respuesta.",
+    "description": "API local del núcleo del orquestador (REST + WebSocket, solo `127.0.0.1`). Generada por `docs/api/generate.ts` desde las rutas del servidor (`createApp(...).routes`) y sus esquemas Zod: no la edites a mano; vuelve a importarla tras regenerar.\n\n1. Arranca el núcleo y copia el `token` de la línea JSON que imprime.\n2. Pégalo en la variable de colección `token` (columna «Current value»). La autenticación `Bearer {{token}}` está definida en la colección y la heredan todas las peticiones, salvo `GET /plugins/canva/callback` (sin token: la abre el navegador al volver de Canva).\n3. Prueba `GET /health`: si responde `200`, el núcleo está arriba y el token es válido.\n\nErrores: `{\"error\":{\"code\",\"message\"}}`. Ninguna respuesta incluye claves: en `POST /agents` la clave va en el cuerpo (`{{apiKey}}`) y la respuesta solo trae `secretRef`.\n\n## WebSocket `/ws`\n\nPostman v2.1 no guarda peticiones WebSocket en colecciones: crea una a mano (New → WebSocket) con:\n\n- URL: `ws://127.0.0.1:47811/ws`\n- Encabezado: `Authorization: Bearer {{token}}`\n\nEl token va en el encabezado del handshake, nunca en la URL. El `WebSocket` del navegador no puede mandar encabezados: la interfaz lo envía como subprotocolo (`Sec-WebSocket-Protocol: orq, orq.bearer.<token>`, con `orq` primero) y el servidor responde `orq`. Electron (proceso principal), Node (`ws`) y Postman usan el encabezado `Authorization`.\n\nMensajes del servidor (esquema `WsServerMessage` en openapi.json): `hello`, `event`, `quota`, `task`, `agent`, `agent_deleted`, `replay`, `pong`, `error`, `settings`, `chat`, `chat_message`, `chat_deleted`, `proposals`, `plugin`, `chat_target`.\nMensajes del cliente (esquema `WsClientMessage`): `replay`, `ping`. Ejemplo: `{\"type\":\"replay\",\"sessionId\":\"01a198bb-df05-7741-818d-3f0a16dd05ae\",\"since\":-1}`.\n\nTras reconectar, pide `replay` con el último `seq` recibido y descarta duplicados por `seq`: los eventos en vivo pueden llegar antes que la respuesta.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -69,6 +69,24 @@
       "value": "revisar-pr-20261101-214500-a1b2c3",
       "type": "string",
       "description": "Skill en cuarentena para /skills/:name/approve y /reject."
+    },
+    {
+      "key": "chatId",
+      "value": "chat-8f3a2c1d",
+      "type": "string",
+      "description": "Chat para /chats/:id (POST /chats la actualiza)."
+    },
+    {
+      "key": "attachmentId",
+      "value": "adj-5b7e9d2a",
+      "type": "string",
+      "description": "Adjunto para GET /attachments/:id (POST /attachments la actualiza)."
+    },
+    {
+      "key": "pluginId",
+      "value": "chrome",
+      "type": "string",
+      "description": "Plugin para /plugins/:id/connect y /disconnect: `chrome` o `canva`."
     }
   ],
   "item": [
@@ -2123,6 +2141,1187 @@
       ]
     },
     {
+      "name": "Chats",
+      "description": "Chats con la mente (F5): mensajes, modo, destino de los cambios y tareas propuestas que se aprueban para la flota. La respuesta de la mente llega por `/ws`.",
+      "item": [
+        {
+          "name": "/chats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats?projectId=vetworld",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats"
+              ],
+              "query": [
+                {
+                  "key": "projectId",
+                  "value": "vetworld"
+                }
+              ]
+            },
+            "description": "Lista los chats con la mente (más recientes primero)\n\nCon `projectId` los de ese proyecto; con `projectId=` (vacío) las conversaciones sin proyecto; sin él, todos."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats?projectId=vetworld",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats"
+                  ],
+                  "query": [
+                    {
+                      "key": "projectId",
+                      "value": "vetworld"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chats\": [\n    {\n      \"id\": \"chat-8f3a2c1d\",\n      \"projectId\": \"vetworld\",\n      \"title\": \"Separar la API y la interfaz del tablero\",\n      \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n      \"extraRoots\": [],\n      \"mode\": \"plan\",\n      \"mindAgentId\": \"claude-mi-clave\",\n      \"sessionId\": \"chat-chat-8f3a2c1d\",\n      \"state\": \"idle\",\n      \"costUsd\": 0.042,\n      \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n      \"updatedAt\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"projectId\": null,\n  \"mode\": \"chat\",\n  \"title\": \"Conversación sin proyecto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea un chat con la mente\n\nLa mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; una conversación sin proyecto (`projectId: null`, sin flota) no la necesita: sin `cwd`, Berland le crea una carpeta interna propia. `mode` por defecto: `settings.defaultMode`; `chat` (como Claude Code, sin flota) vale también sin proyecto."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set('chatId', pm.response.json().chat.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/chats",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"projectId\": null,\n  \"mode\": \"chat\",\n  \"title\": \"Conversación sin proyecto\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chat\": {\n    \"id\": \"chat-8f3a2c1d\",\n    \"projectId\": \"vetworld\",\n    \"title\": \"Separar la API y la interfaz del tablero\",\n    \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n    \"extraRoots\": [],\n    \"mode\": \"plan\",\n    \"mindAgentId\": \"claude-mi-clave\",\n    \"sessionId\": \"chat-chat-8f3a2c1d\",\n    \"state\": \"idle\",\n    \"costUsd\": 0.042,\n    \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n    \"updatedAt\": \"2026-11-02T10:02:10.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Detalle de un chat"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chat\": {\n    \"id\": \"chat-8f3a2c1d\",\n    \"projectId\": \"vetworld\",\n    \"title\": \"Separar la API y la interfaz del tablero\",\n    \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n    \"extraRoots\": [],\n    \"mode\": \"plan\",\n    \"mindAgentId\": \"claude-mi-clave\",\n    \"sessionId\": \"chat-chat-8f3a2c1d\",\n    \"state\": \"idle\",\n    \"costUsd\": 0.042,\n    \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n    \"updatedAt\": \"2026-11-02T10:02:10.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"auto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Renombra el chat, cambia el modo (Shift+Tab) o las carpetas extra\n\nEl cambio de modo rige desde el turno siguiente; la guardia de herramientas lo ve al instante (en `plan`, `delegar` queda bloqueada; en `chat`, `crear_tareas` y `delegar`; fuera de `bypass` y `chat`, edición y shell)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mode\": \"auto\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chat\": {\n    \"id\": \"chat-8f3a2c1d\",\n    \"projectId\": \"vetworld\",\n    \"title\": \"Separar la API y la interfaz del tablero\",\n    \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n    \"extraRoots\": [],\n    \"mode\": \"auto\",\n    \"mindAgentId\": \"claude-mi-clave\",\n    \"sessionId\": \"chat-chat-8f3a2c1d\",\n    \"state\": \"idle\",\n    \"costUsd\": 0.042,\n    \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n    \"updatedAt\": \"2026-11-02T10:05:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Borra el chat, sus mensajes y propuestas\n\nCierra la sesión de la mente. Las tareas ya entregadas a la flota siguen en el tablero."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"deleted\": true,\n  \"id\": \"chat-8f3a2c1d\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/target",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/target",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "target"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Dónde quedan los cambios del chat: en local o en el repositorio que indicó el usuario\n\n`local` por defecto (carpeta del proyecto o, sin proyecto, la del chat), con `git` (`none`, `local` o `remote`) y `worktrees` (el proyecto usa ramas `orq/…`). `remote` solo si la mente anotó con `crear_tareas.destino` el repositorio que indicó el usuario: `url` saneada, rama y `configured` (el remoto está en `git remote` de la carpeta). Berland no sube nada. Los cambios llegan por `/ws` como `chat_target`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/target",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "target"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"target\": {\n    \"kind\": \"local\",\n    \"path\": \"C:\\\\dev\\\\Vetworld\",\n    \"git\": \"remote\",\n    \"worktrees\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/close",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "close"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Cierra el chat (corta el turno y la sesión; un mensaje nuevo lo reabre reanudado)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/close",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "close"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chat\": {\n    \"id\": \"chat-8f3a2c1d\",\n    \"projectId\": \"vetworld\",\n    \"title\": \"Separar la API y la interfaz del tablero\",\n    \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n    \"extraRoots\": [],\n    \"mode\": \"plan\",\n    \"mindAgentId\": \"claude-mi-clave\",\n    \"sessionId\": \"chat-chat-8f3a2c1d\",\n    \"state\": \"closed\",\n    \"costUsd\": 0.042,\n    \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n    \"updatedAt\": \"2026-11-02T10:05:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Mensajes del chat (los últimos `limit`, 500 por defecto)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "messages"
+                  ],
+                  "query": [
+                    {
+                      "key": "limit",
+                      "value": "",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"messages\": [\n    {\n      \"id\": \"msg-1a2b3c4d\",\n      \"chatId\": \"chat-8f3a2c1d\",\n      \"role\": \"user\",\n      \"text\": \"Separa la API y la interfaz del tablero\",\n      \"attachments\": [\n        {\n          \"id\": \"adj-5b7e9d2a\",\n          \"name\": \"captura.png\",\n          \"mime\": \"image/png\",\n          \"size\": 48213,\n          \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\\\\adj-5b7e9d2a-captura.png\",\n          \"kind\": \"image\",\n          \"source\": \"upload\",\n          \"createdAt\": \"2026-11-02T10:01:30.000Z\"\n        }\n      ],\n      \"mode\": \"plan\",\n      \"at\": \"2026-11-02T10:01:30.000Z\"\n    },\n    {\n      \"id\": \"msg-5e6f7a8b\",\n      \"chatId\": \"chat-8f3a2c1d\",\n      \"role\": \"assistant\",\n      \"text\": \"Propongo dos tareas: validar el formulario de citas y sus pruebas. Revísalas y apruébalas.\",\n      \"attachments\": [],\n      \"mode\": \"plan\",\n      \"at\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "messages"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Separa la API y la interfaz del tablero\",\n  \"attachmentIds\": [],\n  \"effort\": \"high\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía un mensaje a la mente\n\nResponde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "messages"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"text\": \"Separa la API y la interfaz del tablero\",\n  \"attachmentIds\": [],\n  \"effort\": \"high\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"message\": {\n    \"id\": \"msg-1a2b3c4d\",\n    \"chatId\": \"chat-8f3a2c1d\",\n    \"role\": \"user\",\n    \"text\": \"Separa la API y la interfaz del tablero\",\n    \"attachments\": [\n      {\n        \"id\": \"adj-5b7e9d2a\",\n        \"name\": \"captura.png\",\n        \"mime\": \"image/png\",\n        \"size\": 48213,\n        \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\\\\adj-5b7e9d2a-captura.png\",\n        \"kind\": \"image\",\n        \"source\": \"upload\",\n        \"createdAt\": \"2026-11-02T10:01:30.000Z\"\n      }\n    ],\n    \"mode\": \"plan\",\n    \"at\": \"2026-11-02T10:01:30.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/interrupt",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/interrupt",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "interrupt"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Corta el turno en curso (la conversación sigue)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/interrupt",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "interrupt"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"chat\": {\n    \"id\": \"chat-8f3a2c1d\",\n    \"projectId\": \"vetworld\",\n    \"title\": \"Separar la API y la interfaz del tablero\",\n    \"cwd\": \"C:\\\\dev\\\\Vetworld\",\n    \"extraRoots\": [],\n    \"mode\": \"plan\",\n    \"mindAgentId\": \"claude-mi-clave\",\n    \"sessionId\": \"chat-chat-8f3a2c1d\",\n    \"state\": \"idle\",\n    \"costUsd\": 0.042,\n    \"createdAt\": \"2026-11-02T10:00:00.000Z\",\n    \"updatedAt\": \"2026-11-02T10:02:10.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/proposals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/proposals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "proposals"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Tareas propuestas por la mente en este chat"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/proposals",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "proposals"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"proposals\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"approval\": \"proposed\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"approval\": \"proposed\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/proposals/approve-all",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/proposals/approve-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "proposals",
+                "approve-all"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                }
+              ]
+            },
+            "description": "Aprueba todas las propuestas pendientes y las entrega a la flota\n\nEn orden de dependencias. Las que no se pueden entregar quedan aprobadas y van en `failed`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/proposals/approve-all",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "proposals",
+                    "approve-all"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"proposals\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"approval\": \"delegated\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"approval\": \"delegated\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ],\n  \"delivered\": [\n    \"validar-citas\",\n    \"pruebas-citas\"\n  ],\n  \"failed\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/proposals/:taskId/approve",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/proposals/:taskId/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "proposals",
+                ":taskId",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                },
+                {
+                  "key": "taskId",
+                  "value": "{{taskId}}"
+                }
+              ]
+            },
+            "description": "Aprueba una propuesta: pasa a `ready` en el tablero y la flota la recibe"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/proposals/:taskId/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "proposals",
+                    ":taskId",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    },
+                    {
+                      "key": "taskId",
+                      "value": "{{taskId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"proposals\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"approval\": \"delegated\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"approval\": \"proposed\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ],\n  \"delivered\": [\n    \"validar-citas\"\n  ],\n  \"failed\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "/chats/:id/proposals/:taskId/reject",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chats/:id/proposals/:taskId/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "chats",
+                ":id",
+                "proposals",
+                ":taskId",
+                "reject"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{chatId}}"
+                },
+                {
+                  "key": "taskId",
+                  "value": "{{taskId}}"
+                }
+              ]
+            },
+            "description": "Rechaza una propuesta (si aún no se entregó)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/chats/:id/proposals/:taskId/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "chats",
+                    ":id",
+                    "proposals",
+                    ":taskId",
+                    "reject"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{chatId}}"
+                    },
+                    {
+                      "key": "taskId",
+                      "value": "{{taskId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"proposals\": [\n    {\n      \"task\": {\n        \"id\": \"validar-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Validar el formulario de citas\",\n        \"objective\": \"Agregar validación con Zod al formulario de citas.\",\n        \"ownedPaths\": [\n          \"src/citas/**\"\n        ],\n        \"dependsOn\": [],\n        \"acceptance\": [\n          \"Pruebas del formulario en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"suggestedAgent\": \"codex\",\n        \"contextRefs\": [],\n        \"skillRefs\": []\n      },\n      \"approval\": \"rejected\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    },\n    {\n      \"task\": {\n        \"id\": \"pruebas-citas\",\n        \"projectId\": \"vetworld\",\n        \"title\": \"Pruebas del formulario de citas\",\n        \"objective\": \"Cubrir con Vitest los casos válidos e inválidos del formulario de citas.\",\n        \"ownedPaths\": [\n          \"tests/citas/**\"\n        ],\n        \"dependsOn\": [\n          \"validar-citas\"\n        ],\n        \"acceptance\": [\n          \"Casos válidos e inválidos cubiertos\",\n          \"npm run gate en verde\"\n        ],\n        \"difficulty\": \"low\",\n        \"contextRefs\": [\n          \"Orquestador/Proyectos/vetworld/Contexto.md\"\n        ],\n        \"skillRefs\": []\n      },\n      \"approval\": \"proposed\",\n      \"proposedAt\": \"2026-11-02T10:02:10.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Adjuntos",
+      "description": "Imágenes y archivos para los mensajes del chat: subida de bytes o registro por ruta (hasta 20 MB).",
+      "item": [
+        {
+          "name": "/attachments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "image/png"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attachments?name=captura.png",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attachments"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "captura.png"
+                }
+              ]
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": ""
+              }
+            },
+            "description": "Sube un adjunto (cuerpo crudo con su Content-Type, hasta 20 MB)\n\nImagen pegada o archivo soltado en la web: `POST /attachments?name=<archivo>` con los bytes como cuerpo. Se guarda en `<dataDir>/attachments/<id>-<nombre saneado>`. `kind`: `image` (png, jpeg, gif o webp según sus bytes), `text` (tipos de texto y código) o `file`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) pm.collectionVariables.set('attachmentId', pm.response.json().attachment.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "image/png"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/attachments?name=captura.png",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "attachments"
+                  ],
+                  "query": [
+                    {
+                      "key": "name",
+                      "value": "captura.png"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "file",
+                  "file": {
+                    "src": ""
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"attachment\": {\n    \"id\": \"adj-5b7e9d2a\",\n    \"name\": \"captura.png\",\n    \"mime\": \"image/png\",\n    \"size\": 48213,\n    \"path\": \"C:\\\\Users\\\\yo\\\\AppData\\\\Local\\\\orquestador\\\\attachments\\\\adj-5b7e9d2a-captura.png\",\n    \"kind\": \"image\",\n    \"source\": \"upload\",\n    \"createdAt\": \"2026-11-02T10:01:30.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/attachments/by-path",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attachments/by-path",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attachments",
+                "by-path"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"C:\\\\Users\\\\yo\\\\Desktop\\\\notas.md\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registra un archivo local por su ruta (Electron), sin copiarlo\n\nEl archivo debe existir y pesar como mucho 20 MB."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/attachments/by-path",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "attachments",
+                    "by-path"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"path\": \"C:\\\\Users\\\\yo\\\\Desktop\\\\notas.md\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"attachment\": {\n    \"id\": \"adj-0c4e6f81\",\n    \"name\": \"notas.md\",\n    \"mime\": \"text/markdown\",\n    \"size\": 2310,\n    \"path\": \"C:\\\\Users\\\\yo\\\\Desktop\\\\notas.md\",\n    \"kind\": \"text\",\n    \"source\": \"path\",\n    \"createdAt\": \"2026-11-02T10:01:30.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/attachments/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attachments/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attachments",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{attachmentId}}"
+                }
+              ]
+            },
+            "description": "Bytes del adjunto (miniaturas)\n\nLas imágenes salen con su tipo; el resto como `application/octet-stream` para descargar. Nunca se interpretan como página."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Uso",
       "description": "Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5).",
       "item": [
@@ -3421,6 +4620,253 @@
               "body": "{\n  \"path\": \"C:\\\\dev\\\\Vetworld\"\n}"
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Plugins",
+      "description": "Chrome personal y Canva para los agentes (F5). La vuelta de OAuth de Canva es la única ruta sin token.",
+      "item": [
+        {
+          "name": "/plugins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plugins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plugins"
+              ]
+            },
+            "description": "Lista los plugins (Chrome, Canva) y su estado"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/plugins",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plugins"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plugins\": [\n    {\n      \"id\": \"chrome\",\n      \"name\": \"Chrome\",\n      \"description\": \"Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.\",\n      \"status\": \"connected\",\n      \"detail\": \"Chrome personal conectado (29 herramientas) · Depuración remota activa · Libre ahora\",\n      \"agents\": [],\n      \"steps\": [],\n      \"updatedAt\": \"2026-11-02T09:30:00.000Z\"\n    },\n    {\n      \"id\": \"canva\",\n      \"name\": \"Canva\",\n      \"description\": \"Tus diseños de Canva por el MCP oficial (mcp.canva.com), con tu cuenta (OAuth).\",\n      \"status\": \"disconnected\",\n      \"agents\": [],\n      \"steps\": [\n        \"Pulsa Conectar: se abre la página de Canva para iniciar sesión.\",\n        \"Acepta los permisos; al volver verás «Canva conectado» y podrás cerrar la pestaña.\"\n      ],\n      \"updatedAt\": \"2026-11-02T09:30:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "/plugins/:id/connect",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/plugins/:id/connect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plugins",
+                ":id",
+                "connect"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{pluginId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Conecta un plugin\n\nChrome («Probar conexión»): arranca el MCP `chrome-devtools-mcp` de tu Chrome personal (`--autoConnect`, el único navegador de los agentes), hace `initialize`, `tools/list` y `list_pages`, y lo cierra; responde `connected` (detalle: número de herramientas) o `error` con los pasos. Puede tardar hasta un minuto si Chrome pide aceptar la conexión. `profile: \"agente\"` (perfil aislado) ya no existe y responde 400. Canva: descubre el servidor OAuth, registra el cliente y responde `connecting` con `authUrl` (la abre la interfaz); termina en `GET /plugins/canva/callback`. `agents` vacío: el plugin llega a todos los agentes compatibles (Claude y Codex). Cada cambio se transmite por `/ws` como `{type:\"plugin\"}`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/plugins/:id/connect",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plugins",
+                    ":id",
+                    "connect"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{pluginId}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plugin\": {\n    \"id\": \"chrome\",\n    \"name\": \"Chrome\",\n    \"description\": \"Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.\",\n    \"status\": \"connected\",\n    \"detail\": \"Chrome personal conectado (29 herramientas) · Depuración remota activa · Libre ahora\",\n    \"agents\": [],\n    \"steps\": [],\n    \"updatedAt\": \"2026-11-02T09:30:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/plugins/:id/disconnect",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plugins/:id/disconnect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plugins",
+                ":id",
+                "disconnect"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{pluginId}}"
+                }
+              ]
+            },
+            "description": "Desconecta un plugin\n\nChrome: deja de entregarse a los agentes. Canva: revoca el token si el servidor lo permite y lo borra de la bóveda."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/plugins/:id/disconnect",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "plugins",
+                    ":id",
+                    "disconnect"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{pluginId}}"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"plugin\": {\n    \"id\": \"chrome\",\n    \"name\": \"Chrome\",\n    \"description\": \"Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.\",\n    \"status\": \"disconnected\",\n    \"detail\": \"Desconectado: los agentes no reciben navegador (ni otro Chrome).\",\n    \"agents\": [],\n    \"steps\": [],\n    \"updatedAt\": \"2026-11-02T10:05:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "/plugins/canva/callback",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/plugins/canva/callback?code=<código>&state=<state>",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "plugins",
+                "canva",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": "<código>"
+                },
+                {
+                  "key": "state",
+                  "value": "<state>"
+                },
+                {
+                  "key": "error",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "error_description",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Vuelta de OAuth de Canva (sin token: la abre el navegador)\n\nÚnica ruta sin `Authorization`: la abre el navegador al volver de Canva. Se valida por `state` (un solo uso, caduca a los 10 minutos); con un `state` desconocido, repetido o vencido responde 400 y no cambia nada. Canjea el código (PKCE), guarda los tokens en la bóveda y responde una página HTML corta. Host y Origin se siguen comprobando."
+          },
+          "response": []
         }
       ]
     }

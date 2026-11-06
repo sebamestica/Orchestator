@@ -7,8 +7,9 @@
  */
 import { DEFAULT_PORT } from '../../src/core/config/index.ts';
 import { API_VERSION, type RouteSpec } from '../../src/core/server/index.ts';
+import * as chats from './examples-chats.ts';
 import * as ex from './examples.ts';
-import { serverRoutes } from './source.ts';
+import { serverRoutes, type ServerRoute } from './source.ts';
 
 export { API_VERSION, DEFAULT_PORT };
 
@@ -23,6 +24,9 @@ export const collectionVariables = {
   taskId: { value: ex.ids.task, description: 'Tarea para /tasks/:id (POST /plans y POST /tasks la actualizan).' },
   sessionId: { value: ex.ids.session, description: 'Sesión para /sessions/:id.' },
   skillName: { value: ex.ids.skill, description: 'Skill en cuarentena para /skills/:name/approve y /reject.' },
+  chatId: { value: chats.chatIds.chat, description: 'Chat para /chats/:id (POST /chats la actualiza).' },
+  attachmentId: { value: chats.chatIds.attachment, description: 'Adjunto para GET /attachments/:id (POST /attachments la actualiza).' },
+  pluginId: { value: chats.chatIds.plugin, description: 'Plugin para /plugins/:id/connect y /disconnect: `chrome` o `canva`.' },
 } as const;
 export type CollectionVariable = keyof typeof collectionVariables;
 
@@ -35,9 +39,11 @@ export interface DocExtras {
   postmanExample?: unknown;
   /** Script de pruebas de Postman (guarda ids generados por el servidor en variables de colección). */
   postmanTest?: readonly string[];
+  /** Cuerpo crudo (bytes, no JSON): tipo de ejemplo para Postman, que lo envía como archivo. */
+  rawBody?: { contentType: string };
 }
 
-export type DocRoute = RouteSpec & DocExtras;
+export type DocRoute = ServerRoute & DocExtras;
 
 /** Clave de una ruta: `POST /agents/:id/probe`. */
 export function routeKey(route: Pick<RouteSpec, 'method' | 'path'>): string {
@@ -52,12 +58,15 @@ export const tags: readonly { name: string; description: string }[] = [
   { name: 'Proyectos', description: 'Repositorios locales sobre los que trabaja la flota.' },
   { name: 'Planes y tareas', description: 'Plan en texto → tareas propuestas → aprobación → ejecución.' },
   { name: 'Sesiones', description: 'Sesiones de agente y sus eventos normalizados (con reconexión por `seq`).' },
+  { name: 'Chats', description: 'Chats con la mente (F5): mensajes, modo, destino de los cambios y tareas propuestas que se aprueban para la flota. La respuesta de la mente llega por `/ws`.' },
+  { name: 'Adjuntos', description: 'Imágenes y archivos para los mensajes del chat: subida de bytes o registro por ruta (hasta 20 MB).' },
   { name: 'Uso', description: 'Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5).' },
   { name: 'Almacenamiento', description: 'Cuánto ocupa Berland en disco (adjuntos subidos, chats, carpetas de conversaciones y la base) y su vaciado; los proyectos no cuentan (issue 13).' },
   { name: 'Skills', description: 'Hub de skills con cuarentena.' },
   { name: 'Memoria', description: 'Extractos de la memoria en Obsidian para ahorrar contexto.' },
   { name: 'Ajustes', description: 'Ajustes de la interfaz (F5): la mente, los subagentes de la flota, el modo inicial, el umbral de cupo, la concurrencia y la apariencia.' },
   { name: 'Carpetas', description: 'Explorador de carpetas del equipo y diálogo nativo de Windows para elegir la carpeta de un proyecto (F5).' },
+  { name: 'Plugins', description: 'Chrome personal y Canva para los agentes (F5). La vuelta de OAuth de Canva es la única ruta sin token.' },
   { name: 'Tiempo real', description: 'WebSocket con eventos en vivo y cambios de cupo, tareas y agentes.' },
 ];
 
@@ -67,6 +76,8 @@ const planId = { id: 'planId' } as const;
 const taskId = { id: 'taskId' } as const;
 const sessionId = { id: 'sessionId' } as const;
 const skillName = { name: 'skillName' } as const;
+const chatId = { id: 'chatId' } as const;
+const proposalIds = { id: 'chatId', taskId: 'taskId' } as const;
 
 /** Lo que agrega la documentación a cada ruta del servidor (una entrada por ruta, ni más ni menos). */
 export const docExtras: Readonly<Record<string, DocExtras>> = {
@@ -139,6 +150,34 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'POST /storage/conversations/clean': { responseExample: { result: ex.storageConversationsCleaned, storage: ex.storageSummary } },
   'POST /storage/compact': { responseExample: { result: ex.storageCompacted, storage: ex.storageSummary } },
 
+  'GET /chats': { responseExample: { chats: [chats.chat] } },
+  'POST /chats': {
+    // Sin proyecto: la mente trabaja en una carpeta interna del chat y la petición funciona en cualquier equipo.
+    postmanExample: { projectId: null, mode: 'chat', title: 'Conversación sin proyecto' },
+    responseExample: { chat: chats.chat },
+    postmanTest: ["if (pm.response.code === 201) pm.collectionVariables.set('chatId', pm.response.json().chat.id);"],
+  },
+  'GET /chats/:id': { paramVars: chatId, responseExample: { chat: chats.chat } },
+  'PATCH /chats/:id': { paramVars: chatId, responseExample: { chat: chats.chatAuto } },
+  'DELETE /chats/:id': { paramVars: chatId, responseExample: { deleted: true, id: chats.chatIds.chat } },
+  'GET /chats/:id/target': { paramVars: chatId, responseExample: { target: chats.chatTarget } },
+  'POST /chats/:id/close': { paramVars: chatId, responseExample: { chat: chats.chatClosed } },
+  'GET /chats/:id/messages': { paramVars: chatId, responseExample: { messages: [chats.userMessage, chats.assistantMessage] } },
+  'POST /chats/:id/messages': { paramVars: chatId, responseExample: { message: chats.userMessage } },
+  'POST /chats/:id/interrupt': { paramVars: chatId, responseExample: { chat: chats.chat } },
+  'GET /chats/:id/proposals': { paramVars: chatId, responseExample: { proposals: chats.proposals } },
+  'POST /chats/:id/proposals/approve-all': { paramVars: chatId, responseExample: chats.approvedAll },
+  'POST /chats/:id/proposals/:taskId/approve': { paramVars: proposalIds, responseExample: chats.approvedOne },
+  'POST /chats/:id/proposals/:taskId/reject': { paramVars: proposalIds, responseExample: { proposals: chats.rejectedOne } },
+
+  'POST /attachments': {
+    rawBody: { contentType: 'image/png' },
+    responseExample: { attachment: chats.attachment },
+    postmanTest: ["if (pm.response.code === 201) pm.collectionVariables.set('attachmentId', pm.response.json().attachment.id);"],
+  },
+  'POST /attachments/by-path': { responseExample: { attachment: chats.attachmentByPath } },
+  'GET /attachments/:id': { paramVars: { id: 'attachmentId' } },
+
   'GET /skills': { responseExample: { skills: ex.skillsList } },
   'POST /skills/import': { responseExample: { result: ex.skillImport } },
   'POST /skills/:name/approve': { paramVars: skillName, responseExample: { result: ex.skillApproved } },
@@ -153,11 +192,16 @@ export const docExtras: Readonly<Record<string, DocExtras>> = {
   'GET /fs/list': { responseExample: ex.fsList },
   'POST /fs/pick-folder': { responseExample: { path: 'C:\\dev\\Vetworld' } },
 
+  'GET /plugins': { responseExample: { plugins: [chats.chromePlugin, chats.canvaPlugin] } },
+  'POST /plugins/:id/connect': { paramVars: { id: 'pluginId' }, responseExample: { plugin: chats.chromePlugin } },
+  'POST /plugins/:id/disconnect': { paramVars: { id: 'pluginId' }, responseExample: { plugin: chats.chromeDisconnected } },
+  'GET /plugins/canva/callback': {},
+
   'GET /ws': {},
 };
 
 /** Rutas del servidor con lo que agrega la documentación. Falla si alguna ruta no tiene entrada o sobra una. */
-export function docRoutes(server: readonly RouteSpec[] = serverRoutes()): DocRoute[] {
+export function docRoutes(server: readonly ServerRoute[] = serverRoutes()): DocRoute[] {
   const keys = new Set(server.map(routeKey));
   const orphans = Object.keys(docExtras).filter((k) => !keys.has(k));
   if (orphans.length) throw new Error(`docs/api/routes.ts documenta rutas que el servidor no tiene: ${orphans.join(', ')}`);

@@ -6,8 +6,8 @@ import { openApiPath, type Json, type JsonObject } from '../../docs/api/build.ts
 import { OPENAPI_FILE, POSTMAN_FILE, renderFiles } from '../../docs/api/generate.ts';
 import { DEFAULT_PORT, docRoutes } from '../../docs/api/routes.ts';
 import { wsClientMessageSchema, wsServerMessageSchema } from '../../docs/api/schemas.ts';
-import { serverRoutes } from '../../docs/api/source.ts';
-import { apiSchemas, type RouteSpec } from '../../src/core/server/index.ts';
+import { serverRoutes, type ServerRoute } from '../../docs/api/source.ts';
+import { apiSchemas } from '../../src/core/server/index.ts';
 import { QUARANTINE_ID_RE, lockEntrySchema, skillReviewSchema } from '../../src/core/skills/index.ts';
 import * as ex from '../../docs/api/examples.ts';
 
@@ -330,17 +330,27 @@ describe('docs/api: seguridad', () => {
     expect(JSON.parse(String(obj(addAgent?.request.body, 'body').raw))).toMatchObject({ apiKey: '{{apiKey}}' });
   });
 
-  it('autenticación Bearer {{token}} a nivel de colección y en todas las operaciones de OpenAPI (como el servidor)', () => {
+  it('autenticación Bearer {{token}} a nivel de colección y en todas las operaciones de OpenAPI salvo las públicas (como el servidor)', () => {
+    const open = new Set(serverRoutes().filter((r) => r.public).map((r) => routeKey(r.method, r.path)));
+    expect([...open]).toEqual(['GET /plugins/canva/callback']);
     expect(postman.auth).toEqual({ type: 'bearer', bearer: [{ key: 'token', value: '{{token}}', type: 'string' }] });
-    for (const r of postmanRequests()) expect(r.request.auth, `${r.name} hereda la autenticación`).toBeUndefined();
+    for (const r of postmanRequests()) {
+      const isOpen = open.has(routeKey(String(r.request.method), postmanPath(r.url)));
+      expect(r.request.auth, `${r.name}: ${isOpen ? 'sin token' : 'hereda la autenticación'}`).toEqual(isOpen ? { type: 'noauth' } : undefined);
+    }
     const vars = Object.fromEntries(arr(postman.variable, 'variable').map((v) => [String(obj(v, 'variable').key), obj(v, 'variable').value]));
     expect(vars.baseUrl).toBe(`http://127.0.0.1:${DEFAULT_PORT}`);
     expect(z.url().safeParse(vars.baseUrl).success).toBe(true);
 
     expect(openapi.security).toEqual([{ bearerAuth: [] }]);
     expect(obj(obj(openapi.components, 'components').securitySchemes, 'securitySchemes').bearerAuth).toMatchObject({ type: 'http', scheme: 'bearer' });
-    // El servidor exige el token en todas las rutas, /health y el handshake de /ws incluidos.
+    // El servidor exige el token en todas las rutas, /health y el handshake de /ws incluidos, salvo las públicas.
     for (const { method, path, op } of operations()) {
+      if (open.has(routeKey(method, path))) {
+        expect(op.security, `${method} ${path} es pública`).toEqual([]);
+        expect(obj(op.responses, 'responses')['401'], `${method} ${path}`).toBeUndefined();
+        continue;
+      }
       expect(op.security, `${method} ${path} no anula la seguridad global`).toBeUndefined();
       expect(obj(op.responses, 'responses')['401'], `${method} ${path}`).toEqual({ $ref: '#/components/responses/E401' });
     }
@@ -375,11 +385,12 @@ const zodJson = (schema: z.ZodType, io: 'input' | 'output'): Json =>
 const sameJson = (a: Json, b: Json): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 describe('docs/api: openapi.json coincide con createApp(...).routes', () => {
-  const server: readonly RouteSpec[] = serverRoutes();
+  const server: readonly ServerRoute[] = serverRoutes();
   const byKey = new Map(operations().map((o) => [routeKey(o.method, o.path), o.op]));
 
   it('mismas rutas, ni una más ni una menos', () => {
-    expect(server.length).toBe(49);
+    // 49 base y de c14, c29 y c34, más 17 de chats y adjuntos (c15) y 4 de plugins (c16).
+    expect(server.length).toBe(70);
     expect([...byKey.keys()].sort()).toEqual(server.map((r) => routeKey(r.method, r.path)).sort());
   });
 
@@ -392,7 +403,7 @@ describe('docs/api: openapi.json coincide con createApp(...).routes', () => {
       if (op.summary !== r.summary) diffs.push(`${key}: resumen`);
       if ((op.description ?? undefined) !== r.description) diffs.push(`${key}: descripción`);
       const codes = Object.keys(obj(op.responses, 'responses')).map(Number).sort((a, b) => a - b);
-      const expected = [r.status ?? 200, 401, 403, ...(r.errors ?? [])].sort((a, b) => a - b);
+      const expected = [r.status ?? 200, ...(r.public ? [] : [401]), 403, ...(r.errors ?? [])].sort((a, b) => a - b);
       if (!sameJson(codes, [...new Set(expected)])) diffs.push(`${key}: códigos ${codes.join(',')} ≠ ${expected.join(',')}`);
       if (Boolean(op['x-websocket']) !== Boolean(r.websocket)) diffs.push(`${key}: websocket`);
     }
@@ -415,7 +426,8 @@ describe('docs/api: openapi.json coincide con createApp(...).routes', () => {
           if (where === 'query' && p.required !== !schema?.safeParse(undefined).success) diffs.push(`${key}: obligatoriedad de ${String(p.name)}`);
         }
       }
-      const body = isObj(op.requestBody) ? op.requestBody : undefined;
+      // Solo los cuerpos JSON tienen esquema Zod; uno crudo (bytes de `POST /attachments`) no.
+      const body = isObj(op.requestBody) && isObj(op.requestBody.content) && op.requestBody.content['application/json'] !== undefined ? op.requestBody : undefined;
       if (Boolean(body) !== Boolean(r.body)) diffs.push(`${key}: cuerpo presente`);
       if (body && r.body) {
         if (body.required !== !r.bodyOptional) diffs.push(`${key}: cuerpo obligatorio`);

@@ -133,6 +133,8 @@ export interface CoreApp {
    * tareas (`tasks.recover`). Lo llama `startServer` cuando ya escucha; corre una sola vez y cada error se registra.
    */
   recover(): void;
+  /** Rutas que no exigen el token (`allowWithoutToken`), como `GET /plugins/canva/callback`. */
+  publicRoutes: readonly string[];
 }
 
 const CANCELLABLE: readonly TaskState[] = ['pending', 'ready', 'running', 'review'];
@@ -803,5 +805,5 @@ export function createApp(deps: AppDeps): CoreApp {
     attempt(() => deps.tasks?.recover?.(), 'no se pudo revisar las tareas interrumpidas');
   };
 
-  return { app, routes: r.specs, recover };
+  return { app, routes: r.specs, recover, publicRoutes: [...publicRoutes] };
 }

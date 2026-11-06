@@ -4,7 +4,7 @@
     "title": "Orquestador — API local",
     "version": "0.1.0",
     "summary": "REST + WebSocket del núcleo del orquestador (solo 127.0.0.1).",
-    "description": "API local del núcleo. Escucha solo en `127.0.0.1` y exige `Authorization: Bearer <token>` en todas las rutas (también `/health` y el WebSocket `/ws`); el token es aleatorio y lo imprime el núcleo al arrancar.\n\nLa interfaz web (`GET /`, `/index.html` y `/assets/*`, archivos de `dist/ui`) se sirve sin token y no es parte de esta API: abre el enlace `web: http://127.0.0.1:47811/#t=<token>` que imprime `iniciar` (el token va en el fragmento, que el navegador no envía). Las peticiones del navegador solo se aceptan desde el propio origen del núcleo o los de `ORQ_ALLOWED_ORIGINS`.\n\nErrores: siempre `{\"error\":{\"code\",\"message\"}}` (más `warnings` o `issues` en 422). Ninguna respuesta incluye claves: al agregar un agente la clave va en el cuerpo de la petición (`apiKey`) y la respuesta solo trae `secretRef`.\n\nRutas y esquemas salen del servidor (`createApp(...).routes` en `src/core/server/`, que usa los contratos Zod de `src/shared/`) con `z.toJSONSchema`, mediante `docs/api/generate.ts`; no edites este archivo a mano."
+    "description": "API local del núcleo. Escucha solo en `127.0.0.1` y exige `Authorization: Bearer <token>` en todas las rutas (también `/health` y el WebSocket `/ws`) salvo `GET /plugins/canva/callback`, la vuelta de OAuth de Canva que abre el navegador; el token es aleatorio y lo imprime el núcleo al arrancar.\n\nLa interfaz web (`GET /`, `/index.html` y `/assets/*`, archivos de `dist/ui`) se sirve sin token y no es parte de esta API: abre el enlace `web: http://127.0.0.1:47811/#t=<token>` que imprime `iniciar` (el token va en el fragmento, que el navegador no envía). Las peticiones del navegador solo se aceptan desde el propio origen del núcleo o los de `ORQ_ALLOWED_ORIGINS`.\n\nErrores: siempre `{\"error\":{\"code\",\"message\"}}` (más `warnings` o `issues` en 422). Ninguna respuesta incluye claves: al agregar un agente la clave va en el cuerpo de la petición (`apiKey`) y la respuesta solo trae `secretRef`.\n\nRutas y esquemas salen del servidor (`createApp(...).routes` en `src/core/server/`, que usa los contratos Zod de `src/shared/`) con `z.toJSONSchema`, mediante `docs/api/generate.ts`; no edites este archivo a mano."
   },
   "servers": [
     {
@@ -49,6 +49,14 @@
       "description": "Sesiones de agente y sus eventos normalizados (con reconexión por `seq`)."
     },
     {
+      "name": "Chats",
+      "description": "Chats con la mente (F5): mensajes, modo, destino de los cambios y tareas propuestas que se aprueban para la flota. La respuesta de la mente llega por `/ws`."
+    },
+    {
+      "name": "Adjuntos",
+      "description": "Imágenes y archivos para los mensajes del chat: subida de bytes o registro por ruta (hasta 20 MB)."
+    },
+    {
       "name": "Uso",
       "description": "Tokens y costo acumulados; resumen de uso y gasto por modelo, día, rol y proyecto, y tu tarifa por modelo (issue 5)."
     },
@@ -71,6 +79,10 @@
     {
       "name": "Carpetas",
       "description": "Explorador de carpetas del equipo y diálogo nativo de Windows para elegir la carpeta de un proyecto (F5)."
+    },
+    {
+      "name": "Plugins",
+      "description": "Chrome personal y Canva para los agentes (F5). La vuelta de OAuth de Canva es la única ruta sin token."
     },
     {
       "name": "Tiempo real",
@@ -3879,6 +3891,1744 @@
             "$ref": "#/components/responses/E415"
           }
         }
+      }
+    },
+    "/chats": {
+      "get": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Lista los chats con la mente (más recientes primero)",
+        "operationId": "getChats",
+        "description": "Con `projectId` los de ese proyecto; con `projectId=` (vacío) las conversaciones sin proyecto; sin él, todos.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+                },
+                {
+                  "type": "string",
+                  "const": ""
+                }
+              ]
+            },
+            "example": "vetworld"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatsResponse"
+                },
+                "example": {
+                  "chats": [
+                    {
+                      "id": "chat-8f3a2c1d",
+                      "projectId": "vetworld",
+                      "title": "Separar la API y la interfaz del tablero",
+                      "cwd": "C:\\dev\\Vetworld",
+                      "extraRoots": [],
+                      "mode": "plan",
+                      "mindAgentId": "claude-mi-clave",
+                      "sessionId": "chat-chat-8f3a2c1d",
+                      "state": "idle",
+                      "costUsd": 0.042,
+                      "createdAt": "2026-11-02T10:00:00.000Z",
+                      "updatedAt": "2026-11-02T10:02:10.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Crea un chat con la mente",
+        "operationId": "postChats",
+        "description": "La mente es el agente de `settings.mind.agentId` (o el primer Claude habilitado). `cwd` por defecto es la carpeta del proyecto; una conversación sin proyecto (`projectId: null`, sin flota) no la necesita: sin `cwd`, Berland le crea una carpeta interna propia. `mode` por defecto: `settings.defaultMode`; `chat` (como Claude Code, sin flota) vale también sin proyecto.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "extraRoots": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    }
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "plan",
+                      "auto",
+                      "bypass",
+                      "chat"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "projectId"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "projectId": "vetworld",
+                "mode": "plan"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "plan",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "idle",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:02:10.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/chats/{id}": {
+      "get": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Detalle de un chat",
+        "operationId": "getChatsById",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "plan",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "idle",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:02:10.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Renombra el chat, cambia el modo (Shift+Tab) o las carpetas extra",
+        "operationId": "patchChatsById",
+        "description": "El cambio de modo rige desde el turno siguiente; la guardia de herramientas lo ve al instante (en `plan`, `delegar` queda bloqueada; en `chat`, `crear_tareas` y `delegar`; fuera de `bypass` y `chat`, edición y shell).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "plan",
+                      "auto",
+                      "bypass",
+                      "chat"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "extraRoots": {
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {
+                "mode": "auto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "auto",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "idle",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:05:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Borra el chat, sus mensajes y propuestas",
+        "operationId": "deleteChatsById",
+        "description": "Cierra la sesión de la mente. Las tareas ya entregadas a la flota siguen en el tablero.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "deleted": true,
+                  "id": "chat-8f3a2c1d"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      }
+    },
+    "/chats/{id}/target": {
+      "get": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Dónde quedan los cambios del chat: en local o en el repositorio que indicó el usuario",
+        "operationId": "getChatsByIdTarget",
+        "description": "`local` por defecto (carpeta del proyecto o, sin proyecto, la del chat), con `git` (`none`, `local` o `remote`) y `worktrees` (el proyecto usa ramas `orq/…`). `remote` solo si la mente anotó con `crear_tareas.destino` el repositorio que indicó el usuario: `url` saneada, rama y `configured` (el remoto está en `git remote` de la carpeta). Berland no sube nada. Los cambios llegan por `/ws` como `chat_target`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "target": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "local"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "git": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "local",
+                                "remote"
+                              ]
+                            },
+                            "worktrees": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path",
+                            "git",
+                            "worktrees"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "remote"
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "remote": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "url": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "url"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "branch": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "configured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path",
+                            "remote",
+                            "branch",
+                            "configured"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "target"
+                  ],
+                  "additionalProperties": false
+                },
+                "example": {
+                  "target": {
+                    "kind": "local",
+                    "path": "C:\\dev\\Vetworld",
+                    "git": "remote",
+                    "worktrees": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      }
+    },
+    "/chats/{id}/close": {
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Cierra el chat (corta el turno y la sesión; un mensaje nuevo lo reabre reanudado)",
+        "operationId": "postChatsByIdClose",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "plan",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "closed",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:05:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      }
+    },
+    "/chats/{id}/messages": {
+      "get": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Mensajes del chat (los últimos `limit`, 500 por defecto)",
+        "operationId": "getChatsByIdMessages",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessagesResponse"
+                },
+                "example": {
+                  "messages": [
+                    {
+                      "id": "msg-1a2b3c4d",
+                      "chatId": "chat-8f3a2c1d",
+                      "role": "user",
+                      "text": "Separa la API y la interfaz del tablero",
+                      "attachments": [
+                        {
+                          "id": "adj-5b7e9d2a",
+                          "name": "captura.png",
+                          "mime": "image/png",
+                          "size": 48213,
+                          "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments\\adj-5b7e9d2a-captura.png",
+                          "kind": "image",
+                          "source": "upload",
+                          "createdAt": "2026-11-02T10:01:30.000Z"
+                        }
+                      ],
+                      "mode": "plan",
+                      "at": "2026-11-02T10:01:30.000Z"
+                    },
+                    {
+                      "id": "msg-5e6f7a8b",
+                      "chatId": "chat-8f3a2c1d",
+                      "role": "assistant",
+                      "text": "Propongo dos tareas: validar el formulario de citas y sus pruebas. Revísalas y apruébalas.",
+                      "attachments": [],
+                      "mode": "plan",
+                      "at": "2026-11-02T10:02:10.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Envía un mensaje a la mente",
+        "operationId": "postChatsByIdMessages",
+        "description": "Responde en cuanto guarda el mensaje del usuario; la respuesta llega por `/ws`. Con un turno en curso, 409. Las imágenes adjuntas van como bloques de imagen (tope de 5 MB en base64); los demás archivos, como «Adjuntos: <ruta>» y su carpeta pasa a ser legible. `effort` (opcional) es el esfuerzo de este turno: sin él, el de los ajustes de la mente; se aplica en vivo, sin perder la conversación.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 100000
+                  },
+                  "attachmentIds": {
+                    "default": [],
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{6,100}$"
+                    }
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "text": "Separa la API y la interfaz del tablero",
+                "attachmentIds": [],
+                "effort": "high"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageResponse"
+                },
+                "example": {
+                  "message": {
+                    "id": "msg-1a2b3c4d",
+                    "chatId": "chat-8f3a2c1d",
+                    "role": "user",
+                    "text": "Separa la API y la interfaz del tablero",
+                    "attachments": [
+                      {
+                        "id": "adj-5b7e9d2a",
+                        "name": "captura.png",
+                        "mime": "image/png",
+                        "size": 48213,
+                        "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments\\adj-5b7e9d2a-captura.png",
+                        "kind": "image",
+                        "source": "upload",
+                        "createdAt": "2026-11-02T10:01:30.000Z"
+                      }
+                    ],
+                    "mode": "plan",
+                    "at": "2026-11-02T10:01:30.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "413": {
+            "$ref": "#/components/responses/E413"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/chats/{id}/interrupt": {
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Corta el turno en curso (la conversación sigue)",
+        "operationId": "postChatsByIdInterrupt",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                },
+                "example": {
+                  "chat": {
+                    "id": "chat-8f3a2c1d",
+                    "projectId": "vetworld",
+                    "title": "Separar la API y la interfaz del tablero",
+                    "cwd": "C:\\dev\\Vetworld",
+                    "extraRoots": [],
+                    "mode": "plan",
+                    "mindAgentId": "claude-mi-clave",
+                    "sessionId": "chat-chat-8f3a2c1d",
+                    "state": "idle",
+                    "costUsd": 0.042,
+                    "createdAt": "2026-11-02T10:00:00.000Z",
+                    "updatedAt": "2026-11-02T10:02:10.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      }
+    },
+    "/chats/{id}/proposals": {
+      "get": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Tareas propuestas por la mente en este chat",
+        "operationId": "getChatsByIdProposals",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalsResponse"
+                },
+                "example": {
+                  "proposals": [
+                    {
+                      "task": {
+                        "id": "validar-citas",
+                        "projectId": "vetworld",
+                        "title": "Validar el formulario de citas",
+                        "objective": "Agregar validación con Zod al formulario de citas.",
+                        "ownedPaths": [
+                          "src/citas/**"
+                        ],
+                        "dependsOn": [],
+                        "acceptance": [
+                          "Pruebas del formulario en verde"
+                        ],
+                        "difficulty": "low",
+                        "suggestedAgent": "codex",
+                        "contextRefs": [],
+                        "skillRefs": []
+                      },
+                      "approval": "proposed",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    },
+                    {
+                      "task": {
+                        "id": "pruebas-citas",
+                        "projectId": "vetworld",
+                        "title": "Pruebas del formulario de citas",
+                        "objective": "Cubrir con Vitest los casos válidos e inválidos del formulario de citas.",
+                        "ownedPaths": [
+                          "tests/citas/**"
+                        ],
+                        "dependsOn": [
+                          "validar-citas"
+                        ],
+                        "acceptance": [
+                          "Casos válidos e inválidos cubiertos",
+                          "npm run gate en verde"
+                        ],
+                        "difficulty": "low",
+                        "contextRefs": [
+                          "Orquestador/Proyectos/vetworld/Contexto.md"
+                        ],
+                        "skillRefs": []
+                      },
+                      "approval": "proposed",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          }
+        }
+      }
+    },
+    "/chats/{id}/proposals/approve-all": {
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Aprueba todas las propuestas pendientes y las entrega a la flota",
+        "operationId": "postChatsByIdProposalsApproveAll",
+        "description": "En orden de dependencias. Las que no se pueden entregar quedan aprobadas y van en `failed`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalApprovalResponse"
+                },
+                "example": {
+                  "proposals": [
+                    {
+                      "task": {
+                        "id": "validar-citas",
+                        "projectId": "vetworld",
+                        "title": "Validar el formulario de citas",
+                        "objective": "Agregar validación con Zod al formulario de citas.",
+                        "ownedPaths": [
+                          "src/citas/**"
+                        ],
+                        "dependsOn": [],
+                        "acceptance": [
+                          "Pruebas del formulario en verde"
+                        ],
+                        "difficulty": "low",
+                        "suggestedAgent": "codex",
+                        "contextRefs": [],
+                        "skillRefs": []
+                      },
+                      "approval": "delegated",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    },
+                    {
+                      "task": {
+                        "id": "pruebas-citas",
+                        "projectId": "vetworld",
+                        "title": "Pruebas del formulario de citas",
+                        "objective": "Cubrir con Vitest los casos válidos e inválidos del formulario de citas.",
+                        "ownedPaths": [
+                          "tests/citas/**"
+                        ],
+                        "dependsOn": [
+                          "validar-citas"
+                        ],
+                        "acceptance": [
+                          "Casos válidos e inválidos cubiertos",
+                          "npm run gate en verde"
+                        ],
+                        "difficulty": "low",
+                        "contextRefs": [
+                          "Orquestador/Proyectos/vetworld/Contexto.md"
+                        ],
+                        "skillRefs": []
+                      },
+                      "approval": "delegated",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    }
+                  ],
+                  "delivered": [
+                    "validar-citas",
+                    "pruebas-citas"
+                  ],
+                  "failed": []
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          }
+        }
+      }
+    },
+    "/chats/{id}/proposals/{taskId}/approve": {
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Aprueba una propuesta: pasa a `ready` en el tablero y la flota la recibe",
+        "operationId": "postChatsByIdProposalsByTaskIdApprove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+            },
+            "example": "validar-citas"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalApprovalResponse"
+                },
+                "example": {
+                  "proposals": [
+                    {
+                      "task": {
+                        "id": "validar-citas",
+                        "projectId": "vetworld",
+                        "title": "Validar el formulario de citas",
+                        "objective": "Agregar validación con Zod al formulario de citas.",
+                        "ownedPaths": [
+                          "src/citas/**"
+                        ],
+                        "dependsOn": [],
+                        "acceptance": [
+                          "Pruebas del formulario en verde"
+                        ],
+                        "difficulty": "low",
+                        "suggestedAgent": "codex",
+                        "contextRefs": [],
+                        "skillRefs": []
+                      },
+                      "approval": "delegated",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    },
+                    {
+                      "task": {
+                        "id": "pruebas-citas",
+                        "projectId": "vetworld",
+                        "title": "Pruebas del formulario de citas",
+                        "objective": "Cubrir con Vitest los casos válidos e inválidos del formulario de citas.",
+                        "ownedPaths": [
+                          "tests/citas/**"
+                        ],
+                        "dependsOn": [
+                          "validar-citas"
+                        ],
+                        "acceptance": [
+                          "Casos válidos e inválidos cubiertos",
+                          "npm run gate en verde"
+                        ],
+                        "difficulty": "low",
+                        "contextRefs": [
+                          "Orquestador/Proyectos/vetworld/Contexto.md"
+                        ],
+                        "skillRefs": []
+                      },
+                      "approval": "proposed",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    }
+                  ],
+                  "delivered": [
+                    "validar-citas"
+                  ],
+                  "failed": []
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          }
+        }
+      }
+    },
+    "/chats/{id}/proposals/{taskId}/reject": {
+      "post": {
+        "tags": [
+          "Chats"
+        ],
+        "summary": "Rechaza una propuesta (si aún no se entregó)",
+        "operationId": "postChatsByIdProposalsByTaskIdReject",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "chat-8f3a2c1d"
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+            },
+            "example": "validar-citas"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalsResponse"
+                },
+                "example": {
+                  "proposals": [
+                    {
+                      "task": {
+                        "id": "validar-citas",
+                        "projectId": "vetworld",
+                        "title": "Validar el formulario de citas",
+                        "objective": "Agregar validación con Zod al formulario de citas.",
+                        "ownedPaths": [
+                          "src/citas/**"
+                        ],
+                        "dependsOn": [],
+                        "acceptance": [
+                          "Pruebas del formulario en verde"
+                        ],
+                        "difficulty": "low",
+                        "suggestedAgent": "codex",
+                        "contextRefs": [],
+                        "skillRefs": []
+                      },
+                      "approval": "rejected",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    },
+                    {
+                      "task": {
+                        "id": "pruebas-citas",
+                        "projectId": "vetworld",
+                        "title": "Pruebas del formulario de citas",
+                        "objective": "Cubrir con Vitest los casos válidos e inválidos del formulario de citas.",
+                        "ownedPaths": [
+                          "tests/citas/**"
+                        ],
+                        "dependsOn": [
+                          "validar-citas"
+                        ],
+                        "acceptance": [
+                          "Casos válidos e inválidos cubiertos",
+                          "npm run gate en verde"
+                        ],
+                        "difficulty": "low",
+                        "contextRefs": [
+                          "Orquestador/Proyectos/vetworld/Contexto.md"
+                        ],
+                        "skillRefs": []
+                      },
+                      "approval": "proposed",
+                      "proposedAt": "2026-11-02T10:02:10.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          }
+        }
+      }
+    },
+    "/attachments": {
+      "post": {
+        "tags": [
+          "Adjuntos"
+        ],
+        "summary": "Sube un adjunto (cuerpo crudo con su Content-Type, hasta 20 MB)",
+        "operationId": "postAttachments",
+        "description": "Imagen pegada o archivo soltado en la web: `POST /attachments?name=<archivo>` con los bytes como cuerpo. Se guarda en `<dataDir>/attachments/<id>-<nombre saneado>`. `kind`: `image` (png, jpeg, gif o webp según sus bytes), `text` (tipos de texto y código) o `file`.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "example": "captura.png"
+          }
+        ],
+        "requestBody": {
+          "description": "Bytes del archivo con su `Content-Type` (p. ej. `image/png`).",
+          "required": true,
+          "content": {
+            "*/*": {}
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentResponse"
+                },
+                "example": {
+                  "attachment": {
+                    "id": "adj-5b7e9d2a",
+                    "name": "captura.png",
+                    "mime": "image/png",
+                    "size": 48213,
+                    "path": "C:\\Users\\yo\\AppData\\Local\\orquestador\\attachments\\adj-5b7e9d2a-captura.png",
+                    "kind": "image",
+                    "source": "upload",
+                    "createdAt": "2026-11-02T10:01:30.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "413": {
+            "$ref": "#/components/responses/E413"
+          }
+        }
+      }
+    },
+    "/attachments/by-path": {
+      "post": {
+        "tags": [
+          "Adjuntos"
+        ],
+        "summary": "Registra un archivo local por su ruta (Electron), sin copiarlo",
+        "operationId": "postAttachmentsByPath",
+        "description": "El archivo debe existir y pesar como mucho 20 MB.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "path": "C:\\Users\\yo\\Desktop\\notas.md"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentResponse"
+                },
+                "example": {
+                  "attachment": {
+                    "id": "adj-0c4e6f81",
+                    "name": "notas.md",
+                    "mime": "text/markdown",
+                    "size": 2310,
+                    "path": "C:\\Users\\yo\\Desktop\\notas.md",
+                    "kind": "text",
+                    "source": "path",
+                    "createdAt": "2026-11-02T10:01:30.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "413": {
+            "$ref": "#/components/responses/E413"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/attachments/{id}": {
+      "get": {
+        "tags": [
+          "Adjuntos"
+        ],
+        "summary": "Bytes del adjunto (miniaturas)",
+        "operationId": "getAttachmentsById",
+        "description": "Las imágenes salen con su tipo; el resto como `application/octet-stream` para descargar. Nunca se interpretan como página.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{6,100}$"
+            },
+            "example": "adj-5b7e9d2a"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "413": {
+            "$ref": "#/components/responses/E413"
+          }
+        }
+      }
+    },
+    "/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Lista los plugins (Chrome, Canva) y su estado",
+        "operationId": "getPlugins",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginsResponse"
+                },
+                "example": {
+                  "plugins": [
+                    {
+                      "id": "chrome",
+                      "name": "Chrome",
+                      "description": "Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.",
+                      "status": "connected",
+                      "detail": "Chrome personal conectado (29 herramientas) · Depuración remota activa · Libre ahora",
+                      "agents": [],
+                      "steps": [],
+                      "updatedAt": "2026-11-02T09:30:00.000Z"
+                    },
+                    {
+                      "id": "canva",
+                      "name": "Canva",
+                      "description": "Tus diseños de Canva por el MCP oficial (mcp.canva.com), con tu cuenta (OAuth).",
+                      "status": "disconnected",
+                      "agents": [],
+                      "steps": [
+                        "Pulsa Conectar: se abre la página de Canva para iniciar sesión.",
+                        "Acepta los permisos; al volver verás «Canva conectado» y podrás cerrar la pestaña."
+                      ],
+                      "updatedAt": "2026-11-02T09:30:00.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          }
+        }
+      }
+    },
+    "/plugins/{id}/connect": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Conecta un plugin",
+        "operationId": "postPluginsByIdConnect",
+        "description": "Chrome («Probar conexión»): arranca el MCP `chrome-devtools-mcp` de tu Chrome personal (`--autoConnect`, el único navegador de los agentes), hace `initialize`, `tools/list` y `list_pages`, y lo cierra; responde `connected` (detalle: número de herramientas) o `error` con los pasos. Puede tardar hasta un minuto si Chrome pide aceptar la conexión. `profile: \"agente\"` (perfil aislado) ya no existe y responde 400. Canva: descubre el servidor OAuth, registra el cliente y responde `connecting` con `authUrl` (la abre la interfaz); termina en `GET /plugins/canva/callback`. `agents` vacío: el plugin llega a todos los agentes compatibles (Claude y Codex). Cada cambio se transmite por `/ws` como `{type:\"plugin\"}`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "chrome"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "profile": {
+                    "type": "string",
+                    "enum": [
+                      "personal",
+                      "agente"
+                    ]
+                  },
+                  "agents": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginResponse"
+                },
+                "example": {
+                  "plugin": {
+                    "id": "chrome",
+                    "name": "Chrome",
+                    "description": "Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.",
+                    "status": "connected",
+                    "detail": "Chrome personal conectado (29 herramientas) · Depuración remota activa · Libre ahora",
+                    "agents": [],
+                    "steps": [],
+                    "updatedAt": "2026-11-02T09:30:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          },
+          "415": {
+            "$ref": "#/components/responses/E415"
+          }
+        }
+      }
+    },
+    "/plugins/{id}/disconnect": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Desconecta un plugin",
+        "operationId": "postPluginsByIdDisconnect",
+        "description": "Chrome: deja de entregarse a los agentes. Canva: revoca el token si el servidor lo permite y lo borra de la bóveda.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "chrome"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginResponse"
+                },
+                "example": {
+                  "plugin": {
+                    "id": "chrome",
+                    "name": "Chrome",
+                    "description": "Tu Chrome personal, con tus sesiones y tu perfil, para los agentes (chrome-devtools-mcp). Es su único navegador: nunca abren otro. Uno a la vez: si otro agente lo está usando, el siguiente espera.",
+                    "status": "disconnected",
+                    "detail": "Desconectado: los agentes no reciben navegador (ni otro Chrome).",
+                    "agents": [],
+                    "steps": [],
+                    "updatedAt": "2026-11-02T10:05:00.000Z"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "401": {
+            "$ref": "#/components/responses/E401"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          }
+        }
+      }
+    },
+    "/plugins/canva/callback": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "Vuelta de OAuth de Canva (sin token: la abre el navegador)",
+        "operationId": "getPluginsCanvaCallback",
+        "description": "Única ruta sin `Authorization`: la abre el navegador al volver de Canva. Se valida por `state` (un solo uso, caduca a los 10 minutos); con un `state` desconocido, repetido o vencido responde 400 y no cambia nada. Canjea el código (PKCE), guarda los tokens en la bóveda y responde una página HTML corta. Host y Origin se siguen comprobando.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "example": "<código>"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "example": "<state>"
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/E400"
+          },
+          "403": {
+            "$ref": "#/components/responses/E403"
+          }
+        },
+        "security": []
       }
     },
     "/usage/summary": {
@@ -8116,6 +9866,76 @@
         },
         "additionalProperties": false
       },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,100}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "mime": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "text",
+              "file"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "upload",
+              "path"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mime",
+          "size",
+          "path",
+          "kind",
+          "source",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "Adjunto de un mensaje: copia subida o archivo local referido por ruta (src/shared/api.ts)."
+      },
+      "AttachmentResponse": {
+        "type": "object",
+        "properties": {
+          "attachment": {
+            "$ref": "#/components/schemas/Attachment"
+          }
+        },
+        "required": [
+          "attachment"
+        ],
+        "additionalProperties": false
+      },
       "CancelTaskRequest": {
         "type": "object",
         "properties": {
@@ -8125,6 +9945,211 @@
             "maxLength": 500
           }
         },
+        "additionalProperties": false
+      },
+      "Chat": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,100}$"
+          },
+          "projectId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extraRoots": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "auto",
+              "bypass",
+              "chat"
+            ]
+          },
+          "mindAgentId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "running",
+              "error",
+              "closed"
+            ]
+          },
+          "costUsd": {
+            "type": "number",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "backgroundTasks": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "internalFolder": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "title",
+          "cwd",
+          "extraRoots",
+          "mode",
+          "mindAgentId",
+          "sessionId",
+          "state",
+          "costUsd",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Chat con la mente (src/shared/api.ts). Sus eventos llegan por `/ws` con `sessionId`."
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,100}$"
+          },
+          "chatId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,100}$"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "auto",
+              "bypass",
+              "chat"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "chatId",
+          "role",
+          "text",
+          "attachments",
+          "mode",
+          "at"
+        ],
+        "additionalProperties": false,
+        "description": "Mensaje de un chat, del usuario o de la mente (src/shared/api.ts)."
+      },
+      "ChatMessageResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/ChatMessage"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "ChatMessagesResponse": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "ChatResponse": {
+        "type": "object",
+        "properties": {
+          "chat": {
+            "$ref": "#/components/schemas/Chat"
+          }
+        },
+        "required": [
+          "chat"
+        ],
+        "additionalProperties": false
+      },
+      "ChatsResponse": {
+        "type": "object",
+        "properties": {
+          "chats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Chat"
+            }
+          }
+        },
+        "required": [
+          "chats"
+        ],
         "additionalProperties": false
       },
       "DeletedResponse": {
@@ -8563,6 +10588,95 @@
         ],
         "additionalProperties": false
       },
+      "Plugin": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "chrome",
+              "canva"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "disconnected",
+              "connecting",
+              "connected",
+              "error"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "authUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "status",
+          "agents",
+          "steps",
+          "updatedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Plugin de los agentes (Chrome o Canva) y su estado (src/shared/api.ts). Nunca trae un token."
+      },
+      "PluginResponse": {
+        "type": "object",
+        "properties": {
+          "plugin": {
+            "$ref": "#/components/schemas/Plugin"
+          }
+        },
+        "required": [
+          "plugin"
+        ],
+        "additionalProperties": false
+      },
+      "PluginsResponse": {
+        "type": "object",
+        "properties": {
+          "plugins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Plugin"
+            }
+          }
+        },
+        "required": [
+          "plugins"
+        ],
+        "additionalProperties": false
+      },
       "ProbeResponse": {
         "type": "object",
         "properties": {
@@ -8945,6 +11059,94 @@
         },
         "required": [
           "projects"
+        ],
+        "additionalProperties": false
+      },
+      "Proposal": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskBrief"
+          },
+          "approval": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "approved",
+              "rejected",
+              "delegated"
+            ]
+          },
+          "proposedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "task",
+          "approval",
+          "proposedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Tarea propuesta por la mente y su aprobación (src/shared/api.ts)."
+      },
+      "ProposalApprovalResponse": {
+        "type": "object",
+        "properties": {
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proposal"
+            }
+          },
+          "delivered": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "taskId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "taskId",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "proposals",
+          "delivered",
+          "failed"
+        ],
+        "additionalProperties": false,
+        "description": "Propuestas tras aprobar: `delivered`, las que la flota aceptó; `failed`, las aprobadas que no se entregaron."
+      },
+      "ProposalsResponse": {
+        "type": "object",
+        "properties": {
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proposal"
+            }
+          }
+        },
+        "required": [
+          "proposals"
         ],
         "additionalProperties": false
       },
@@ -10591,101 +12793,7 @@
                 "const": "chat"
               },
               "chat": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9_-]{6,100}$"
-                  },
-                  "projectId": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "title": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "cwd": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "extraRoots": {
-                    "maxItems": 20,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "plan",
-                      "auto",
-                      "bypass",
-                      "chat"
-                    ]
-                  },
-                  "mindAgentId": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
-                  },
-                  "sessionId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "state": {
-                    "type": "string",
-                    "enum": [
-                      "idle",
-                      "running",
-                      "error",
-                      "closed"
-                    ]
-                  },
-                  "costUsd": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "createdAt": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "updatedAt": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "backgroundTasks": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "internalFolder": {
-                    "type": "boolean",
-                    "const": true
-                  }
-                },
-                "required": [
-                  "id",
-                  "projectId",
-                  "title",
-                  "cwd",
-                  "extraRoots",
-                  "mode",
-                  "mindAgentId",
-                  "sessionId",
-                  "state",
-                  "costUsd",
-                  "createdAt",
-                  "updatedAt"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/Chat"
               }
             },
             "required": [
@@ -10702,110 +12810,7 @@
                 "const": "chat_message"
               },
               "message": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9_-]{6,100}$"
-                  },
-                  "chatId": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z0-9_-]{6,100}$"
-                  },
-                  "role": {
-                    "type": "string",
-                    "enum": [
-                      "user",
-                      "assistant"
-                    ]
-                  },
-                  "text": {
-                    "type": "string"
-                  },
-                  "attachments": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{6,100}$"
-                        },
-                        "name": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
-                        },
-                        "mime": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
-                        "size": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "path": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "image",
-                            "text",
-                            "file"
-                          ]
-                        },
-                        "source": {
-                          "type": "string",
-                          "enum": [
-                            "upload",
-                            "path"
-                          ]
-                        },
-                        "createdAt": {
-                          "type": "string",
-                          "format": "date-time"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "mime",
-                        "size",
-                        "path",
-                        "kind",
-                        "source",
-                        "createdAt"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "plan",
-                      "auto",
-                      "bypass",
-                      "chat"
-                    ]
-                  },
-                  "at": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "id",
-                  "chatId",
-                  "role",
-                  "text",
-                  "attachments",
-                  "mode",
-                  "at"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/ChatMessage"
               }
             },
             "required": [
@@ -10844,31 +12849,7 @@
               "proposals": {
                 "type": "array",
                 "items": {
-                  "type": "object",
-                  "properties": {
-                    "task": {
-                      "$ref": "#/components/schemas/TaskBrief"
-                    },
-                    "approval": {
-                      "type": "string",
-                      "enum": [
-                        "proposed",
-                        "approved",
-                        "rejected",
-                        "delegated"
-                      ]
-                    },
-                    "proposedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "task",
-                    "approval",
-                    "proposedAt"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Proposal"
                 }
               }
             },
@@ -10887,65 +12868,7 @@
                 "const": "plugin"
               },
               "plugin": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "enum": [
-                      "chrome",
-                      "canva"
-                    ]
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "disconnected",
-                      "connecting",
-                      "connected",
-                      "error"
-                    ]
-                  },
-                  "detail": {
-                    "type": "string"
-                  },
-                  "agents": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
-                    }
-                  },
-                  "steps": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "authUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  },
-                  "updatedAt": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "description",
-                  "status",
-                  "agents",
-                  "steps",
-                  "updatedAt"
-                ],
-                "additionalProperties": false
+                "$ref": "#/components/schemas/Plugin"
               }
             },
             "required": [
