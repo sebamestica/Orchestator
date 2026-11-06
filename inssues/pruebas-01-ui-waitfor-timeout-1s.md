@@ -3,7 +3,7 @@
 - **Área:** Pruebas y rendimiento
 - **Severidad:** media
 - **Archivos:** `vitest.config.ts:9-17`, `vitest.config.ts:13-15`, `node_modules/@testing-library/dom/dist/config.js:15`, `node_modules/@testing-library/dom/dist/wait-for.js:16`, `tests/ui/settings/usage.test.tsx:124`, `tests/ui/settings/usage.test.tsx:155`, `tests/ui/settings/usage.test.tsx:160-161`, `tests/ui/settings/usage.test.tsx:172`, `tests/ui/settings/usage.test.tsx:183`, `tests/ui/settings/usage.test.tsx:189`, `tests/ui/settings/usage.test.tsx:202`, `src/ui/features/settings/UsageSection.tsx:54`, `src/core/orchestrator/fleet.ts:422-424`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Las pruebas de la interfaz (`tests/ui/**/*.test.tsx`, con `// @vitest-environment happy-dom`) renderizan vistas de HeroUI

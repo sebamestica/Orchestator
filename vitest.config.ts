@@ -13,6 +13,8 @@ export default defineConfig({
     // todo su grafo. Dentro de ellas siguen los skipIf por clave y plataforma.
     exclude: [...configDefaults.exclude, ...(process.env.ORQ_LIVE === '1' ? [] : ['tests/live/**'])],
     environment: 'node',
+    // Sube el tope de findBy/waitFor de Testing Library en las pruebas con DOM; en las del núcleo no hace nada.
+    setupFiles: ['tests/ui/setup.ts'],
     // Media CPU por suite: la flota corre varios gates y checks a la vez, y sin tope cada uno abre
     // availableParallelism() - 1 forks. VITEST_MAX_WORKERS, si está puesta, sigue mandando.
     maxWorkers: '50%',
