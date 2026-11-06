@@ -20,6 +20,8 @@ export function TaskCard({ task, agentName, onClick }: TaskCardProps) {
   const remainingPaths = paths.length - 2;
   const isHandedOff = task.state === 'handed_off';
   const isFailed = task.state === 'failed';
+  /** Aprobada con motivo (p. ej. «esperando a …» sus dependencias). */
+  const isWaiting = task.state === 'ready' && Boolean(task.detail);
   const refreshTasks = useApp((s) => s.refreshTasks);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -125,6 +127,12 @@ export function TaskCard({ task, agentName, onClick }: TaskCardProps) {
           </span>
         </div>
       </div>
+
+      {isWaiting && (
+        <p className="border-t border-foreground/[0.06] px-3 pb-2.5 pt-2 text-[11px] leading-snug text-muted line-clamp-2 break-words" title={task.detail ?? undefined}>
+          {task.detail}
+        </p>
+      )}
 
       {isFailed && (
         <div className="flex flex-col gap-2 border-t border-danger/15 px-3 pb-3 pt-2">

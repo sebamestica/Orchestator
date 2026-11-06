@@ -99,7 +99,8 @@ export class TaskQueue {
     const changes: TaskStateChange[] = [];
     for (const t of incoming.values()) {
       this.#entries.set(t.id, { task: t, state: 'pending', updatedAt: this.#now().toISOString() });
-      changes.push(this.#change(t.id, null, 'pending'));
+      const waiting = t.dependsOn.filter((dep) => this.#entries.get(dep)?.state !== 'integrated');
+      changes.push(this.#change(t.id, null, 'pending', waiting.length ? { detail: `esperando a ${waiting.join(', ')}` } : {}));
     }
     // Un requisito ya cancelado no se integrará nunca: la cancelación se propaga al agregar (si no, la tarea
     // quedaría `pending` para siempre con la cola ociosa).

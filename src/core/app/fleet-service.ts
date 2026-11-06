@@ -140,6 +140,10 @@ export class FleetService {
   /**
    * Copia un cambio de la cola a la tarea del almacén: estado, agente, motivo (tachado; un cambio sin motivo lo
    * borra) y un intento más cada vez que la flota la empieza. Después lo difunde.
+   *
+   * `pending` no significa lo mismo en los dos lados: en la cola es «aprobada, esperando sus dependencias»; en la base,
+   * «sin aprobar». Una tarea que la base ya tiene aprobada sigue `ready` (con el motivo «esperando a …»): si volviera a
+   * `pending`, el tablero le ofrecería Aprobar otra vez y, tras un reinicio, nadie la recuperaría.
    */
   #copyChange(change: TaskStateChange): void {
     const store = this.#deps.store;
@@ -148,8 +152,10 @@ export class FleetService {
         const entry = this.queue.get(change.taskId);
         if (entry) this.#reviewOf.set(buildReviewTask(entry.task, [], '').id, change.taskId);
       }
-      if (!store.getTask(change.taskId)) return;
-      const saved = store.setTaskState(change.taskId, change.to, change.agentId, {
+      const stored = store.getTask(change.taskId);
+      if (!stored) return;
+      const to = change.to === 'pending' && stored.state !== 'pending' ? 'ready' : change.to;
+      const saved = store.setTaskState(change.taskId, to, change.agentId, {
         detail: change.detail ?? null,
         ...(change.from === 'ready' && change.to === 'running' ? { countAttempt: true } : {}),
       });

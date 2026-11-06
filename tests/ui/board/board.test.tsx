@@ -394,4 +394,16 @@ describe('BoardView', () => {
       expect(refreshTasksMock).toHaveBeenCalled();
     });
   });
+
+  it('una tarea lista que espera a sus dependencias muestra el motivo en la tarjeta y en el detalle', () => {
+    const waiting = { ...makeTask('t-espera-1', 'proj-alpha', 'ready', 'Tarea que espera Alfa'), detail: 'esperando a t-running-1' };
+    useApp.setState({ tasks: { ...useApp.getState().tasks, 't-espera-1': waiting } });
+    render(<BoardView />);
+
+    expect(screen.getByText('esperando a t-running-1')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Tarea t-espera-1/i));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Motivo del estado').textContent).toBe('esperando a t-running-1');
+    expect(within(dialog).queryByRole('button', { name: /aprobar tarea/i })).toBeNull();
+  });
 });

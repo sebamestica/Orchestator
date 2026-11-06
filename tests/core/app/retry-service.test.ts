@@ -37,7 +37,8 @@ describe('FleetService: el motivo de cada cambio llega a la base y a la interfaz
     expect(saved?.detail).toContain('sin éxito tras 4 intentos');
     expect(saved?.detail).toContain(REDACTED);
     expect(saved?.detail).not.toContain('sk-ant-api03');
-    expect(published.map((t) => t.state)).toEqual(['pending', 'ready', 'running', 'failed']);
+    // Ya aprobada (`ready` en la base): el `pending` con que entra a la cola no la devuelve a «sin aprobar».
+    expect(published.map((t) => t.state)).toEqual(['ready', 'ready', 'running', 'failed']);
     expect(published.at(-1)?.detail).toBe(saved?.detail);
 
     // Un cambio sin motivo lo borra (el motivo es el del último cambio) y un nuevo arranque suma un intento.
@@ -120,5 +121,46 @@ describe('FleetService.retry: errores', () => {
     expect(fleet.status('vieja')).toMatchObject({ taskId: 'vieja', state: 'failed', agentId: 'codex', detail: INTERRUPTED_DETAIL });
     store.putTask(task('nueva'), 'pending');
     expect(fleet.status('nueva')).toBeUndefined();
+  });
+});
+
+describe('FleetService: una tarea aprobada que espera a sus dependencias', () => {
+  it('sigue ready en la base con el motivo «esperando a …» y nunca se difunde como pending', () => {
+    const { store, fleet, published } = service();
+    store.putTask(task('ta'), 'ready');
+    store.putTask(task('tb', { dependsOn: ['ta'] }), 'ready');
+    fleet.queue.add(task('ta'));
+    fleet.queue.next();
+    fleet.queue.add(task('tb', { dependsOn: ['ta'] }));
+
+    expect(fleet.queue.state('tb')).toBe('pending');
+    expect(store.getTask('tb')).toMatchObject({ state: 'ready', detail: 'esperando a ta' });
+    const ofB = published.filter((t) => t.task.id === 'tb');
+    expect(ofB.length).toBeGreaterThan(0);
+    expect(ofB.some((t) => t.state === 'pending')).toBe(false);
+
+    // Al integrarse la dependencia, la cola la libera y la base pierde el motivo de la espera.
+    fleet.queue.transition('ta', 'review');
+    fleet.queue.transition('ta', 'integrated');
+    expect(fleet.queue.state('tb')).toBe('ready');
+    expect(store.getTask('tb')).toMatchObject({ state: 'ready', detail: null });
+    expect(fleet.queue.next()?.id).toBe('tb');
+    expect(store.getTask('tb')).toMatchObject({ state: 'running', attempts: 1 });
+  });
+
+  it('tras un reinicio, la que esperaba queda fallida y reintentable (no «sin aprobar»)', () => {
+    const { store, fleet } = service();
+    store.putTask(task('ta'), 'ready');
+    store.putTask(task('tb', { dependsOn: ['ta'] }), 'ready');
+    fleet.queue.add(task('ta'));
+    fleet.queue.add(task('tb', { dependsOn: ['ta'] }));
+
+    const restarted = service();
+    for (const id of ['ta', 'tb']) {
+      const saved = store.getTask(id);
+      if (saved) restarted.store.putTask(saved.task, saved.state);
+    }
+    expect(restarted.fleet.recoverOrphans().map((t) => t.task.id).sort()).toEqual(['ta', 'tb']);
+    expect(restarted.store.getTask('tb')).toMatchObject({ state: 'failed', detail: INTERRUPTED_DETAIL });
   });
 });

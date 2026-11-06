@@ -278,10 +278,10 @@ export function createApp(deps: AppDeps): CoreApp {
   };
   /** Aprueba las pendientes en orden de dependencias (la flota no acepta una tarea antes que sus dependencias). */
   const approveInOrder = async (tasks: readonly TaskRecord[]): Promise<void> => {
-    const byId = new Map(tasks.map((t) => [t.task.id, t]));
     const { order, blocked } = topologicalOrder(tasks.map((t) => t.task));
     for (const id of [...order, ...blocked]) {
-      const t = byId.get(id);
+      // Se relee: otra petición pudo aprobarla mientras se aprobaba la anterior.
+      const t = store.getTask(id);
       if (t?.state === 'pending') await approve(t);
     }
   };

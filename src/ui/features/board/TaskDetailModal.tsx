@@ -138,6 +138,15 @@ export function TaskDetailModal({ task, isOpen, onClose, agents, onTaskUpdated }
               </section>
             )}
 
+            {task.state === 'ready' && task.detail && (
+              <p
+                aria-label="Motivo del estado"
+                className="rounded-xl border border-foreground/[0.06] bg-foreground/[0.03] p-3 text-xs text-muted whitespace-pre-wrap break-words"
+              >
+                {task.detail}
+              </p>
+            )}
+
             {errorNotice && (
               <div
                 role="alert"

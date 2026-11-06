@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** media
 - **Archivos:** `src/core/app/fleet-service.ts:144-160`, `src/core/orchestrator/queue.ts:99-103`, `src/core/orchestrator/queue.ts:225-230`, `src/core/orchestrator/queue.ts:87`, `src/core/app/fleet-port.ts:116-127`, `src/core/app/fleet-service.ts:320-324`, `src/core/server/app.ts:245-252`, `src/core/server/app.ts:137-148`, `src/core/server/app.ts:490-494`, `src/core/chat/service.ts:902-927`, `src/core/app/fleet-service.ts:71`, `src/core/app/fleet-service.ts:238-242`, `src/shared/tasks.ts:22`, `src/ui/features/board/types.ts:10`, `src/ui/features/board/TaskDetailModal.tsx:38`, `src/ui/features/board/TaskDetailModal.tsx:285-296`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
