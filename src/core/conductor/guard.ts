@@ -20,8 +20,9 @@
  *   es la carpeta real del usuario, así que además git no fusiona, no mueve la rama ni descarta cambios (`userCopy`).
  *   Lo que la sesión baja de internet no lo ejecuta (`shell-downloads.ts`). Ver su riesgo residual: sin aislamiento
  *   del sistema operativo, un script del proyecto puede escribir fuera.
- * - Los subagentes no pueden pedir un modo de permisos más amplio ni ejecutarse en remoto (ni, con escritura, en un
- *   worktree propio).
+ * - Subagentes: con `subagentTypes`, solo esos tipos y con `subagent_type` explícito (el SDK suma sus integrados, como
+ *   `general-purpose`, que es el tipo por omisión). No pueden pedir un modo de permisos más amplio ni ejecutarse en
+ *   remoto (ni en un worktree propio).
  */
 import path from 'node:path';
 import type { CanUseTool, HookCallback } from '@anthropic-ai/claude-agent-sdk';
@@ -61,6 +62,11 @@ export interface ToolGuardOptions {
    * en disco con el módulo del sistema.
    */
   pathApi?: path.PlatformPath;
+  /**
+   * Tipos de subagente que se pueden lanzar (los de `Options.agents`). Con la lista, `Agent`/`Task` exige un
+   * `subagent_type` de ella: sin él, el SDK lanza su `general-purpose` con todas las herramientas de la sesión.
+   */
+  subagentTypes?: readonly string[];
 }
 
 export interface ToolGuard {
@@ -81,7 +87,7 @@ const SUBAGENT_TOOLS = new Set(['Agent', 'Task']);
 /** Herramientas de edición y la propiedad con la ruta que escriben. */
 const EDIT_TOOLS: Readonly<Record<string, string>> = { Edit: 'file_path', Write: 'file_path', NotebookEdit: 'notebook_path' };
 const SHELL_TOOLS: Readonly<Record<string, ShellKind>> = { Bash: 'bash', PowerShell: 'powershell' };
-/** Modos de permiso que un subagente puede pedir (ninguno amplía lo que ya tiene la sesión). */
+/** Modos de permiso que un subagente puede pedir (ninguno amplía lo que ya tiene la sesión). El SDK 0.3.302 ignora `mode`; se revisa por si vuelve a regir. */
 const SAFE_SUBAGENT_MODES = new Set(['default', 'dontAsk', 'plan']);
 const SENSITIVE_FILE = /^(?:\.env(?:\..*)?|\.npmrc|\.netrc|\.pypirc|\.git-credentials|\.?credentials(?:\.json)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|.*\.(?:pem|key|p12|pfx|kdbx))$/i;
 const GLOB_CHARS = /[*?[\]{}]/;
@@ -148,7 +154,7 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
   const listOf = (v: readonly string[] | (() => readonly string[]) | undefined) => (typeof v === 'function' ? v() : (v ?? []));
   const roots = (): string[] => [cwd, ...listOf(opts.readRoots).map((r) => p.resolve(cwd, r))];
   const writeRoots = (): string[] => listOf(opts.writeRoots).map((r) => path.resolve(opts.cwd, r));
-  const writes = opts.writeRoots !== undefined || opts.shellRoot !== undefined;
+  const subagentTypes = opts.subagentTypes ? new Set(opts.subagentTypes) : undefined;
   const shellRoot = opts.shellRoot === undefined ? undefined : path.resolve(opts.shellRoot);
   const denied = (opts.denyPaths ?? []).map((d) => p.resolve(cwd, d));
   const deniedOnDisk = (opts.denyPaths ?? []).map((d) => path.resolve(opts.cwd, d));
@@ -185,6 +191,20 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
     return checkPath(fixed, tool);
   };
 
+  /** Tipo de subagente permitido, sin modo más amplio, ni remoto ni en worktree propio. */
+  const checkSubagent = (args: Record<string, unknown>): GuardDecision => {
+    if (subagentTypes && !(typeof args.subagent_type === 'string' && subagentTypes.has(args.subagent_type))) {
+      return { allow: false, reason: `Solo puedes lanzar estos subagentes: ${[...subagentTypes].join(', ')}. Indica subagent_type.` };
+    }
+    if (args.mode !== undefined && !SAFE_SUBAGENT_MODES.has(String(args.mode))) {
+      return { allow: false, reason: `Un subagente no puede usar el modo ${String(args.mode)}.` };
+    }
+    if (args.isolation === 'remote') return { allow: false, reason: 'Los subagentes del orquestador corren en local.' };
+    // Un worktree propio escribe en .git y en el proyecto (y corre sus hooks de git) aunque la sesión no edite.
+    if (args.isolation === 'worktree') return { allow: false, reason: 'Los subagentes trabajan en la carpeta del proyecto, sin worktree propio.' };
+    return { allow: true };
+  };
+
   /** Parte síncrona común: herramienta permitida, bloqueo dinámico, lectura y subagentes. */
   const precheck = (toolName: string, input: unknown): GuardDecision => {
     if (!isAllowed(toolName)) return { allow: false, reason: `${toolName} no está permitido. ${DENY_DEFAULT}` };
@@ -198,15 +218,7 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
       if (toolName === 'Grep') return checkPattern(args.glob, toolName);
       return pathCheck;
     }
-    if (SUBAGENT_TOOLS.has(toolName)) {
-      if (args.mode !== undefined && !SAFE_SUBAGENT_MODES.has(String(args.mode))) {
-        return { allow: false, reason: `Un subagente no puede usar el modo ${String(args.mode)}.` };
-      }
-      if (args.isolation === 'remote') return { allow: false, reason: 'Los subagentes del orquestador corren en local.' };
-      if (writes && args.isolation === 'worktree') {
-        return { allow: false, reason: 'Los subagentes trabajan en la carpeta del proyecto, sin worktree propio.' };
-      }
-    }
+    if (SUBAGENT_TOOLS.has(toolName)) return checkSubagent(args);
     return { allow: true };
   };
 

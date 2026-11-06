@@ -182,6 +182,26 @@ describe('ConductorSession: opciones del SDK', () => {
     s.close();
   });
 
+  it('solo el investigador como subagente: sin los integrados del SDK y la guardia niega los demás tipos', async () => {
+    const { s, q } = session();
+    s.send('hola');
+    const o = optionsOf(q);
+    expect(o.env?.CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS).toBe('1');
+    expect(Object.keys(o.agents ?? {})).toEqual(['investigador']);
+    const hook = (o.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
+    if (!hook) throw new Error('falta la guardia');
+    const signal = new AbortController().signal;
+    const pre = async (tool_input: unknown, sub: { agent_id?: string; agent_type?: string } = {}) =>
+      JSON.stringify(await hook({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd: 'C:\\dev\\demo', ...sub }, 't', { signal }));
+    const task = { description: 'x', prompt: 'y' };
+    expect(await pre({ ...task, subagent_type: 'general-purpose' })).toMatch(/"permissionDecision":"deny".*investigador/);
+    expect(await pre({ ...task, subagent_type: 'general-purpose' }, { agent_id: 'a1', agent_type: 'investigador' })).toMatch(/"permissionDecision":"deny"/);
+    expect(await pre(task)).toMatch(/"permissionDecision":"deny".*subagent_type/);
+    expect(await pre({ ...task, subagent_type: 'investigador' })).toBe('{}');
+    expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/Indica siempre subagent_type: investigador/);
+    s.close();
+  });
+
   it('valida las opciones', () => {
     expect(() => session({ projectId: 'Con Espacios' })).toThrow();
     expect(() => session({ baseUrl: 'no es url' })).toThrow();
@@ -548,7 +568,7 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
       for (const t of BYPASS_TOOLS) expect(o.allowedTools, `${mode} ${t}`).not.toContain(t);
       expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' }), mode).toMatch(/"deny".*Write no está permitido/);
       expect(await pre('Bash', { command: 'git status' }), mode).toMatch(/"deny".*Bash no está permitido/);
-      expect(await pre('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' }), mode).toBe('{}');
+      expect(await pre('Agent', { description: 'x', prompt: 'y', subagent_type: 'investigador', isolation: 'worktree' }), mode).toMatch(/"deny".*sin worktree propio/);
       s.close();
     }
   });

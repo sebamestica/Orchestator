@@ -79,6 +79,12 @@ export function modeActs(mode: MindMode | undefined, standalone: boolean): boole
  */
 export const BYPASS_ENV: Readonly<Record<string, string>> = { ...CLAUDE_SUBPROCESS_SCRUB_ENV, CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1' };
 
+/**
+ * Sin los subagentes integrados del SDK (`general-purpose`, `claude`, `Explore`, `Plan`…): traen todas las herramientas
+ * y su propio prompt. Variable del CLI 2.1.302 sin documentar en `sdk.d.ts`; la barrera es `subagentTypes` de la guardia.
+ */
+export const NO_BUILTIN_AGENTS_ENV: Readonly<Record<string, string>> = { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: '1' };
+
 /** Subagente propio: investiga en paralelo con las mismas herramientas de lectura. */
 export const CONDUCTOR_SUBAGENTS: Readonly<Record<string, AgentDefinition>> = {
   investigador: {
@@ -290,6 +296,7 @@ export class ConductorSession {
       ...(o.apiKey ? { ANTHROPIC_API_KEY: o.apiKey } : {}),
       ...(o.baseUrl ? { ANTHROPIC_BASE_URL: o.baseUrl } : {}),
       ...(acts ? BYPASS_ENV : {}),
+      ...NO_BUILTIN_AGENTS_ENV,
     });
     this.#secrets = credentialsOf(env);
     this.#query = opts.query ?? sdkQuery;
@@ -332,9 +339,11 @@ export class ConductorSession {
     const actTools = new Set<string>(BYPASS_TOOLS);
     const pluginLive = opts.pluginLive;
     const pluginOf = (tool: string) => plugins.find(([name]) => tool.startsWith(`mcp__${name}__`))?.[0];
+    const agents = { ...CONDUCTOR_SUBAGENTS };
     const guard = createToolGuard({
       allowedTools,
       cwd: o.cwd,
+      subagentTypes: Object.keys(agents),
       readRoots,
       denyPaths: [...(opts.denyPaths ?? [])],
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
@@ -399,7 +408,7 @@ export class ConductorSession {
         // Lo que devuelven los plugins es de terceros: cada resultado lleva el aviso de que no son instrucciones.
         ...(plugins.length ? { PostToolUse: [{ hooks: [createExternalContentHook(plugins.map(([name]) => name))] }] } : {}),
       },
-      agents: { ...CONDUCTOR_SUBAGENTS },
+      agents,
       // Aislado de la sesión y los ajustes de usuario de Claude Code (permisos, hooks o MCP ajenos).
       settingSources: [...(opts.settingSources ?? [])],
       forwardSubagentText: true,

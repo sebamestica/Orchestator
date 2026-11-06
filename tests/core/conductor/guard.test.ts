@@ -45,6 +45,21 @@ describe('guardia de herramientas (rutas de Windows)', () => {
     expect(guard.check('Read', { file_path: 'docs\\environment.md' }).allow).toBe(true);
   });
 
+  it('solo deja lanzar los subagentes de Berland', () => {
+    const only = createToolGuard({ allowedTools: [...allowedTools, 'Task'], cwd: 'C:\\dev\\demo', pathApi: path.win32, subagentTypes: ['investigador'] });
+    expect(only.check('Agent', { description: 'x', prompt: 'y', subagent_type: 'investigador' })).toEqual({ allow: true });
+    for (const type of ['general-purpose', 'claude', 'Explore', 'Plan', 'statusline-setup', 'fork']) {
+      const decision = only.check('Agent', { description: 'x', prompt: 'y', subagent_type: type });
+      expect(decision.allow, type).toBe(false);
+      if (!decision.allow) expect(decision.reason, type).toMatch(/Solo puedes lanzar estos subagentes: investigador/);
+    }
+    const missing = only.check('Agent', { description: 'x', prompt: 'y' });
+    expect(missing.allow).toBe(false);
+    if (!missing.allow) expect(missing.reason).toMatch(/subagent_type/);
+    expect(only.check('Task', { description: 'x', prompt: 'y', subagent_type: 'general-purpose' }).allow).toBe(false);
+    expect(only.check('Agent', { description: 'x', prompt: 'y', subagent_type: 42 }).allow).toBe(false);
+  });
+
   it('los subagentes no amplían permisos ni corren en remoto', () => {
     expect(guard.check('Agent', { prompt: 'x', mode: 'bypassPermissions' }).allow).toBe(false);
     expect(guard.check('Agent', { prompt: 'x', mode: 'acceptEdits' }).allow).toBe(false);
@@ -336,11 +351,11 @@ describe('guardia de bypass: escritura y shell (disco real)', () => {
     expect(await guard.canUseTool('Bash', { command: 'git status' }, { signal, toolUseID: 'b', requestId: 'r' })).toEqual({ behavior: 'allow', updatedInput: { command: 'git status' } });
   });
 
-  it('con escritura, los subagentes no se van a un worktree propio; sin escritura no cambia nada', async () => {
+  it('los subagentes nunca se van a un worktree propio, con escritura o sin ella', async () => {
     expect(await reason('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' })).toMatch(/sin worktree propio/);
     expect(await allowed('Agent', { description: 'x', prompt: 'y' })).toBe(true);
     const readOnly = createToolGuard({ allowedTools: ['Read', 'Agent'], cwd: root });
-    expect(readOnly.check('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' }).allow).toBe(true);
+    expect(readOnly.check('Agent', { description: 'x', prompt: 'y', isolation: 'worktree' }).allow).toBe(false);
   });
 
   it('sin writeRoots ni shellRoot, Edit y Bash se niegan aunque estén permitidos', async () => {
