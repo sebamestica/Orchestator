@@ -29,6 +29,8 @@ export const TASK_PLAN_FILE = join(...PLAN_FILES.taskPlan.split('/'));
 export const DEFAULT_MEMORY_BUDGET_CHARS = 4_000;
 /** Rondas autor → revisión → integración por tarea. */
 export const DEFAULT_MAX_ROUNDS = 3;
+/** Motivo de una tarea en curso al detener la flota (p. ej. Ctrl+C en `iniciar`): queda `failed` y reintentable. */
+export const FLEET_STOPPED_DETAIL = 'interrumpida al detener el núcleo';
 /** Revisores que se prueban si uno no entrega un veredicto válido. */
 const REVIEW_TRIES = 2;
 const REVIEW_MAX_ATTEMPTS = 2;
@@ -162,6 +164,8 @@ interface TaskRun {
   planChecks: Map<number, TaskPlanStatus>;
   /** USD gastados por la tarea en este ciclo (autores y revisores), para su tope. */
   spentUsd: number;
+  /** Señal de `run`: abortada, la flota se está deteniendo (nadie pidió cancelar la tarea). */
+  stop: AbortSignal | undefined;
 }
 
 /** Lo que devuelve la etapa de revisión (gate previo + revisor). */
@@ -210,6 +214,8 @@ export class Fleet {
   readonly #committing = new Set<string>();
   /** Cancelaciones pedidas durante la integración: se aplican solo si la integración falla. */
   readonly #cancelAfterCommit = new Map<string, string>();
+  /** Tareas en curso que canceló el usuario (`cancel`): al detener la flota siguen terminando `cancelled`. */
+  readonly #userCancelled = new Set<string>();
   /** Tareas cuyo ciclo aún no terminó (también mientras se guardan sesiones y se limpia el worktree). */
   readonly #inFlight = new Set<string>();
 
@@ -272,7 +278,7 @@ export class Fleet {
             const id = task.id;
             const key = this.#keyOf(task);
             if (key !== undefined) this.#exclusive.set(id, key);
-            const job = this.#runTask(task)
+            const job = this.#runTask(task, opts.signal)
               .then((r) => { reports.push(r); })
               .catch((err: unknown) => { this.#warn(`${id}: ${err instanceof Error ? err.message : String(err)}`); })
               .finally(() => {
@@ -307,6 +313,7 @@ export class Fleet {
    * la tarea queda `integrated`; si falla, entonces se cancela.
    */
   cancel(taskId: string, detail = 'cancelada por el usuario'): boolean {
+    if (this.#inFlight.has(taskId)) this.#userCancelled.add(taskId);
     if (this.#committing.has(taskId)) {
       this.#cancelAfterCommit.set(taskId, detail);
       this.#warn(`${taskId}: se está integrando; la cancelación se ignora salvo que la integración falle.`);
@@ -331,7 +338,7 @@ export class Fleet {
     }
   }
 
-  async #runTask(task: TaskBrief): Promise<TaskReport> {
+  async #runTask(task: TaskBrief, stop: AbortSignal | undefined): Promise<TaskReport> {
     this.#inFlight.add(task.id);
     try {
       const controller = new AbortController();
@@ -341,6 +348,7 @@ export class Fleet {
         attempts: [],
         planChecks: new Map(),
         spentUsd: 0,
+        stop,
         report: { taskId: task.id, state: 'running', authors: [], reviewers: [], handoffs: [], rounds: 0, warnings: [], spentUsd: 0 },
       };
       let finalOutcome: 'ok' | 'failed' = 'failed';
@@ -359,6 +367,7 @@ export class Fleet {
       return run.report;
     } finally {
       this.#inFlight.delete(task.id);
+      this.#userCancelled.delete(task.id);
     }
   }
 
@@ -769,8 +778,12 @@ export class Fleet {
   }
 
   #cancelled(run: TaskRun, detail = 'cancelada'): 'failed' {
+    const id = run.task.id;
+    const pending = this.#queue.state(id) !== 'cancelled';
+    // Al detener la flota nadie pidió cancelarla: queda fallida y reintentable, sin cancelar a sus dependientes.
+    if (pending && run.stop?.aborted && !this.#userCancelled.has(id)) return this.#fail(run, FLEET_STOPPED_DETAIL);
     run.report.detail = detail;
-    if (this.#queue.state(run.task.id) !== 'cancelled') this.#queue.cancel(run.task.id, detail);
+    if (pending) this.#queue.cancel(id, detail);
     return 'failed';
   }
 

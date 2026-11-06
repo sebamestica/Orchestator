@@ -182,7 +182,10 @@ export class FleetRuntime implements FleetPort {
     return this.queue.list().map(toStatus);
   }
 
-  /** Cancela las tareas en curso y espera a que la flota termine. */
+  /**
+   * Detiene la flota y espera a que termine. Las tareas en curso quedan `failed` («interrumpida al detener el núcleo»,
+   * reintentables) y sus dependientes, `pending`; las que canceló el usuario siguen `cancelled`.
+   */
   async stop(): Promise<void> {
     this.#abort.abort();
     await this.#running;

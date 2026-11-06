@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** baja
 - **Archivos:** `src/core/orchestrator/fleet.ts:248`, `src/core/orchestrator/fleet.ts:406`, `src/core/orchestrator/fleet.ts:418`, `src/core/orchestrator/fleet.ts:768`, `src/core/orchestrator/queue.ts:160`, `src/core/orchestrator/queue.ts:236`, `src/core/app/fleet-port.ts:186`, `src/core/app/fleet-service.ts:71`, `src/core/app/fleet-service.ts:242`, `src/core/app/fleet-port.ts:143`, `src/core/app/compose.ts:234`, `src/core/app/cli.ts:51`, `src/core/app/cli-commands.ts:130`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

@@ -42,6 +42,19 @@ async function until(queue: TaskQueue, id: string, states: readonly TaskState[])
 
 const brief = (id: string, extra: Partial<TaskBrief> = {}) => task(id, { suggestedAgent: 'claude-1', ...extra });
 
+describe('FleetRuntime.stop: detener el núcleo', () => {
+  it('la tarea en curso queda fallida y reintentable; su dependiente sigue pendiente', async () => {
+    const s = await setup({ author: [[{ untilAbort: true }, { error: 'cancelled' }, { done: false }]] });
+    await s.runtime.delegate(brief('ta'));
+    await s.runtime.delegate(brief('tb', { dependsOn: ['ta'] }));
+    expect(await until(s.queue, 'ta', ['running'])).toBe('running');
+    await s.runtime.stop();
+    expect(s.queue.get('ta')?.state).toBe('failed');
+    expect(s.runtime.status('ta')?.detail).toMatch(/interrumpida al detener el núcleo/);
+    expect(s.queue.get('tb')?.state).toBe('pending');
+  });
+});
+
 describe('FleetRuntime.retry: tarea fallida en la cola', () => {
   it('vuelve a ready, corre en el mismo worktree con la sección «Continuación» y se integra', async () => {
     const s = await setup({ author: [failScript, okScript('listo al segundo intento')] });

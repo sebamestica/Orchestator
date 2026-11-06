@@ -428,6 +428,53 @@ describe('Fleet: concurrencia y dependencias', () => {
     expect(s.workspaces.integrated).toEqual([]);
     s.expectNoLeases();
   });
+
+  it('detener la flota deja la tarea en curso fallida (reintentable) y su dependiente pendiente', async () => {
+    const stop = new AbortController();
+    const s = await setup({
+      agents: [agents.claude1, agents.codex],
+      quotas: [new FakeQuota('codex', 0.9)],
+      scripts: { codex: [{ effect: () => { setTimeout(() => stop.abort(), 30); } }, { untilAbort: true }, { error: 'cancelled' }, { done: false }] },
+    });
+    s.queue.addAll([task('larga'), task('despues', { dependsOn: ['larga'] })]);
+    const report = await s.fleet.run({ signal: stop.signal });
+    expect(report.states).toEqual({ larga: 'failed', despues: 'pending' });
+    expect(report.tasks.find((t) => t.taskId === 'larga')?.detail).toMatch(/interrumpida al detener el núcleo/);
+    s.expectNoLeases();
+  });
+
+  it('la cancelación del usuario sigue cancelando aunque después se detenga la flota', async () => {
+    const stop = new AbortController();
+    const s = await setup({
+      agents: [agents.claude1, agents.codex],
+      quotas: [new FakeQuota('codex', 0.9)],
+      scripts: {
+        codex: [{ effect: () => { setTimeout(() => { s.fleet.cancel('larga'); stop.abort(); }, 30); } }, { untilAbort: true }, { error: 'cancelled' }, { done: false }],
+      },
+    });
+    s.queue.addAll([task('larga'), task('despues', { dependsOn: ['larga'] })]);
+    const report = await s.fleet.run({ signal: stop.signal });
+    expect(report.states).toEqual({ larga: 'cancelled', despues: 'cancelled' });
+    s.expectNoLeases();
+  });
+
+  it('cancelar durante una integración que falla cancela aunque la flota se detenga a la vez', async () => {
+    const stop = new AbortController();
+    const s = await setup({
+      agents: [agents.claude1, agents.codex],
+      quotas: [new FakeQuota('codex', 0.9)],
+      scripts: { codex: okScript('hecho'), 'claude-1': verdictScript('aprobado') },
+    });
+    s.workspaces.integrationScript.set('base', [{ ok: false, conflicts: ['src/a.ts'], gateSummary: '' }]);
+    s.workspaces.duringIntegrate = () => {
+      s.fleet.cancel('base');
+      stop.abort();
+    };
+    s.queue.add(task('base'));
+    const report = await s.fleet.run({ signal: stop.signal });
+    expect(report.states).toEqual({ base: 'cancelled' });
+    s.expectNoLeases();
+  });
 });
 
 describe('revisión: encargo y veredicto', () => {
