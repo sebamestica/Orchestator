@@ -177,7 +177,7 @@ describe('traducción a Codex CLI', () => {
     const opts = run.mock.calls[0]?.[0];
     const plugins = codexPluginArgs(servers);
     // Primero el esfuerzo de razonamiento (issue 6), después el navegador apagado y los servidores MCP.
-    expect(opts?.args.slice(0, 5 + plugins.args.length)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...plugins.args]);
+    expect(opts?.args.slice(0, 6 + plugins.args.length)).toEqual(['codex.js', 'exec', '--json', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', ...plugins.args]);
     expect(opts?.args).toContain('plugins.chrome@openai-bundled.enabled=false');
     expect(opts?.args).toContain('mcp_servers.node_repl.enabled=false');
     // El chrome-personal que entrega Berland (la puerta) no se apaga: se enciende y se aprueba.
@@ -202,7 +202,7 @@ describe('traducción a Codex CLI', () => {
     const ctx: RunContext = { worktreePath: await worktree(), env: {}, signal: new AbortController().signal, timeoutMs: 1000 };
     await collect(new CodexCliAdapter(config, { runner: run, executable: { command: 'node', args: ['codex.js'] } }).run(task, ctx));
     const off = codexBrowserOffArgs();
-    expect(run.mock.calls[0]?.[0].args.slice(0, 7 + off.length)).toEqual(['codex.js', 'exec', '--json', '-c', 'model_reasoning_effort="low"', ...off, '-s', 'workspace-write']);
+    expect(run.mock.calls[0]?.[0].args.slice(0, 8 + off.length)).toEqual(['codex.js', 'exec', '--json', '--skip-git-repo-check', '-c', 'model_reasoning_effort="low"', ...off, '-s', 'workspace-write']);
     expect(off).toContain('mcp_servers.chrome-personal.enabled=false');
   });
 
