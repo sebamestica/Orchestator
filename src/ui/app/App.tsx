@@ -9,10 +9,11 @@ import { HomeView } from '../features/home/HomeView.tsx';
 import { useApp } from '../store/app.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { TitleBar } from './TitleBar.tsx';
-import type { Route } from './routes.ts';
+import { routeHash, type Route } from './routes.ts';
 import { useAgentsPanel } from './use-agents-panel.ts';
 import { useAppearance } from './use-appearance.ts';
 import { useRoute } from './use-route.ts';
+import { ViewBoundary } from './ViewBoundary.tsx';
 import { BootScreen } from '../components/BootScreen.tsx';
 
 // Vistas pesadas por demanda: la portada carga sola y rápido.
@@ -102,9 +103,11 @@ export function App() {
         <div className="chrome-frame relative flex min-w-0 flex-1 gap-2">
           <main className="chrome-surface relative flex min-w-0 flex-1 flex-col overflow-hidden">
             {core === 'ready' ? (
-              <Suspense fallback={null}>
-                <View route={route} />
-              </Suspense>
+              <ViewBoundary resetKey={routeHash(route)}>
+                <Suspense fallback={null}>
+                  <View route={route} />
+                </Suspense>
+              </ViewBoundary>
             ) : core === 'starting' ? (
               <BootScreen label="Conectando con el núcleo…" />
             ) : (
@@ -121,7 +124,13 @@ export function App() {
               </div>
             )}
           </main>
-          {panel.shown ? <AgentsPanel overlay={!panel.inline} onClose={() => panel.toggle(false)} /> : null}
+          {panel.shown ? (
+            <ViewBoundary
+              className={`chrome-surface ${panel.inline ? 'flex shrink-0' : 'absolute top-0 right-2 bottom-2 z-30 flex shadow-xl'} w-[var(--panel-width)] flex-col items-center justify-center`}
+            >
+              <AgentsPanel overlay={!panel.inline} onClose={() => panel.toggle(false)} />
+            </ViewBoundary>
+          ) : null}
         </div>
       </div>
     </div>

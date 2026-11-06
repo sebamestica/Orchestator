@@ -3,7 +3,7 @@
 - **Área:** Interfaz: tablero, panel, ajustes
 - **Severidad:** media
 - **Archivos:** `src/ui/app/App.tsx:16`, `src/ui/app/App.tsx:115`, `src/ui/main.tsx:8`, `src/ui/vite.config.ts:17`, `package.json:15`, `src/core/server/static.ts:95`, `src/core/server/static.ts:119`, `src/core/app/f5-servidor.ts:43`, `apps/desktop/src/main.ts:76`, `apps/desktop/src/main.ts:130`, `apps/desktop/src/main.ts:212`, `src/ui/app/TitleBar.tsx:27`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 
