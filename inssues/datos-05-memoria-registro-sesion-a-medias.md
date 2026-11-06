@@ -3,7 +3,7 @@
 - **Área:** Datos y almacenamiento
 - **Severidad:** baja
 - **Archivos:** `src/core/memory/obsidian-memory.ts:262`, `src/core/memory/obsidian-memory.ts:308-321`, `src/core/memory/obsidian-memory.ts:325-334`, `src/core/memory/safe-fs.ts:81-111`, `src/core/orchestrator/fleet.ts:353`, `src/core/orchestrator/fleet.ts:745-749`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

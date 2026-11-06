@@ -34,6 +34,8 @@ export function isBudgetStop(detail: string | null | undefined): boolean {
   return detail?.startsWith(BUDGET_STOP_DETAIL) ?? false;
 }
 export const DEFAULT_MEMORY_BUDGET_CHARS = 4_000;
+/** Esperas entre reintentos al guardar una sesión en la memoria (un archivo retenido por OneDrive o el antivirus). */
+export const DEFAULT_MEMORY_RETRY_MS: readonly number[] = [1_000, 3_000];
 /** Rondas autor → revisión → integración por tarea. */
 export const DEFAULT_MAX_ROUNDS = 3;
 /** Motivo de una tarea en curso al detener la flota (p. ej. Ctrl+C en `iniciar`): queda `failed` y reintentable. */
@@ -96,6 +98,8 @@ export interface FleetOptions {
   /** Variables para los agentes de una tarea local (el bloqueo de push por entorno de `LocalWorkspaces`). */
   agentEnv?: (workspace: Workspace) => Readonly<Record<string, string>> | undefined;
   memoryBudgetChars?: number;
+  /** Esperas entre reintentos de `recordSession` (por defecto `DEFAULT_MEMORY_RETRY_MS`). */
+  memoryRetryMs?: readonly number[];
   maxRounds?: number;
   rulesFiles?: readonly string[];
   timeoutMs?: number;
@@ -211,6 +215,7 @@ export class Fleet {
   /** Claves de exclusión de las tareas con su ciclo en curso. */
   readonly #exclusive = new Map<string, string>();
   readonly #memoryBudget: number;
+  readonly #memoryRetryMs: readonly number[];
   readonly #maxRounds: number;
   readonly #rulesFiles: readonly string[] | undefined;
   readonly #timeoutMs: number | undefined;
@@ -244,6 +249,7 @@ export class Fleet {
     this.#isLocal = opts.isLocal ?? (() => false);
     this.#agentEnv = opts.agentEnv ?? (() => undefined);
     this.#memoryBudget = opts.memoryBudgetChars ?? DEFAULT_MEMORY_BUDGET_CHARS;
+    this.#memoryRetryMs = opts.memoryRetryMs ?? DEFAULT_MEMORY_RETRY_MS;
     this.#maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
     this.#rulesFiles = opts.rulesFiles;
     this.#timeoutMs = opts.timeoutMs;
@@ -776,10 +782,23 @@ export class Fleet {
         ...(check ? { exists: check.exists, done: check.done, pending: check.pending } : {}),
       };
       if (Object.keys(plan).length) session.plan = plan;
+      await this.#recordSession(run.task.id, session);
+    }
+  }
+
+  /** Guarda la sesión con reintentos: `recordSession` completa lo que un intento anterior dejó a medias, sin duplicar. */
+  async #recordSession(taskId: string, session: SessionSummary): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
       try {
         await this.#memory.recordSession(session);
+        return;
       } catch (err) {
-        this.#warn(`${run.task.id}: no se pudo guardar la sesión de ${first.agentId} (${err instanceof Error ? err.message : String(err)}).`);
+        const wait = this.#memoryRetryMs[attempt];
+        if (wait === undefined) {
+          this.#warn(`${taskId}: no se pudo guardar la sesión de ${session.agentId} (${err instanceof Error ? err.message : String(err)}).`);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, wait));
       }
     }
   }

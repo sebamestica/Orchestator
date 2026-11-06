@@ -149,6 +149,18 @@ function sessionPlanData(plan: SessionPlan | undefined): Frontmatter {
   };
 }
 
+/** La sección de la nota ya tiene un enlace `[[nota|…]]` o `[[nota]]` (bitácora o historial de una sesión registrada). */
+function linksTo(text: string, heading: string, note: string): boolean {
+  let body = text;
+  try {
+    body = parseNote(text, { lenient: true, skipBadLines: true }).body;
+  } catch {
+    // `---` sin cierre: se busca en el texto entero.
+  }
+  const section = sectionText(body, heading);
+  return section.includes(`[[${note}|`) || section.includes(`[[${note}]]`);
+}
+
 function slugify(text: string): string {
   const slug = text
     .normalize('NFD')
@@ -263,7 +275,8 @@ export class ObsidianMemory implements MemoryStore {
 
   /**
    * Nota de sesión + línea en la bitácora del proyecto + totales del agente, todo bajo el candado de la
-   * bóveda. Idempotente para la misma sesión (tarea, agente y hora).
+   * bóveda. Idempotente para la misma sesión (tarea, agente y hora): cada nota se escribe solo si no tiene ya el
+   * enlace a la sesión, así que repetir el registro tras un fallo a medias completa lo que faltó sin duplicar.
    */
   async recordSession(input: SessionNoteInput): Promise<void> {
     const s = sessionSummarySchema.parse(input);
@@ -310,30 +323,30 @@ export class ObsidianMemory implements MemoryStore {
       ].join('\n');
 
       for (let attempt = 0; attempt < 20; attempt++) {
-        const note = await this.freeSessionNote(date, s);
-        if (note === null) return; // ya registrada
+        const { note, existing } = await this.freeSessionNote(date, s);
         const sessionLink = this.link(note, note.slice(note.lastIndexOf('/') + 1));
-        // Se preparan las tres notas antes de escribir: si algo falla, no queda la sesión a medias.
-        const projectText = await this.projectWithLog(s.projectId, date, `- ${date} · ${sessionLink} · ${agentLink} · ${s.outcome} · ${title}`);
-        const agentText = await this.agentWithTotals(s, date, `- ${date} · ${sessionLink} · ${projectLink} · ${s.outcome} · ${totalTokens} tokens`);
+        // Se preparan los textos antes de escribir (un fallo de lectura no deja nada escrito). Un fallo de escritura sí
+        // puede dejar la sesión a medias: el próximo registro de la misma sesión completa solo la nota que no la enlaza.
+        const projectText = await this.projectWithLog(s.projectId, date, note, `- ${date} · ${sessionLink} · ${agentLink} · ${s.outcome} · ${title}`);
+        const agentText = await this.agentWithTotals(s, date, note, `- ${date} · ${sessionLink} · ${projectLink} · ${s.outcome} · ${totalTokens} tokens`);
         // Nota nueva creada en exclusiva (`wx`): si otro escritor tomó el nombre primero, se prueba el siguiente sufijo.
-        if (!(await createFileExclusive(this.vaultPath, this.abs(note), stringifyNote(data, body)))) continue;
-        await this.writeNote(this.projectNote(s.projectId), projectText);
-        await this.writeNote(this.agentNote(s.agentId), agentText);
+        if (!existing && !(await createFileExclusive(this.vaultPath, this.abs(note), stringifyNote(data, body)))) continue;
+        if (projectText !== null) await this.writeNote(this.projectNote(s.projectId), projectText);
+        if (agentText !== null) await this.writeNote(this.agentNote(s.agentId), agentText);
         return;
       }
       throw new Error(`no se pudo reservar un nombre para la sesión de ${s.taskId} el ${date}`);
     });
   }
 
-  /** Nombre libre `<fecha>-<tarea>[-n]`; null si la misma sesión (tarea, agente y hora) ya estaba registrada. */
-  private async freeSessionNote(date: string, s: z.infer<typeof sessionSummarySchema>): Promise<string | null> {
+  /** Nombre libre `<fecha>-<tarea>[-n]`, o la nota de la misma sesión (tarea, agente y hora) si ya existe. */
+  private async freeSessionNote(date: string, s: z.infer<typeof sessionSummarySchema>): Promise<{ note: string; existing: boolean }> {
     for (let n = 1; n < 1000; n++) {
       const note = `${this.sessionsDir()}/${date}-${s.taskId}${n === 1 ? '' : `-${n}`}`;
-      const existing = await this.readNote(note);
-      if (existing === null) return note;
-      const data = forgivingData(existing);
-      if (data.tarea === s.taskId && data.agente === s.agentId && data.at === s.at) return null;
+      const text = await this.readNote(note);
+      if (text === null) return { note, existing: false };
+      const data = forgivingData(text);
+      if (data.tarea === s.taskId && data.agente === s.agentId && data.at === s.at) return { note, existing: true };
     }
     throw new Error(`demasiadas sesiones de ${s.taskId} el ${date}`);
   }
@@ -351,18 +364,20 @@ export class ObsidianMemory implements MemoryStore {
   }
 
   /**
-   * Texto nuevo de `Contexto.md` con la línea agregada a la bitácora. Se lee en modo tolerante y solo se
-   * reescriben `actualizado` y `sesiones`: las demás líneas del frontmatter (del usuario) quedan tal cual.
+   * Texto nuevo de `Contexto.md` con la línea agregada a la bitácora, o null si ya enlaza la sesión. Se lee en modo
+   * tolerante y solo se reescriben `actualizado` y `sesiones`: las demás líneas del frontmatter (del usuario) quedan tal cual.
    */
-  private async projectWithLog(projectId: string, date: string, line: string): Promise<string> {
+  private async projectWithLog(projectId: string, date: string, sessionNote: string, line: string): Promise<string | null> {
     const text = (await this.readNote(this.projectNote(projectId))) ?? this.newProjectNote(projectId, date);
+    if (linksTo(text, LOG_HEADING, sessionNote)) return null;
     const data = forgivingData(text);
     return updateNote(text, { actualizado: latestDate(data, date), sesiones: numberField(data, 'sesiones') + 1 }, (body) => appendToSection(body, LOG_HEADING, line));
   }
 
-  /** Texto nuevo de la nota del agente con los totales sumados; conserva las líneas del usuario. */
-  private async agentWithTotals(s: z.infer<typeof sessionSummarySchema>, date: string, line: string): Promise<string> {
+  /** Texto nuevo de la nota del agente con los totales sumados, o null si ya enlaza la sesión; conserva las líneas del usuario. */
+  private async agentWithTotals(s: z.infer<typeof sessionSummarySchema>, date: string, sessionNote: string, line: string): Promise<string | null> {
     const text = (await this.readNote(this.agentNote(s.agentId))) ?? stringifyNote({ tipo: 'agente', agente: s.agentId }, [`# ${s.agentId}`, '', SESSIONS_HEADING].join('\n'));
+    if (linksTo(text, SESSIONS_HEADING, sessionNote)) return null;
     const prev = forgivingData(text);
     const tokensIn = numberField(prev, 'tokens_entrada') + s.inputTokens;
     const tokensOut = numberField(prev, 'tokens_salida') + s.outputTokens;
