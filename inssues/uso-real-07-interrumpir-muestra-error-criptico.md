@@ -3,7 +3,7 @@
 - **Área:** Evidencia de uso real (chat con la mente)
 - **Severidad:** baja
 - **Archivos:** `src/core/adapters/claude-sdk/translate.ts:577`, `src/core/adapters/claude-sdk/translate.ts:589`, `src/core/adapters/claude-sdk/translate.ts:590`, `src/core/chat/service.ts:499`, `src/core/chat/service.ts:795`, `src/core/chat/service.ts:799`, `src/core/chat/service.ts:860`, `src/core/store/store.ts:553`, `src/ui/features/chat/timeline.ts:106`, `src/ui/features/chat/components/LiveReply.tsx:114`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

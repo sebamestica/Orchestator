@@ -67,6 +67,7 @@ import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
 import { ChatProposals, toProposal } from './proposals.ts';
 import { conversationDir } from './conversations.ts';
 import { chainCapNotice, dayCapMessage, dayLeftUsd, exhausted, freshSpend, MIND_MAX_TURNS, sessionCapUsd, turnCapNotice, type MindSpend } from './limits.ts';
+import { asInterrupted } from './interrupted.ts';
 import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
 import { TurnChanges, turnSession } from './turn-memory.ts';
 
@@ -978,9 +979,12 @@ export class ChatService {
         const current = live.session === session;
         // El `result` trae el costo que se guarda: lo estimado hasta aquí deja de estar «en curso».
         if (current && update.message.type === 'result') live.spend = { ...live.spend, mark: session.streamCostUsd, shownCents: 0 };
-        for (const event of update.events) this.#emit(chatId, live, event);
+        // El `result` de un turno interrumpido no es un error para el usuario: sin sus errores y con estado cancelado.
+        const closesTurn = update.message.type === 'result' && live.turn?.session === session;
+        const events = closesTurn && live.turn?.interrupted ? asInterrupted(update.events) : update.events;
+        for (const event of events) this.#emit(chatId, live, event);
         if (current && live.session === session && update.message.type === 'assistant') this.#watchSpend(chatId, live, session);
-        if (update.message.type === 'result' && live.turn?.session === session) this.#finishTurn(chatId, live, live.turn, update.message);
+        if (closesTurn && live.turn) this.#finishTurn(chatId, live, live.turn, update.message);
         const spent = session.spentUsd ?? 0;
         if (update.message.type === 'result') settled = spent;
         spend?.set(spent - settled);

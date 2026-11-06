@@ -161,6 +161,41 @@ describe('ChatService: mensajes, eventos y costo', () => {
     expect(b.q.interrupted).toBe(1);
   });
 
+  describe('el result de un turno detenido', () => {
+    const DIAG = '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null';
+    const cut: SDKMessage = { ...sdkResult(undefined, 'sdk-1', 0.001, 'error_during_execution'), errors: [DIAG] } as unknown as SDKMessage;
+
+    it('no deja error ni done fallido: la sesión queda cancelada y el chat ocioso', async () => {
+      const slow: TurnFn = async (_m, ctx) => {
+        await ctx.stopped;
+        return [sdkInit('sdk-1'), sdkText('a medias', 'sdk-1'), cut];
+      };
+      const b = await bench({ turn: slow });
+      const chat = b.service.create({ projectId: 'demo' });
+      await b.service.send(chat.id, { text: 'largo' });
+      await b.service.interrupt(chat.id);
+      await b.settle(chat.id);
+      const events = b.events(chat.sessionId);
+      expect(events.filter((e) => e.type === 'error')).toEqual([]);
+      expect(events.filter((e) => e.type === 'done' && !e.payload.ok)).toEqual([]);
+      expect(events.some((e) => e.type === 'usage')).toBe(true);
+      expect(events.at(-1)).toMatchObject({ type: 'status', payload: { state: 'cancelled' } });
+      expect(b.store.getSession(chat.sessionId)?.state).toBe('cancelled');
+      expect(b.service.get(chat.id).state).toBe('idle');
+      expect(b.service.messages(chat.id).map((m) => m.text)).toEqual(['largo', 'a medias']);
+    });
+
+    it('sin «Detener», el mismo result sigue siendo un fallo', async () => {
+      const b = await bench({ turn: () => [sdkInit('sdk-1'), cut] });
+      const chat = b.service.create({ projectId: 'demo' });
+      await turn(b, chat.id, 'hola');
+      const events = b.events(chat.sessionId);
+      expect(events.some((e) => e.type === 'error' && e.payload.message.includes('ede_diagnostic'))).toBe(true);
+      expect(b.store.getSession(chat.sessionId)?.state).toBe('failed');
+      expect(b.service.get(chat.id).state).toBe('error');
+    });
+  });
+
   it('dos envíos a la vez: el segundo recibe 409 aunque el primero aún cargue la clave', async () => {
     const b = await bench();
     const chat = b.service.create({ projectId: 'demo' });
