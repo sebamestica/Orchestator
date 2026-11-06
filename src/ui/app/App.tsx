@@ -32,7 +32,7 @@ function View({ route }: { route: Route }) {
     case 'standalone':
       return <ChatView key="suelto" projectId={null} {...(route.chatId ? { chatId: route.chatId } : {})} />;
     case 'board':
-      return <BoardView {...(route.projectId ? { projectId: route.projectId } : {})} />;
+      return <BoardView {...(route.projectId ? { projectId: route.projectId } : {})} openManual={route.nueva === true} />;
     case 'settings':
       return <SettingsView section={route.section} />;
     case 'plugins':

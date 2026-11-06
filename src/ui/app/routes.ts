@@ -8,8 +8,8 @@ export type Route =
   | { name: 'home' }
   /** Chat con la mente sobre un proyecto (sin `chatId`: el último o uno nuevo). */
   | { name: 'project'; projectId: string; chatId?: string }
-  /** Tablero de tareas (de un proyecto o de todos). */
-  | { name: 'board'; projectId?: string }
+  /** Tablero de tareas (de un proyecto o de todos); `nueva` (`?nueva`) abre el diálogo de tarea a mano. */
+  | { name: 'board'; projectId?: string; nueva?: true }
   /** Conversaciones: chats sin proyecto (antes «agente suelto»). */
   | { name: 'standalone'; chatId?: string }
   | { name: 'settings'; section: SettingsSection }
@@ -23,7 +23,8 @@ export function panelRoute(route: Route): boolean {
 const seg = (s: string | undefined) => (s ? decodeURIComponent(s) : undefined);
 
 export function parseRoute(hash: string): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  const [path = '', query = ''] = hash.replace(/^#\/?/, '').split('?');
+  const parts = path.split('/').filter(Boolean);
   const [a, b, c, d] = parts;
   switch (a) {
     case 'p': {
@@ -34,7 +35,8 @@ export function parseRoute(hash: string): Route {
     }
     case 'tablero': {
       const projectId = seg(b);
-      return projectId ? { name: 'board', projectId } : { name: 'board' };
+      const nueva = query.split('&').includes('nueva');
+      return { name: 'board', ...(projectId ? { projectId } : {}), ...(nueva ? { nueva: true as const } : {}) };
     }
     case 'conversaciones':
     case 'suelto': { // `#/suelto`: enlaces de antes del cambio de nombre
@@ -63,7 +65,7 @@ export function routeHash(route: Route): string {
     case 'project':
       return route.chatId ? `#/p/${enc(route.projectId)}/c/${enc(route.chatId)}` : `#/p/${enc(route.projectId)}`;
     case 'board':
-      return route.projectId ? `#/tablero/${enc(route.projectId)}` : '#/tablero';
+      return `${route.projectId ? `#/tablero/${enc(route.projectId)}` : '#/tablero'}${route.nueva ? '?nueva' : ''}`;
     case 'standalone':
       return route.chatId ? `#/conversaciones/${enc(route.chatId)}` : '#/conversaciones';
     case 'settings':

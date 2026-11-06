@@ -13,6 +13,8 @@ describe('rutas de la interfaz', () => {
     { name: 'project', projectId: 'vetworld', chatId: 'chat_abc123' },
     { name: 'board' },
     { name: 'board', projectId: 'orquestador' },
+    { name: 'board', nueva: true },
+    { name: 'board', projectId: 'orquestador', nueva: true },
     { name: 'standalone' },
     { name: 'standalone', chatId: 'chat_x1y2z3' },
     { name: 'settings', section: 'mente' },
@@ -26,6 +28,12 @@ describe('rutas de la interfaz', () => {
     expect(routeHash({ name: 'standalone', chatId: 'chat_x1y2z3' })).toBe('#/conversaciones/chat_x1y2z3');
     expect(parseRoute('#/suelto')).toEqual({ name: 'standalone' });
     expect(parseRoute('#/suelto/chat_x1y2z3')).toEqual({ name: 'standalone', chatId: 'chat_x1y2z3' });
+  });
+  it('el Tablero lleva en la consulta la orden de abrir la tarea a mano', () => {
+    expect(routeHash({ name: 'board', nueva: true })).toBe('#/tablero?nueva');
+    expect(parseRoute('#/tablero?nueva')).toEqual({ name: 'board', nueva: true });
+    expect(parseRoute('#/tablero/orquestador?nueva')).toEqual({ name: 'board', projectId: 'orquestador', nueva: true });
+    expect(parseRoute('#/tablero?otra')).toEqual({ name: 'board' });
   });
   it('una sección desconocida cae en general', () => {
     expect(parseRoute('#/ajustes/nada')).toEqual({ name: 'settings', section: 'general' });

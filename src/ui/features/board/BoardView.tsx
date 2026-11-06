@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { lastActivity } from '../../api/tasks.ts';
 import type { TaskRecord } from '../../api/types.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
+import { navigate } from '../../app/routes.ts';
 import { useApp } from '../../store/app.ts';
 import { ManualTaskDialog } from './ManualTaskDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
@@ -12,6 +13,8 @@ import { BOARD_COLUMNS, taskMatchesColumn } from './types.ts';
 
 export interface BoardViewProps {
   projectId?: string;
+  /** Llega con `#/tablero?nueva`: abre el diálogo de tarea a mano al entrar. */
+  openManual?: boolean;
 }
 
 const MAX_TASKS_PER_COLUMN = 100;
@@ -21,7 +24,7 @@ function newestActivityFirst(a: TaskRecord, b: TaskRecord): number {
   return Date.parse(lastActivity(b)) - Date.parse(lastActivity(a));
 }
 
-export default function BoardView({ projectId: fixedProjectId }: BoardViewProps) {
+export default function BoardView({ projectId: fixedProjectId, openManual = false }: BoardViewProps) {
   const rawTasks = useApp((s) => s.tasks);
   const projects = useApp((s) => s.projects);
   const agents = useApp((s) => s.agents);
@@ -33,6 +36,14 @@ export default function BoardView({ projectId: fixedProjectId }: BoardViewProps)
   const [tasksList, setTasksList] = useState<TaskRecord[]>(() => Object.values(rawTasks));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [manualDialogOpen, setManualDialogOpen] = useState(false);
+
+  // La orden `?nueva` se consume al abrir: se quita de la barra para que recargar o ir atrás no reabra el diálogo.
+  // Va en un efecto (no solo en el estado inicial) porque pasar de `#/tablero` a `#/tablero?nueva` no remonta la vista.
+  useEffect(() => {
+    if (!openManual) return;
+    setManualDialogOpen(true);
+    navigate({ name: 'board', ...(fixedProjectId ? { projectId: fixedProjectId } : {}) }, { replace: true });
+  }, [openManual, fixedProjectId]);
 
   // Agrupar actualizaciones en vivo por cuadro (requestAnimationFrame) para no sobrecargar la CPU.
   useEffect(() => {

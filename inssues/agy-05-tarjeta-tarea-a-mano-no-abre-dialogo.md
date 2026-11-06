@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/home/HomeView.tsx:28`, `src/ui/app/routes.ts:12`, `src/ui/app/routes.ts:30-33`, `src/ui/app/routes.ts:60-61`, `src/ui/app/App.tsx:29-30`, `src/ui/features/board/BoardView.tsx:27`, `src/ui/features/board/BoardView.tsx:105-113`, `src/ui/features/board/BoardView.tsx:213-222`, `src/ui/features/board/ManualTaskDialog.tsx:61`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

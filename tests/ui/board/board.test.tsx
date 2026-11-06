@@ -421,6 +421,21 @@ describe('BoardView', () => {
     });
   });
 
+  it('abre el diálogo de tarea a mano si llega con openManual y no lo reabre tras cerrarlo', () => {
+    window.history.replaceState(null, '', '/#/tablero?nueva');
+    const { rerender } = render(<BoardView openManual />);
+
+    expect(screen.getByText('Nueva tarea a mano')).toBeTruthy();
+    // La orden se consume: recargar o ir atrás no vuelve a abrirlo.
+    expect(window.location.hash).toBe('#/tablero');
+
+    fireEvent.click(screen.getByRole('button', { name: /cancelar creación/i }));
+    expect(screen.queryByText('Nueva tarea a mano')).toBeNull();
+
+    rerender(<BoardView openManual />);
+    expect(screen.queryByText('Nueva tarea a mano')).toBeNull();
+  });
+
   it('el diálogo de tarea a mano valida campos vacíos', () => {
     render(<BoardView />);
 
