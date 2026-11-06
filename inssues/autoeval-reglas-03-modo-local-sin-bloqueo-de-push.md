@@ -3,7 +3,7 @@
 - **Área:** Núcleo de la flota
 - **Severidad:** alta
 - **Archivos:** `src/core/workspace/push-block.ts:88-115`, `src/core/workspace/manager.ts:116`, `src/core/workspace/manager.ts:130`, `src/core/workspace/integrate.ts:42`, `src/core/app/local-workspaces.ts:99-115`, `src/core/app/f5-servidor.ts:217-218`, `src/core/adapters/agy-cli/index.ts:205-225`, `src/core/adapters/codex-cli/index.ts:170`, `src/core/adapters/codex-cli/index.ts:191-194`, `src/core/process/run-jsonl.ts:32`, `src/core/process/child-env.ts:21-31`, `src/core/adapters/claude-sdk/shell-policy.ts:475`, `src/core/brief/render-brief.ts:23-31`, `src/core/brief/render-brief.ts:56-107`, `src/core/orchestrator/supervisor.ts:285`, `src/core/orchestrator/supervisor.ts:316`, `docs/DECISIONES.md:37`, `docs/DECISIONES.md:43-53`, `tests/core/workspace/push-block.cases.ts:17-35`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** autoevaluación de la mente (2026-11-05)
 - **Relacionadas:** `flota-01-modo-local-reglas-fuera-del-prompt.md`, `autoeval-reglas-04-agy-sin-ninguna-barrera-tecnica.md`, `autoeval-reglas-07-codex-sandbox-depende-de-config-global.md`
 

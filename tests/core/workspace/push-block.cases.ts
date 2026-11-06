@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { BLOCKED_PUSH_URL, WorktreeManager } from '../../../src/core/workspace/index.ts';
+import { BLOCKED_PUSH_URL, createGitRunner, pushBlockEnv, WorktreeManager } from '../../../src/core/workspace/index.ts';
 import { brief, commitFile, makeRepo } from './helpers.ts';
 import type { TempRepo } from './helpers.ts';
 
@@ -11,10 +11,10 @@ afterEach(() => {
   t = undefined;
 });
 
-/** git directo (sin la guardia), como lo lanzaría un agente que se la salta. */
-function rawGit(cwd: string, args: string[]): { code: number; out: string } {
+/** git directo (sin la guardia), como lo lanzaría un agente que se la salta; `env`, sobre el del proceso. */
+function rawGit(cwd: string, args: string[], env?: Record<string, string>): { code: number; out: string } {
   try {
-    const out = execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const out = execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...(env ? { env: { ...process.env, ...env } } : {}) });
     return { code: 0, out };
   } catch (err) {
     const e = err as { status?: number; stderr?: string; stdout?: string };
@@ -34,6 +34,42 @@ function setup(): { t: TempRepo; mgr: WorktreeManager; bare: string } {
 function localConfig(t: TempRepo): string[] {
   return t.git(t.repo, 'config', '--list', '--local').split(/\r?\n/).filter(Boolean).sort();
 }
+
+describe('bloqueo de push por entorno (modo local, sin worktree)', () => {
+  it('con pushBlockEnv git push falla por cualquier vía desde la carpeta del usuario; el resto de git sigue y su config no cambia', async () => {
+    const { t, bare } = setup();
+    commitFile(t, t.repo, 'b.txt', 'nuevo\n');
+    // Un remoto con `pushurl` propio del usuario: sin hook pre-push, la lista tiene que quedar solo con la bloqueada.
+    const espejo = join(t.base, 'espejo.git');
+    t.git(t.base, 'init', '-q', '--bare', espejo);
+    t.git(t.repo, 'remote', 'add', 'espejo', bare);
+    t.git(t.repo, 'remote', 'set-url', '--push', 'espejo', espejo);
+    const before = localConfig(t);
+    const env = await pushBlockEnv(createGitRunner(), t.repo);
+    expect(Object.keys(env)).toEqual(['GIT_CONFIG_PARAMETERS']);
+
+    const intentos: string[][] = [
+      ['push'],
+      ['push', 'origin', 'main'],
+      ['push', '--no-verify', 'origin', 'main'],
+      ['push', '--no-verify', bare, 'main'],
+      ['push', '--no-verify', `file://${bare.replace(/\\/g, '/')}`, 'HEAD:refs/heads/robada'],
+      ['push', '--no-verify', 'espejo', 'main'],
+    ];
+    for (const args of intentos) {
+      const r = rawGit(t.repo, args, env);
+      expect(r.code, `git ${args.join(' ')}: ${r.out}`).not.toBe(0);
+    }
+    expect(rawGit(bare, ['for-each-ref']).out.trim()).toBe('');
+    expect(rawGit(espejo, ['for-each-ref']).out.trim()).toBe('');
+    // El bloqueo no rompe el resto de git ni escribe en la config del usuario.
+    expect(rawGit(t.repo, ['status'], env).code).toBe(0);
+    expect(rawGit(t.repo, ['log', '-1'], env).code).toBe(0);
+    expect(localConfig(t)).toEqual(before);
+    // Sin ese entorno (el usuario), el push sí sale.
+    expect(rawGit(t.repo, ['push', 'origin', 'main']).code).toBe(0);
+  });
+});
 
 describe('bloqueo de push a nivel de git en los worktrees', () => {
   it('git push falla desde el worktree de tarea por cualquier vía, y el remoto no cambia', async () => {

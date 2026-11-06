@@ -183,6 +183,18 @@ describe('Supervisor.execute: traspasos', () => {
     expectNoLeases(router);
   });
 
+  it('las variables de la tarea (env) llegan a cada intento sobre las del agente, también tras reasignar', async () => {
+    const fail = [{ error: 'crash' as const, message: 'exit 1' }, { done: false }];
+    const { adapters, router, supervisor } = setup({ codex: fail, claude1: [{ done: true }] }, { env: { CODEX_TOKEN: 'clave-del-agente-123' } });
+    router.acquire('codex');
+    const env = { GIT_CONFIG_PARAMETERS: "'remote.pushDefault'='orquestador-bloqueado'" };
+    const result = await supervisor.execute(task('t1'), { agentId: 'codex', worktreePath: worktree, env });
+    expect(result.ok).toBe(true);
+    expect(adapters.codex.calls.map((c) => c.ctx.env)).toEqual([{ CODEX_TOKEN: 'clave-del-agente-123', ...env }, { CODEX_TOKEN: 'clave-del-agente-123', ...env }]);
+    expect(adapters.claude1.calls[0]?.ctx.env).toEqual(env);
+    expectNoLeases(router);
+  });
+
   it('si el que falla dos veces ya es Claude, pasa a otra instancia de Claude', async () => {
     const fail = [{ error: 'timeout' as const }, { done: false }];
     const { router, supervisor } = setup({ claude1: fail, claude2: [{ done: true }] });

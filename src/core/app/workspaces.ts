@@ -92,6 +92,11 @@ export class ProjectWorktrees implements WorkspaceManager {
     return this.#local.isLocal(workspace);
   }
 
+  /** Variables para los agentes de una tarea local (bloqueo de push); `undefined` con worktrees. */
+  agentEnv(workspace: Workspace): Readonly<Record<string, string>> | undefined {
+    return this.#local.agentEnv(workspace);
+  }
+
   /**
    * Clave de exclusión de las tareas del proyecto: la carpeta, si es local (dos tareas en la misma carpeta se
    * pisarían); `undefined` si usa worktrees (cada tarea tiene el suyo).

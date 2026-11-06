@@ -16,6 +16,8 @@ afterEach(async () => {
 });
 
 const isReview = (t: TaskBrief) => t.id.endsWith('-revision');
+/** Lo que daría `LocalWorkspaces.agentEnv` (bloqueo de push por entorno). */
+const BLOCK_ENV = { GIT_CONFIG_PARAMETERS: "'remote.pushDefault'='orquestador-bloqueado'" };
 
 async function setup(opts: { exclusiveKey: (projectId: string) => string | undefined; localProjects?: readonly string[]; work?: (t: TaskBrief) => Step[] }) {
   const workspaces = await FakeWorkspaces.create();
@@ -40,6 +42,7 @@ async function setup(opts: { exclusiveKey: (projectId: string) => string | undef
     exclusiveKey: opts.exclusiveKey,
     // FakeWorkspaces crea `<raíz>/<proyecto>/<tarea>`: el proyecto sale de la ruta.
     isLocal: (ws) => [...local].some((p) => ws.path.includes(`${p}`)),
+    agentEnv: () => BLOCK_ENV,
     warn: () => undefined,
   });
   return { queue, changes, fleet, writes, adapters };
@@ -114,6 +117,8 @@ describe('Fleet: modo local (una tarea a la vez por carpeta)', () => {
     for (const c of calls) {
       expect(prompt(c)).toContain('## Modo local (sin worktree)');
       expect(prompt(c)).toContain('No hagas commits ni ramas');
+      // El bloqueo de push del modo local llega al proceso de cada agente.
+      expect(c.ctx.env).toMatchObject(BLOCK_ENV);
     }
     const continued = calls.find((c) => c.ctx.handoff && !isReview(c.task));
     expect(continued).toBeDefined();
@@ -129,7 +134,10 @@ describe('Fleet: modo local (una tarea a la vez por carpeta)', () => {
     await s.fleet.run();
     const calls = s.adapters.flatMap((a) => a.calls);
     expect(calls.length).toBeGreaterThan(0);
-    for (const c of calls) expect(briefHints(c.ctx)).toEqual({});
+    for (const c of calls) {
+      expect(briefHints(c.ctx)).toEqual({});
+      expect(c.ctx.env).not.toHaveProperty('GIT_CONFIG_PARAMETERS');
+    }
   });
 });
 

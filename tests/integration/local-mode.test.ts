@@ -121,11 +121,20 @@ describe('modo local: carpeta git sin gate (caso marketing)', () => {
     writeFileSync(join(repo, '5', 'a.md'), 'uno\n');
     writeFileSync(join(repo, '.gitignore'), 'node_modules/\n');
     for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'inicio']]) expect(git(repo, ...args).status).toBe(0);
+    const bare = join(root, 'remoto.git');
+    expect(git(root, 'init', '-q', '--bare', bare).status).toBe(0);
+    expect(git(repo, 'remote', 'add', 'origin', bare).status).toBe(0);
     const before = snapshot(repo);
     const { id, ws } = localSetup(repo, 'marketing');
 
     const w = await ws.create(id, task('t1', id, ['5/**']));
     expect(git(repo, 'status', '--porcelain').stdout).toBe('');
+    // Los agentes reciben el bloqueo de push por entorno: desde la carpeta, `git push` no sale.
+    const agentEnv = ws.agentEnv(w);
+    expect(agentEnv?.GIT_CONFIG_PARAMETERS).toBeDefined();
+    const push = spawnSync('git', ['push', '--no-verify', 'origin', 'main'], { cwd: repo, encoding: 'utf8', env: { ...process.env, ...agentEnv } });
+    expect(push.status).not.toBe(0);
+    expect(git(bare, 'for-each-ref').stdout.trim()).toBe('');
     writeFileSync(join(repo, '5', 'a.md'), 'dos\n');
     await ws.reviewSummary(w, ran(['5/a.md']));
     const result = await ws.integrate(id, w);

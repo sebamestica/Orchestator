@@ -72,6 +72,8 @@ export interface AttemptOptions {
   budgetUsd?: number;
   /** Modo local (carpeta del usuario, sin worktree): va al adaptador (`RunHints.local`) para su encargo. */
   local?: { path: string };
+  /** Variables de esta tarea para el proceso del agente, sobre las suyas (p. ej. el bloqueo de push del modo local). */
+  env?: Readonly<Record<string, string>>;
 }
 
 export interface BeforeAttemptInfo {
@@ -109,6 +111,8 @@ export interface ExecuteOptions {
   retryBase?: number;
   /** Modo local: cada intento lo pasa al adaptador (ver `AttemptOptions.local`). */
   local?: { path: string };
+  /** Variables de la tarea para cada intento (ver `AttemptOptions.env`). */
+  env?: Readonly<Record<string, string>>;
 }
 
 export interface ExecuteResult {
@@ -228,6 +232,7 @@ export class Supervisor {
           worktreePath: opts.worktreePath, signal: opts.signal, timeoutMs: opts.timeoutMs, maxRunMs: opts.maxRunMs, handoff, attempt: n, retries,
           ...(budget !== undefined ? { budgetUsd: Math.max(0, budget - spent) } : {}),
           ...(opts.local ? { local: opts.local } : {}),
+          ...(opts.env ? { env: opts.env } : {}),
         });
         attempts.push(attempt);
         spent += attempt.usage.costUsd ?? 0;
@@ -287,8 +292,10 @@ export class Supervisor {
    */
   async runAttempt(task: TaskBrief, agentId: string, opts: AttemptOptions): Promise<AttemptResult> {
     const adapter = this.#adapters.get(agentId);
-    const env = this.#env(agentId);
-    const secrets = Object.values(env);
+    const agentEnv = this.#env(agentId);
+    // Las variables de la tarea (bloqueo de push) van encima de las del agente; solo estas se tachan aquí.
+    const secrets = Object.values(agentEnv);
+    const env = opts.env ? { ...agentEnv, ...opts.env } : agentEnv;
     const state = new AttemptState(agentId, `${task.id}-${agentId}-${opts.attempt ?? 1}`, this.#iso());
     if (!adapter) {
       state.fail('crash', `No hay adaptador para el agente ${agentId}.`);

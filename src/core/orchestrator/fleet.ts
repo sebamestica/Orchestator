@@ -86,6 +86,8 @@ export interface FleetOptions {
   exclusiveKey?: (projectId: string) => string | undefined;
   /** El workspace es la carpeta del usuario en modo local (cambia el encargo: sin commits ni ramas). */
   isLocal?: (workspace: Workspace) => boolean;
+  /** Variables para los agentes de una tarea local (el bloqueo de push por entorno de `LocalWorkspaces`). */
+  agentEnv?: (workspace: Workspace) => Readonly<Record<string, string>> | undefined;
   memoryBudgetChars?: number;
   maxRounds?: number;
   rulesFiles?: readonly string[];
@@ -198,6 +200,7 @@ export class Fleet {
   readonly #diffSummary: (workspace: Workspace, task: TaskBrief, run: ExecuteResult) => Promise<string>;
   readonly #exclusiveKey: (projectId: string) => string | undefined;
   readonly #isLocal: (workspace: Workspace) => boolean;
+  readonly #agentEnv: (workspace: Workspace) => Readonly<Record<string, string>> | undefined;
   /** Claves de exclusión de las tareas con su ciclo en curso. */
   readonly #exclusive = new Map<string, string>();
   readonly #memoryBudget: number;
@@ -232,6 +235,7 @@ export class Fleet {
     this.#diffSummary = opts.diffSummary ?? (async (_ws, _task, run) => defaultDiffSummary(run));
     this.#exclusiveKey = opts.exclusiveKey ?? (() => undefined);
     this.#isLocal = opts.isLocal ?? (() => false);
+    this.#agentEnv = opts.agentEnv ?? (() => undefined);
     this.#memoryBudget = opts.memoryBudgetChars ?? DEFAULT_MEMORY_BUDGET_CHARS;
     this.#maxRounds = opts.maxRounds ?? DEFAULT_MAX_ROUNDS;
     this.#rulesFiles = opts.rulesFiles;
@@ -376,7 +380,7 @@ export class Fleet {
     const workspace = await this.#workspaces.create(task.projectId, task);
     run.workspace = workspace;
     report.workspace = workspace;
-    const local = this.#localOf(workspace);
+    const localRun = this.#localOf(workspace);
     const memoryContext = await this.#memoryContext(task);
     const plan = await this.#generalPlan(task);
     report.plan = { id: plan.id, source: plan.source, ...(plan.note ? { note: plan.note } : {}), exists: false, done: 0, pending: 0 };
@@ -393,7 +397,7 @@ export class Fleet {
         info.handoff.partialSummary = withTaskPlanNote(info.handoff.partialSummary, status);
       }
       await this.#writeFile(join(workspace.path, PLAN_FILE), plan.file);
-      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles, ...local }));
+      await this.#writeFile(join(workspace.path, BRIEF_FILE), renderBrief(info.task, info.handoff, { memoryContext, rulesFiles: this.#rulesFiles, ...(localRun.local ? { local: localRun.local } : {}) }));
     };
 
     const decision = await this.#router.route(task);
@@ -409,7 +413,7 @@ export class Fleet {
       // Cada ronda de corrección cuenta como reintento: el autor piensa un nivel más (`RunHints.retries`).
       const exec = await this.#supervisor.execute(current, {
         agentId: author, worktreePath: workspace.path, signal, timeoutMs: this.#timeoutMs, handoff, beforeAttempt: writeFiles('author'),
-        retryBase: round - 1, ...this.#budgetOf(run), ...local,
+        retryBase: round - 1, ...this.#budgetOf(run), ...localRun,
       });
       this.#spend(run, exec);
       run.attempts.push(...exec.attempts);
@@ -612,9 +616,14 @@ export class Fleet {
     return cap === undefined ? {} : { budgetUsd: cap - run.spentUsd };
   }
 
-  /** Modo local (carpeta del usuario): va a `.orq/BRIEF.md` y, por el Supervisor, al encargo de cada adaptador. */
-  #localOf(workspace: Workspace): Pick<ExecuteOptions, 'local'> {
-    return this.#isLocal(workspace) ? { local: { path: workspace.path } } : {};
+  /**
+   * Modo local (carpeta del usuario): la ruta va a `.orq/BRIEF.md` y, por el Supervisor, al encargo de cada adaptador;
+   * el entorno (bloqueo de push), al proceso de cada agente.
+   */
+  #localOf(workspace: Workspace): Pick<ExecuteOptions, 'local' | 'env'> {
+    if (!this.#isLocal(workspace)) return {};
+    const env = this.#agentEnv(workspace);
+    return { local: { path: workspace.path }, ...(env ? { env } : {}) };
   }
 
   #spend(run: TaskRun, exec: ExecuteResult): void {

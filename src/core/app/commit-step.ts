@@ -135,6 +135,7 @@ export interface CommittingWorkspacesOptions {
 interface LocalAware {
   isLocal(workspace: Workspace): boolean;
   exclusiveKey(projectId: string): string | undefined;
+  agentEnv?(workspace: Workspace): Readonly<Record<string, string>> | undefined;
 }
 
 function isLocalAware(inner: WorkspaceManager): inner is WorkspaceManager & LocalAware {
@@ -172,6 +173,11 @@ export class CommittingWorkspaces implements WorkspaceManager {
   /** El workspace es la carpeta del usuario en modo local. */
   isLocal(workspace: Workspace): boolean {
     return isLocalAware(this.#inner) && this.#inner.isLocal(workspace);
+  }
+
+  /** Variables para los agentes de una tarea local: el bloqueo de push por entorno (`undefined` con worktrees). */
+  agentEnv(workspace: Workspace): Readonly<Record<string, string>> | undefined {
+    return isLocalAware(this.#inner) ? this.#inner.agentEnv?.(workspace) : undefined;
   }
 
   /** Clave para no correr a la vez dos tareas en la misma carpeta local (`undefined` con worktrees). */

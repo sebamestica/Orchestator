@@ -95,7 +95,7 @@ export async function enableWorktreeConfig(git: GitRunner, worktreePath: string)
 export async function blockPush(git: GitRunner, worktreePath: string, hooksDir: string): Promise<void> {
   await ensureHooksDir(hooksDir);
   await enableWorktreeConfig(git, worktreePath);
-  const remotes = (await git(worktreePath, ['remote'])).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const remotes = remoteNames((await git(worktreePath, ['remote'])).stdout);
   // Se escribe `config.worktree` de una vez (en Windows cada git.exe cuesta ~65 ms); git lo lee igual
   // que si se usara `git config --worktree` clave por clave.
   const raw = (await git(worktreePath, ['rev-parse', '--git-path', 'config.worktree'])).stdout.trim();
@@ -113,6 +113,40 @@ export async function blockPush(git: GitRunner, worktreePath: string, hooksDir: 
   ].join('\n');
   const current = existsSync(file) ? await readFile(file, 'utf8') : '';
   await writeFile(file, current === '' || current.endsWith('\n') ? current + block : `${current}\n${block}`, 'utf8');
+}
+
+/**
+ * El mismo bloqueo, por entorno del proceso del agente y sin escribir nada en la config del usuario (modo local: no
+ * hay worktree ni `config.worktree`). Va en `GIT_CONFIG_PARAMETERS`, la variable con la que `git -c` pasa la config a
+ * sus subprocesos: el filtro `*KEY*` de Codex quitaría `GIT_CONFIG_KEY_<n>` y rompería todo git. Sin `core.hooksPath`:
+ * en la carpeta del usuario desactivaría sus hooks, así que no hay `pre-push` que frene un `pushurl` propio del usuario:
+ * `pushurl` es una lista (se empuja a todas) y `pushInsteadOf` no la reescribe, por eso cada remoto la vacía (`''`)
+ * antes de poner la bloqueada. Si la carpeta no es git, igual vale: `pushInsteadOf ""` también reescribe los remotos
+ * que el agente agregue después.
+ */
+export async function pushBlockEnv(git: GitRunner, folder: string): Promise<Record<string, string>> {
+  let remotes: string[] = [];
+  try {
+    const listed = await git(folder, ['remote'], { check: false });
+    if (listed.code === 0) remotes = remoteNames(listed.stdout);
+  } catch {
+    // Sin git o sin repo: queda el bloqueo general (`pushDefault` y `pushInsteadOf`).
+  }
+  const pairs: [string, string][] = [
+    ['remote.pushDefault', BLOCKED_REMOTE],
+    ...remotes.flatMap((r): [string, string][] => [[`remote.${r}.pushurl`, ''], [`remote.${r}.pushurl`, BLOCKED_PUSH_URL]]),
+    [`url.${BLOCKED_PUSH_URL}.pushInsteadOf`, ''],
+  ];
+  return { GIT_CONFIG_PARAMETERS: pairs.map(([key, value]) => `${shellQuote(key)}=${shellQuote(value)}`).join(' ') };
+}
+
+function remoteNames(stdout: string): string[] {
+  return stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
+/** Comillas de `GIT_CONFIG_PARAMETERS` (las de `sq_quote` de git). */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''").replace(/!/g, "'\\!'")}'`;
 }
 
 /** Comillas de la sintaxis de config de git (subsecciones y valores). */

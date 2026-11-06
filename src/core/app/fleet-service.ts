@@ -388,6 +388,7 @@ export class FleetService {
       // Modo local: una tarea a la vez por carpeta y encargo sin commits ni ramas.
       exclusiveKey: (projectId) => workspaces.exclusiveKey(projectId),
       isLocal: (workspace) => workspaces.isLocal(workspace),
+      agentEnv: (workspace) => workspaces.agentEnv(workspace),
       warn: this.#log,
       ...(this.#tuning.timeoutMs ? { timeoutMs: this.#tuning.timeoutMs } : {}),
       ...(this.#tuning.maxRounds ? { maxRounds: this.#tuning.maxRounds } : {}),

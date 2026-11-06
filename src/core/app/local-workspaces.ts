@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { IntegrationResult, TaskBrief, Workspace } from '../../shared/index.ts';
 import { redactSecrets } from '../../shared/index.ts';
 import { deduceGate, gateForWorkspace } from '../fs/folders.ts';
-import { createGitRunner, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
+import { createGitRunner, pushBlockEnv, runCommands, summarizeCommands, WorkspaceError, type CommandSpec, type GitRunner } from '../workspace/index.ts';
 
 /**
  * Rama ficticia de un workspace local: no hay rama, se trabaja sobre la carpeta del usuario. No es un nombre de rama
@@ -60,7 +60,8 @@ async function defaultGateFor(dir: string): Promise<CommandSpec[] | null> {
  * commits del núcleo. Lo usan los proyectos registrados sin `workspace` (carpeta sin git o sin gate).
  *
  * - `create` devuelve la carpeta del proyecto y prepara `.orq/` (con su marca); si la carpeta es git, excluye `.orq/`
- *   en `info/exclude`.
+ *   en `info/exclude`. Calcula también el bloqueo de push por entorno (`agentEnv`): no hay `config.worktree` donde
+ *   escribirlo y la config del usuario no se toca.
  * - `integrate` corre el gate si la carpeta tiene uno (si falla, la tarea vuelve al autor); si no, da por buena la
  *   tarea revisada. Nunca confirma nada.
  * - `remove` borra solo `.orq/`, y solo si la creó el modo local.
@@ -72,8 +73,8 @@ export class LocalWorkspaces {
   readonly #gateFor: (dir: string) => Promise<CommandSpec[] | null>;
   readonly #git: GitRunner | undefined;
   readonly #log: (line: string) => void;
-  /** Workspaces locales vivos, por ruta normalizada + tarea. */
-  readonly #live = new Map<string, LocalProject>();
+  /** Workspaces locales vivos, por ruta normalizada + tarea, con el entorno de sus agentes. */
+  readonly #live = new Map<string, { project: LocalProject; env: Readonly<Record<string, string>> }>();
 
   constructor(opts: LocalWorkspacesOptions = {}) {
     this.#gateFor = opts.gateFor ?? defaultGateFor;
@@ -93,12 +94,18 @@ export class LocalWorkspaces {
 
   /** Proyecto de un workspace local vivo (creado por este gestor y aún no quitado). */
   projectOf(workspace: Workspace): LocalProject | undefined {
-    return workspace.branch === LOCAL_BRANCH ? this.#live.get(liveKey(workspace)) : undefined;
+    return workspace.branch === LOCAL_BRANCH ? this.#live.get(liveKey(workspace))?.project : undefined;
+  }
+
+  /** Variables para los agentes de un workspace local vivo: el bloqueo de push (`pushBlockEnv`). */
+  agentEnv(workspace: Workspace): Readonly<Record<string, string>> | undefined {
+    return workspace.branch === LOCAL_BRANCH ? this.#live.get(liveKey(workspace))?.env : undefined;
   }
 
   async create(project: LocalProject, task: TaskBrief): Promise<Workspace> {
     if (!isAbsolute(project.repoPath)) throw new WorkspaceError(`proyecto ${project.id}: la carpeta debe ser una ruta absoluta (${project.repoPath})`);
     if (!(await isDir(project.repoPath))) throw new WorkspaceError(`proyecto ${project.id}: la carpeta ${project.repoPath} no existe`);
+    const env = await pushBlockEnv(this.#gitFor(project), project.repoPath);
     const scratch = join(project.repoPath, SCRATCH);
     const ours = !(await exists(scratch)) || (await exists(join(project.repoPath, LOCAL_MARKER)));
     await mkdir(scratch, { recursive: true });
@@ -108,8 +115,8 @@ export class LocalWorkspaces {
     // Solo corre una tarea a la vez por carpeta: lo que quede de esta carpeta es de una tarea fallida (la flota
     // conserva su `.orq/` y no llama a `remove`). Se olvida para que no impida limpiar al terminar esta.
     const folder = LocalWorkspaces.key(project.repoPath);
-    for (const [key, p] of this.#live) if (LocalWorkspaces.key(p.repoPath) === folder) this.#live.delete(key);
-    this.#live.set(liveKey(workspace), project);
+    for (const [key, live] of this.#live) if (LocalWorkspaces.key(live.project.repoPath) === folder) this.#live.delete(key);
+    this.#live.set(liveKey(workspace), { project, env });
     this.#log(`${task.id}: modo local en ${project.repoPath} (sin worktree ni commits)`);
     return workspace;
   }
@@ -141,21 +148,25 @@ export class LocalWorkspaces {
 
   async remove(workspace: Workspace): Promise<void> {
     const key = liveKey(workspace);
-    const project = this.#live.get(key);
+    const project = this.#live.get(key)?.project;
     if (!project) return;
     this.#live.delete(key);
     // Otra tarea viva de la misma carpeta aún usa `.orq/` (no debería pasar: la flota las serializa).
     const folder = LocalWorkspaces.key(project.repoPath);
-    if ([...this.#live.values()].some((p) => LocalWorkspaces.key(p.repoPath) === folder)) return;
+    if ([...this.#live.values()].some((live) => LocalWorkspaces.key(live.project.repoPath) === folder)) return;
     if (await exists(join(project.repoPath, LOCAL_MARKER))) await rm(join(project.repoPath, SCRATCH), { recursive: true, force: true });
+  }
+
+  /** git de solo lectura, con la guardia que protege la carpeta del usuario. */
+  #gitFor(project: LocalProject): GitRunner {
+    return this.#git ?? createGitRunner({ protectedPaths: [project.repoPath] });
   }
 
   /** `.orq/` fuera de `git status` del usuario: en `info/exclude`, que no se versiona. Sin git, nada. */
   async #excludeScratch(project: LocalProject): Promise<void> {
     if (!(await exists(join(project.repoPath, '.git')))) return;
     try {
-      const git = this.#git ?? createGitRunner({ protectedPaths: [project.repoPath] });
-      const out = await git(project.repoPath, ['rev-parse', '--git-path', 'info/exclude'], { check: false });
+      const out = await this.#gitFor(project)(project.repoPath, ['rev-parse', '--git-path', 'info/exclude'], { check: false });
       const rel = out.code === 0 ? out.stdout.trim() : '';
       if (!rel) return;
       const file = isAbsolute(rel) ? rel : join(project.repoPath, rel);
