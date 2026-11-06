@@ -203,6 +203,16 @@ export class Supervisor {
     return this.#adapters.has(agentId);
   }
 
+  /** Agrega o reemplaza el adaptador de un agente. Un intento en curso sigue con el que ya tenía. */
+  setAdapter(adapter: AgentAdapter): void {
+    this.#adapters.set(adapter.config.id, adapter);
+  }
+
+  /** Quita el adaptador de un agente (deshabilitado o borrado). Un intento en curso no se ve afectado. */
+  removeAdapter(agentId: string): void {
+    this.#adapters.delete(agentId);
+  }
+
   /** Ejecuta la tarea con la política de traspasos y reintentos. Nunca lanza: los errores van en el resultado. */
   async execute(task: TaskBrief, opts: ExecuteOptions): Promise<ExecuteResult> {
     const maxAttempts = opts.maxAttempts ?? this.#maxAttempts;

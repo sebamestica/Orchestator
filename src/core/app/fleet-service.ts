@@ -18,7 +18,7 @@ import {
 } from '../orchestrator/index.ts';
 import { lazySecrets } from '../registry/index.ts';
 import type { TaskHooks } from '../server/index.ts';
-import type { TaskRecord } from '../store/index.ts';
+import type { AgentRecord, TaskRecord } from '../store/index.ts';
 import type { CommittingWorkspaces } from './commit-step.ts';
 import type { Composition } from './compose.ts';
 import { FleetRuntime, RETRY_DETAIL, fleetTaskStatus, type SavedTask } from './fleet-port.ts';
@@ -43,6 +43,19 @@ export interface FleetTuning {
   verify?: VerifyWorkspace;
   /** Cada ejecución (autor o revisor) al terminar: pruebas, tablas de consumo. */
   onExecuted?: (task: TaskBrief, opts: ExecuteOptions, result: ExecuteResult) => void;
+}
+
+/** Lo que define el adaptador y el cupo de un agente: si cambia, la flota los vuelve a crear. */
+function agentSignature(agent: Pick<AgentRecord, 'config' | 'quotaMethod'>): string {
+  const config = Object.entries(agent.config).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([config, agent.quotaMethod ?? null]);
+}
+
+/** Un agente nuevo o cambiado, con su adaptador ya creado y su clave cargada. */
+interface LoadedAgent {
+  agent: AgentRecord;
+  adapter: AgentAdapter;
+  quota: QuotaProvider | undefined;
 }
 
 /** `Supervisor` que avisa de cada ejecución terminada (no cambia su comportamiento). */
@@ -132,8 +145,12 @@ export class FleetService {
   readonly #tuning: FleetTuning;
   readonly #log: (line: string) => void;
   #runtime: Promise<{ fleet: Fleet; port: FleetRuntime; router: Router }> | undefined;
-  /** La flota ya armada (para consultas síncronas). */
-  #built: { fleet: Fleet } | undefined;
+  /** La flota ya armada (para consultas síncronas y para ponerle al día los agentes). */
+  #built: { fleet: Fleet; router: Router; supervisor: Supervisor } | undefined;
+  /** Firma (`agentSignature`) con la que se creó el adaptador de cada agente de la flota armada. */
+  readonly #agentSigs = new Map<string, string>();
+  /** Puestas al día de agentes, una tras otra (cada una espera a la anterior). */
+  #agentSync: Promise<void> = Promise.resolve();
   #sink: EventSink;
   /** Difusión de las tareas por `/ws` (el hub que llega por `attachSink`). */
   #publisher: TaskPublisher | undefined;
@@ -348,13 +365,83 @@ export class FleetService {
     }
   }
 
-  /** Arma la flota (una sola vez). Agentes agregados después requieren `reset()`. */
+  /** Arma la flota (una sola vez). Los cambios de agentes posteriores llegan por `agentsChanged`. */
   runtime(): Promise<{ fleet: Fleet; port: FleetRuntime; router: Router }> {
     this.#runtime ??= this.#build().catch((err: unknown) => {
       this.#runtime = undefined;
       throw err;
     });
     return this.#runtime;
+  }
+
+  /**
+   * Los agentes cambiaron en el registro (alta, detección, `PATCH`, borrado o prueba): la flota ya armada se pone al día
+   * sin rearmarse (la mente guarda su `FleetRuntime`, y la carga del Router sigue con las tareas en curso). Los agentes
+   * nuevos o cambiados (tipo, clave, URL, modelo, método de cupo…) reciben adaptador, clave y cupo nuevos; los
+   * deshabilitados o borrados salen del Router y del Supervisor. Sin flota armada no hay nada que hacer: la próxima la
+   * arma con lo vigente. Nunca lanza: los errores se registran.
+   */
+  agentsChanged(): Promise<void> {
+    const runtime = this.#runtime;
+    if (!runtime) return Promise.resolve();
+    const next = this.#agentSync.then(async () => {
+      try {
+        await runtime;
+      } catch {
+        return; // la flota no se armó: la próxima `#build` lee lo vigente
+      }
+      if (this.#built) await this.#syncAgents(this.#built);
+    });
+    this.#agentSync = next.catch((err: unknown) => {
+      this.#log(redactSecrets(`flota: no se pudieron poner al día los agentes: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
+    });
+    return this.#agentSync;
+  }
+
+  async #syncAgents(built: { router: Router; supervisor: Supervisor }): Promise<void> {
+    const enabled = this.#deps.registry.list().filter((a) => a.config.enabled);
+    const loaded: LoadedAgent[] = [];
+    const failed = new Set<string>();
+    for (const agent of enabled) {
+      if (this.#agentSigs.get(agent.config.id) === agentSignature(agent)) continue;
+      const one = await this.#loadAgent(agent);
+      if (one) loaded.push(one);
+      else failed.add(agent.config.id);
+    }
+    // Desde aquí, síncrono: el Router y el Supervisor cambian en el mismo paso.
+    const keep = new Set(enabled.map((a) => a.config.id).filter((id) => !failed.has(id)));
+    for (const id of [...this.#agentSigs.keys()]) {
+      if (keep.has(id)) continue;
+      built.supervisor.removeAdapter(id);
+      built.router.setQuotaProvider(id, undefined);
+      this.#agentSigs.delete(id);
+    }
+    for (const { agent, adapter, quota } of loaded) {
+      built.supervisor.setAdapter(adapter);
+      built.router.setQuotaProvider(agent.config.id, quota);
+      this.#agentSigs.set(agent.config.id, agentSignature(agent));
+    }
+    built.router.setAgents(enabled.filter((a) => this.#agentSigs.has(a.config.id)).map((a) => a.config));
+  }
+
+  /** Adaptador (con la clave cargada para `envFor`) y lector de cupo de un agente; `undefined` si no se pudo. */
+  async #loadAgent(agent: AgentRecord): Promise<LoadedAgent | undefined> {
+    const d = this.#deps;
+    const id = agent.config.id;
+    let adapter: AgentAdapter | undefined;
+    try {
+      [adapter] = await d.loadAdapters([id]);
+    } catch (err) {
+      this.#log(redactSecrets(`adaptador ${id} no disponible: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
+    }
+    if (!adapter) return undefined;
+    let quota: QuotaProvider | undefined;
+    try {
+      quota = await d.quotaProviderFactory(agent, await d.registry.secretsFor(agent.config));
+    } catch (err) {
+      this.#log(redactSecrets(`flota: cupo de ${id} no disponible: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
+    }
+    return { agent, adapter, quota };
   }
 
   /** `FleetPort` para el orquestador (c11). */
@@ -390,6 +477,7 @@ export class FleetService {
         this.recoverOrphans();
       },
       activeTasks: (projectId) => this.activeTasks(projectId),
+      agentsChanged: () => this.agentsChanged(),
     };
   }
 
@@ -408,6 +496,8 @@ export class FleetService {
 
   async #build(): Promise<{ fleet: Fleet; port: FleetRuntime; router: Router }> {
     const d = this.#deps;
+    // Firmas leídas antes de crear los adaptadores: un cambio durante el armado se ve como cambio en `agentsChanged`.
+    const signatures = new Map(d.registry.list().map((a) => [a.config.id, agentSignature(a)]));
     const adapters: AgentAdapter[] = await d.loadAdapters();
     const quotas: QuotaProvider[] = [];
     for (const agent of d.registry.list().filter((a) => a.config.enabled)) {
@@ -448,7 +538,11 @@ export class FleetService {
       ...(this.#tuning.taskBudgetUsd !== undefined ? { taskBudgetUsd: this.#tuning.taskBudgetUsd } : {}),
       ...(this.#tuning.verify ? { verify: this.#tuning.verify } : {}),
     });
-    this.#built = { fleet };
+    this.#built = { fleet, router, supervisor };
+    for (const a of adapters) {
+      const signature = signatures.get(a.config.id);
+      if (signature) this.#agentSigs.set(a.config.id, signature);
+    }
     return { fleet, router, port: new FleetRuntime({ queue: this.queue, fleet, log: this.#log, saved: (id) => this.#savedTask(id), savedList: () => this.#deps.store.listTasks() }) };
   }
 }

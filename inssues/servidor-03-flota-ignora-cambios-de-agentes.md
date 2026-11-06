@@ -3,7 +3,7 @@
 - **Área:** Servidor, API y contratos
 - **Severidad:** media
 - **Archivos:** `src/core/app/fleet-service.ts:299`, `src/core/app/fleet-service.ts:300-306`, `src/core/app/fleet-service.ts:356-364`, `src/core/app/compose.ts:165-180`, `src/core/orchestrator/router.ts:92`, `src/core/orchestrator/router.ts:277-289`, `src/core/orchestrator/supervisor.ts:178`, `src/core/orchestrator/supervisor.ts:285`, `src/core/app/env.ts:112-124`, `src/core/server/app.ts:261-341`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 

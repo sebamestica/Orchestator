@@ -58,6 +58,11 @@ export interface TaskHooks {
   recover?(): void;
   /** Tareas del proyecto que la orquestación tiene realmente en curso (aunque el almacén diga otra cosa). */
   activeTasks?(projectId: string): readonly string[];
+  /**
+   * Cambiaron los agentes del registro (alta, detección, cambio, borrado o prueba): la orquestación ya armada se pone
+   * al día sin reiniciar. Un error se registra y no cambia la respuesta (el registro ya quedó guardado).
+   */
+  agentsChanged?(): void | Promise<void>;
 }
 
 export interface QuotaService {
@@ -287,6 +292,14 @@ export function createApp(deps: AppDeps): CoreApp {
       if (t?.state === 'pending') await approve(t);
     }
   };
+  /** Avisa a la orquestación que cambiaron los agentes del registro (la respuesta no depende de que lo logre). */
+  const agentsChanged = async (): Promise<void> => {
+    try {
+      await deps.tasks?.agentsChanged?.();
+    } catch (err) {
+      log?.(redactSecrets(`orquestación: no se pudo aplicar el cambio de agentes: ${err instanceof Error ? err.message : String(err)}`).slice(0, 300));
+    }
+  };
 
   // ------------------------------------------------------------- sistema
   r.add(
@@ -315,11 +328,13 @@ export function createApp(deps: AppDeps): CoreApp {
     async ({ body }) => {
       if ('apiKey' in body) {
         const res = await registry.addAgentFromKey(body);
+        await agentsChanged();
         hub.publishAgent(res.agent);
         return res;
       }
       if (registry.get(body.id)) throw new ApiError(409, 'conflict', `Ya existe el agente ${body.id}`);
       const agent = registry.put(body);
+      await agentsChanged();
       hub.publishAgent(agent);
       return { agent, probe: null };
     },
@@ -334,6 +349,7 @@ export function createApp(deps: AppDeps): CoreApp {
     },
     async () => {
       const res = await registry.detectClis();
+      if (res.added.length > 0) await agentsChanged();
       for (const a of res.added) hub.publishAgent(a);
       return res;
     },
@@ -354,8 +370,9 @@ export function createApp(deps: AppDeps): CoreApp {
       errors: [400, 404, 415],
       example: { enabled: false, quotaFloor: 0.25 },
     },
-    ({ params, body }) => {
+    async ({ params, body }) => {
       const agent = registry.update(params.id ?? '', body);
+      await agentsChanged();
       hub.publishAgent(agent);
       return { agent };
     },
@@ -373,6 +390,7 @@ export function createApp(deps: AppDeps): CoreApp {
     async ({ params }) => {
       const id = params.id ?? '';
       if (!(await registry.delete(id))) throw new ApiError(404, 'not_found', `No existe el agente ${id}`);
+      await agentsChanged();
       hub.publishAgentDeleted(id);
       return { deleted: true as const, id };
     },
@@ -389,6 +407,7 @@ export function createApp(deps: AppDeps): CoreApp {
     },
     async ({ params }) => {
       const res = await registry.probe(params.id ?? '');
+      await agentsChanged();
       hub.publishAgent(res.agent);
       return res;
     },

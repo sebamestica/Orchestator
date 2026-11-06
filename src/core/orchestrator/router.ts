@@ -125,6 +125,26 @@ export class Router {
     else this.#load.set(agentId, n - 1);
   }
 
+  /**
+   * Reemplaza los agentes (alta, cambio, deshabilitación o borrado en caliente). La carga, los turnos y los
+   * agotamientos se conservan por id: un agente que se va con arriendos abiertos se sigue liberando con `release`.
+   */
+  setAgents(configs: readonly AgentConfig[]): void {
+    this.#agents.clear();
+    this.#order.clear();
+    configs.forEach((a, i) => {
+      this.#agents.set(a.id, a);
+      this.#order.set(a.id, i);
+    });
+  }
+
+  /** Pone (o quita, con `undefined`) el lector de cupo de un agente y descarta su lectura en caché. */
+  setQuotaProvider(agentId: string, provider: QuotaProvider | undefined): void {
+    if (provider) this.#quotas.set(agentId, provider);
+    else this.#quotas.delete(agentId);
+    this.invalidateQuota(agentId);
+  }
+
   /** Olvida la lectura de cupo (todas si no se indica agente): la próxima decisión vuelve a leer. */
   invalidateQuota(agentId?: string): void {
     if (agentId) this.#quotaCache.delete(agentId);
