@@ -30,12 +30,25 @@ describe('Abrir carpeta', () => {
     expect(pick).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Repositorio git')).toBeTruthy();
     expect(screen.getByText('Revisa el gate')).toBeTruthy();
-    expect((screen.getByLabelText('Gate propuesto') as HTMLTextAreaElement).value).toBe('npm run -s check');
+    // El gate detectado se muestra como texto: el núcleo guarda el que detecta él, así que no se ofrece editarlo.
+    expect(screen.queryByRole('textbox', { name: /gate/i })).toBeNull();
+    expect(screen.getByText('npm run -s check')).toBeTruthy();
+    expect(screen.queryByText(/aún no se guardan/)).toBeNull();
     fireEvent.change(name, { target: { value: 'Mi proyecto' } });
     fireEvent.click(screen.getByRole('button', { name: 'Agregar' }));
     await waitFor(() => expect(window.location.hash).toBe('#/p/demo'));
     expect(fetch).toHaveBeenCalledWith('/projects/from-folder', expect.objectContaining({ body: JSON.stringify({ path: inspection.path, name: 'Mi proyecto', id: 'demo' }) }));
     expect(refresh).toHaveBeenCalledTimes(1); expect(close).toHaveBeenCalledTimes(1);
+  });
+  it('sin gate detectado avisa del modo local y no sugiere un gate', async () => {
+    window.orq = desktop(vi.fn().mockResolvedValue(inspection.path));
+    vi.mocked(fetch).mockResolvedValueOnce(reply({ ...inspection, gate: null }));
+    render(<AddProjectDialog open onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Elegir carpeta' }));
+    await screen.findByLabelText('Nombre');
+    expect(screen.getByText('Sin gate: se trabajará en local')).toBeTruthy();
+    expect(screen.queryByText('npm run -s check')).toBeNull();
+    expect(screen.queryByPlaceholderText('npm run -s check')).toBeNull();
   });
   it('elige carpeta en web mediante /fs/pick-folder', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(reply({ path: inspection.path })).mockResolvedValueOnce(reply(inspection));

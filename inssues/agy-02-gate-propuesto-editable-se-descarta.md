@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/projects/AddProjectDialog.tsx:20`, `src/ui/features/projects/AddProjectDialog.tsx:36`, `src/ui/features/projects/AddProjectDialog.tsx:48-49`, `src/ui/features/projects/AddProjectDialog.tsx:73-74`, `src/shared/api.ts:567-571`, `src/core/app/f5-servidor.ts:218-225`, `tests/ui/projects/AddProjectDialog.test.tsx:33`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

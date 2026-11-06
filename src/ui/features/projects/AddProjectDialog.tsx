@@ -17,7 +17,7 @@ export function AddProjectDialog({ open, onClose }: AddProjectDialogProps) {
 function FolderForm({ onClose }: { onClose: () => void }) {
   const [listing, setListing] = useState<FsListResponse | null>(null);
   const [inspection, setInspection] = useState<FolderInspection | null>(null);
-  const [name, setName] = useState(''); const [id, setId] = useState(''); const [gate, setGate] = useState('');
+  const [name, setName] = useState(''); const [id, setId] = useState('');
   const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const alive = useRef(true);
   const refreshProjects = useApp((s) => s.refreshProjects);
@@ -33,7 +33,6 @@ function FolderForm({ onClose }: { onClose: () => void }) {
     const result = folderInspectionSchema.parse(await api.post<unknown>('/projects/inspect', { path }));
     if (!alive.current) return;
     setInspection(result); setName(result.suggestedName); setId(result.suggestedId);
-    setGate(result.gate?.map((g) => [g.command, ...g.args].join(' ')).join('\n') ?? '');
   }
   async function browse(path: string) {
     const result = fsListResponse.parse(await api.get<unknown>(`/fs/list?path=${encodeURIComponent(path)}`));
@@ -70,10 +69,14 @@ function FolderForm({ onClose }: { onClose: () => void }) {
       <p className="break-all text-sm">{inspection.path}</p><p>{inspection.isGitRepo ? 'Repositorio git' : 'Carpeta sin repositorio git'}</p>
       <label className="block">Nombre<input className={inputClass} value={name} maxLength={120} disabled={busy} onChange={(e) => setName(e.target.value)} /></label>
       <label className="block">Id<input className={inputClass} value={id} disabled={busy} onChange={(e) => setId(e.target.value)} /></label>
-      <label className="block">Gate propuesto<textarea className={inputClass} value={gate} disabled={busy} placeholder="npm run -s check" onChange={(e) => setGate(e.target.value)} /></label>
-      <p className="text-sm text-muted">Al agregar se usará el gate detectado; los cambios de este campo aún no se guardan.</p>
+      <GateSummary gate={inspection.gate} />
       {inspection.warnings.length > 0 && <ul className="list-inside list-disc text-sm text-muted">{inspection.warnings.slice(0, 500).map((warning, i) => <li key={i}>{warning}</li>)}</ul>}
       <Button isDisabled={busy} onPress={() => setInspection(null)}>Cambiar carpeta</Button>
     </>}
   </div></Modal.Body><Modal.Footer><Button isDisabled={busy} onPress={onClose}>Cancelar</Button>{inspection && <Button className="bg-foreground text-canvas" isDisabled={busy || !name.trim() || !id.trim()} onPress={() => { void run(add); }}>Agregar</Button>}</Modal.Footer></>;
+}
+/** El núcleo guarda el gate que detecta él (`projectFromFolderBody` no lleva gate): se muestra, no se edita. */
+function GateSummary({ gate }: { gate: FolderInspection['gate'] }) {
+  if (!gate?.length) return <p className="text-sm">Sin gate: se trabajará en local</p>;
+  return <div><p>Gate detectado</p><ul className="font-mono text-sm">{gate.map((g, i) => <li key={i}>{[g.command, ...g.args].join(' ')}</li>)}</ul></div>;
 }
