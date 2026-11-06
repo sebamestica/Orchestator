@@ -66,10 +66,13 @@ export function assertServerName(name: string): string {
   return name;
 }
 
+/** Prefijo de las variables con secretos de los servidores: todo valor bajo él se tacha. */
+export const MCP_ENV_PREFIX = 'ORQ_MCP_';
+
 /** Variable de entorno para un secreto de un servidor: `ORQ_MCP_<SERVIDOR>_<CLAVE>`. */
 export function mcpEnvName(server: string, key: string): string {
   const part = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  return `ORQ_MCP_${part(server)}_${part(key) || 'VALOR'}`;
+  return `${MCP_ENV_PREFIX}${part(server)}_${part(key) || 'VALOR'}`;
 }
 
 /** `Bearer <token>` → token (o undefined si el encabezado no tiene esa forma). */

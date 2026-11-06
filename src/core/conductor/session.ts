@@ -17,6 +17,7 @@ import type { AgentDefinition, EffortLevel, McpServerConfig, Options, SDKMessage
 import { z } from 'zod';
 import { idSchema, redactSecrets } from '../../shared/index.ts';
 import type { AgentEvent, MindMode } from '../../shared/index.ts';
+import { MCP_ENV_PREFIX, bearerToken } from '../plugins/mcp.ts';
 import { createToolGuard } from './guard.ts';
 import type { Awaitable, ConductorPorts, ProposedTask, SdkMessageTranslator, TranslatorInit } from './ports.ts';
 import { buildConductorSystemPrompt, type ConductorWorkMode } from './prompt.ts';
@@ -343,7 +344,7 @@ export class ConductorSession {
     if (baseUrl && /^http:\/\//i.test(baseUrl) && !/^http:\/\/(?:127\.0\.0\.1|localhost)(?::|\/|$)/i.test(baseUrl)) {
       warnings.push('La URL de la API usa HTTP sin cifrar: la clave y los prompts viajan en claro.');
     }
-    if (!this.#secrets.length) warnings.push('Falta ANTHROPIC_API_KEY: el orquestador solo funciona con la clave de API (no usa sesión de Claude Code).');
+    if (!anthropicCredentials(env).length) warnings.push('Falta ANTHROPIC_API_KEY: el orquestador solo funciona con la clave de API (no usa sesión de Claude Code).');
     this.warnings = warnings;
 
     const onStderr = opts.onStderr;
@@ -546,8 +547,17 @@ export function buildEnv(base: Readonly<Record<string, string | undefined>>, ses
   return env;
 }
 
-/** Credenciales presentes en el entorno: se tachan en prompt, herramientas, eventos y stderr. */
+/**
+ * Secretos presentes en el entorno: las credenciales de Anthropic y los de los plugins (`ORQ_MCP_*`, como hacen los
+ * adaptadores con `mcpSecrets`: el valor entero y el token suelto de un `Bearer`). Se tachan en prompt, herramientas,
+ * eventos y stderr.
+ */
 export function credentialsOf(env: Readonly<Record<string, string | undefined>>): string[] {
+  const plugins = Object.entries(env).flatMap(([name, value]) => (name.startsWith(MCP_ENV_PREFIX) && value ? [value, bearerToken(value)] : []));
+  return [...new Set([...anthropicCredentials(env), ...plugins])].filter((v): v is string => typeof v === 'string' && v.length >= 8);
+}
+
+function anthropicCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
   return [env.ANTHROPIC_API_KEY, env.ANTHROPIC_AUTH_TOKEN].filter((v): v is string => typeof v === 'string' && v.length >= 8);
 }
 

@@ -20,7 +20,7 @@ import {
 } from '../../../src/core/conductor/index.ts';
 import type { ConductorSessionOptions, SdkMessageTranslator, TranslatorInit } from '../../../src/core/conductor/index.ts';
 import type { AgentEvent } from '../../../src/shared/index.ts';
-import { FAKE_API_KEY, SECRET_PATTERN, assistantText, fakePorts, readTurn, resultMessage, scriptedQuery, userText } from './fakes.ts';
+import { FAKE_API_KEY, SECRET_PATTERN, assistantText, fakePorts, readTurn, resultMessage, scriptedQuery, toolResultMessage, userText } from './fakes.ts';
 
 const PROXY_KEY = 'clave-del-proxy-0123456789';
 const BASE_ENV = { PATH: 'C:\\Windows', USERPROFILE: 'C:\\Users\\yo', CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ANTHROPIC_AUTH_TOKEN: 'token-heredado-abcdef' };
@@ -679,5 +679,94 @@ describe('ConductorSession: esfuerzo en vivo (setEffort)', () => {
     expect(failing.q.flags).toEqual([{ effortLevel: 'low' }]);
     expect(failing.s.effort).toBe('high');
     failing.s.close();
+  });
+});
+
+describe('ConductorSession: secretos de los plugins MCP', () => {
+  // Token sintético opaco (no es un secreto real).
+  const OPACO = 'q7Zt' + 'x'.repeat(30);
+  // Entorno de la mente con el encabezado de Canva, como lo arma mindPlugins.refresh (ORQ_MCP_*).
+  const ENV_MCP = {
+    ANTHROPIC_API_KEY: PROXY_KEY,
+    ANTHROPIC_BASE_URL: 'http://203.0.113.7:18082',
+    ORQ_MCP_CANVA_AUTHORIZATION: 'Bearer ' + OPACO,
+  };
+
+  it('el traductor recibe el encabezado MCP entero y el token suelto como secretos', () => {
+    const inits: TranslatorInit[] = [];
+    const translator = (init: TranslatorInit): SdkMessageTranslator => {
+      inits.push(init);
+      return { translate: () => [] };
+    };
+    const { s } = session({ translator, env: ENV_MCP });
+    expect(inits).toHaveLength(1);
+    const secrets = inits[0]?.secrets ?? [];
+    expect(secrets).toContain('Bearer ' + OPACO);
+    expect(secrets).toContain(OPACO);
+    expect(secrets).toContain(PROXY_KEY);
+    s.close();
+  });
+
+  it('los valores cortos y las variables ajenas (PATH, ruta de usuario, URL) no entran en los secretos', () => {
+    const inits: TranslatorInit[] = [];
+    const translator = (init: TranslatorInit): SdkMessageTranslator => {
+      inits.push(init);
+      return { translate: () => [] };
+    };
+    const { s } = session({ translator, env: { ...ENV_MCP, ORQ_MCP_CORTO: 'abc' } });
+    const secrets = inits[0]?.secrets ?? [];
+    // Sigue el token real, así que la prueba no pasa en vacío.
+    expect(secrets).toContain(OPACO);
+    expect(secrets).not.toContain('abc');
+    // BASE_ENV aporta PATH y USERPROFILE (ambos de más de 8 caracteres) y la URL viene del entorno de la sesión.
+    for (const ajeno of [BASE_ENV.PATH, BASE_ENV.USERPROFILE, ENV_MCP.ANTHROPIC_BASE_URL]) expect(secrets).not.toContain(ajeno);
+    s.close();
+  });
+
+  it('stderr del SDK: el token suelto llega a onStderr tachado', () => {
+    const lines: string[] = [];
+    const { s, q } = session({ env: ENV_MCP, onStderr: (line) => lines.push(line) });
+    s.send('hola');
+    optionsOf(q).stderr?.('fallo ' + OPACO);
+    expect(lines).toEqual(['fallo [REDACTADO]']);
+    s.close();
+  });
+
+  it('redact tacha el token suelto', () => {
+    const { s } = session({ env: ENV_MCP });
+    expect(s.redact('token ' + OPACO)).toBe('token [REDACTADO]');
+    s.close();
+  });
+
+  it('ningún evento de la sesión contiene el token suelto, ni en el texto del asistente ni en un tool_result', async () => {
+    const q = scriptedQuery(() => [
+      assistantText('consulté Canva, el valor es ' + OPACO),
+      toolResultMessage('toolu_canva_1', 'resultado de Canva: ' + OPACO),
+      resultMessage('listo'),
+    ]);
+    // Traductor que vuelca cada mensaje crudo en un evento: lo que sale de la sesión es lo que debe estar tachado.
+    const translator = (init: TranslatorInit): SdkMessageTranslator => {
+      let seq = 0;
+      return {
+        translate: (message): readonly AgentEvent[] => [
+          { sessionId: init.sessionId, agentId: init.agentId, seq: seq++, ts: '2026-11-01T22:00:00.000Z', type: 'text', payload: { text: JSON.stringify(message), role: 'assistant' } },
+        ],
+      };
+    };
+    const { s } = session({ query: q.fn, translator, env: ENV_MCP });
+    const events = s.events()[Symbol.asyncIterator]();
+    s.send('hola');
+    const seen: AgentEvent[] = [];
+    // Tres mensajes del SDK (asistente, tool_result y result), un evento por mensaje.
+    for (let i = 0; i < 3; i++) {
+      const next = await events.next();
+      if (next.done) break;
+      seen.push(next.value);
+    }
+    expect(seen).toHaveLength(3);
+    expect(JSON.stringify(seen)).toContain('[REDACTADO]');
+    expect(JSON.stringify(seen)).not.toContain(OPACO);
+    s.close();
+    expect((await events.next()).done).toBe(true);
   });
 });

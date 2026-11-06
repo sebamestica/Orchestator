@@ -3,7 +3,7 @@
 - **Área:** Seguridad y corrección (revisión de Codex)
 - **Severidad:** media
 - **Archivos:** `src/core/app/f5-chat.ts:77`, `src/core/app/f5-chat.ts:79`, `src/core/app/f5-chat.ts:101`, `src/core/chat/service.ts:699`, `src/core/chat/service.ts:723`, `src/core/chat/service.ts:853`, `src/core/conductor/session.ts:266`, `src/core/conductor/session.ts:272`, `src/core/conductor/session.ts:377`, `src/core/conductor/session.ts:382`, `src/core/conductor/session.ts:453`, `src/core/conductor/session.ts:470`, `src/core/conductor/session.ts:535`, `src/core/adapters/claude-sdk/adapter.ts:307`, `src/core/plugins/mcp.ts:82`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 Cuando Canva está conectado para la mente, `PluginService` arma el servidor MCP con el token en un encabezado
