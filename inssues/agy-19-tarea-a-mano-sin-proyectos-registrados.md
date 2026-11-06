@@ -3,7 +3,7 @@
 - **Área:** Interfaz
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/board/ManualTaskDialog.tsx:46-59`, `src/ui/features/board/ManualTaskDialog.tsx:67-70`, `src/ui/features/board/ManualTaskDialog.tsx:151-165`, `src/ui/features/board/ManualTaskDialog.tsx:280-284`, `src/ui/features/board/BoardView.tsx:105-113`, `src/ui/features/board/BoardView.tsx:128-138`, `src/ui/features/board/BoardView.tsx:213-222`, `src/ui/features/home/HomeView.tsx:28`, `src/shared/api.ts:527-528`
-- **Estado:** abierta
+- **Estado:** resuelta
 - **Origen:** revisión de agy, verificada por Claude
 
 ## Cómo ocurre

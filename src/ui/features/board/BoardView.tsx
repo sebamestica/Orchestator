@@ -6,6 +6,7 @@ import type { TaskRecord } from '../../api/types.ts';
 import { EmptyState } from '../../components/EmptyState.tsx';
 import { navigate } from '../../app/routes.ts';
 import { useApp } from '../../store/app.ts';
+import { AddProjectDialog } from '../projects/AddProjectDialog.tsx';
 import { ManualTaskDialog } from './ManualTaskDialog.tsx';
 import { TaskCard } from './TaskCard.tsx';
 import { TaskDetailModal } from './TaskDetailModal.tsx';
@@ -36,6 +37,7 @@ export default function BoardView({ projectId: fixedProjectId, openManual = fals
   const [tasksList, setTasksList] = useState<TaskRecord[]>(() => Object.values(rawTasks));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [manualDialogOpen, setManualDialogOpen] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
 
   // La orden `?nueva` se consume al abrir: se quita de la barra para que recargar o ir atrás no reabra el diálogo.
   // Va en un efecto (no solo en el estado inicial) porque pasar de `#/tablero` a `#/tablero?nueva` no remonta la vista.
@@ -249,7 +251,12 @@ export default function BoardView({ projectId: fixedProjectId, openManual = fals
         onCreated={() => {
           void refreshTasks();
         }}
+        onOpenFolder={() => {
+          setManualDialogOpen(false);
+          setAddingProject(true);
+        }}
       />
+      <AddProjectDialog open={addingProject} onClose={() => setAddingProject(false)} />
     </div>
   );
 }

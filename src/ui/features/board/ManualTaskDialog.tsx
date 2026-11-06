@@ -10,7 +10,7 @@ import {
   ModalHeading,
   Switch,
 } from '@heroui/react';
-import { AlertCircle, Plus } from 'lucide-react';
+import { AlertCircle, FolderOpen, Info, Plus } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../api/client.ts';
 import type { AgentRecord, ProjectRecord } from '../../api/types.ts';
@@ -23,6 +23,8 @@ interface ManualTaskDialogProps {
   agents: AgentRecord[];
   defaultProjectId?: string;
   onCreated: () => void;
+  /** Sin proyectos registrados: cambia este diálogo por el de abrir una carpeta local. */
+  onOpenFolder: () => void;
 }
 
 export function ManualTaskDialog({
@@ -32,6 +34,7 @@ export function ManualTaskDialog({
   agents,
   defaultProjectId,
   onCreated,
+  onOpenFolder,
 }: ManualTaskDialogProps) {
   const [projectId, setProjectId] = useState<string>('');
   const [title, setTitle] = useState('');
@@ -59,6 +62,9 @@ export function ManualTaskDialog({
   }, [isOpen, defaultProjectId, projects]);
 
   if (!isOpen) return null;
+
+  // Una tarea a mano exige proyecto (contrato `manualTaskBody`): sin ninguno, se avisa antes de que el usuario escriba.
+  const sinProyectos = projects.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,6 +139,21 @@ export function ManualTaskDialog({
             </ModalHeader>
 
             <ModalBody className="flex flex-col gap-4 py-4 max-h-[65vh] overflow-y-auto">
+              {sinProyectos && (
+                <div
+                  role="status"
+                  className="flex items-start gap-2 rounded-xl border border-foreground/[0.08] bg-foreground/[0.04] p-3 text-xs text-foreground"
+                >
+                  <Info className="size-4 shrink-0 mt-0.5 text-muted" aria-hidden="true" />
+                  <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+                    <span>Para crear una tarea hace falta un proyecto. Abre primero una carpeta local.</span>
+                    <Button variant="secondary" size="sm" onPress={onOpenFolder}>
+                      <FolderOpen className="size-4 mr-1.5" aria-hidden="true" />
+                      Abrir una carpeta
+                    </Button>
+                  </div>
+                </div>
+              )}
               {errorNotice && (
                 <div
                   role="alert"
@@ -154,6 +175,7 @@ export function ManualTaskDialog({
                     value={projectId}
                     onChange={(e) => setProjectId(e.target.value)}
                     className="w-full rounded-lg border border-foreground/[0.1] bg-foreground/[0.05] px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-foreground"
+                    disabled={sinProyectos}
                     required
                   >
                     <option value="">Selecciona un proyecto</option>
@@ -281,7 +303,7 @@ export function ManualTaskDialog({
                 type="submit"
                 variant="primary"
                 size="sm"
-                isDisabled={submitting}
+                isDisabled={submitting || sinProyectos}
                 aria-label="Crear tarea manual"
               >
                 <Plus className="size-4 mr-1.5" aria-hidden="true" />

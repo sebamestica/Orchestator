@@ -436,6 +436,33 @@ describe('BoardView', () => {
     expect(screen.queryByText('Nueva tarea a mano')).toBeNull();
   });
 
+  it('sin proyectos, el diálogo de tarea a mano avisa antes de escribir y no deja crear', () => {
+    useApp.setState({ projects: [] });
+    render(<BoardView />);
+    fireEvent.click(screen.getByRole('button', { name: /abrir diálogo de tarea a mano/i }));
+
+    expect(screen.getByText(/hace falta un proyecto/i)).toBeTruthy();
+    const submitBtn = screen.getByRole('button', { name: /crear tarea manual/i }) as HTMLButtonElement;
+    expect(submitBtn.disabled).toBe(true);
+    expect((screen.getByLabelText('Proyecto') as HTMLSelectElement).disabled).toBe(true);
+
+    fireEvent.click(submitBtn);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.queryByText('Debes seleccionar un proyecto.')).toBeNull();
+
+    // El botón del aviso cambia la tarea por el diálogo de abrir carpeta.
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir una carpeta' }));
+    expect(screen.queryByText('Nueva tarea a mano')).toBeNull();
+    expect(screen.getByText('Abrir una carpeta local')).toBeTruthy();
+  });
+
+  it('con proyectos, el diálogo de tarea a mano no muestra el aviso de falta de proyecto', () => {
+    render(<BoardView />);
+    fireEvent.click(screen.getByRole('button', { name: /abrir diálogo de tarea a mano/i }));
+    expect(screen.queryByText(/hace falta un proyecto/i)).toBeNull();
+    expect((screen.getByRole('button', { name: /crear tarea manual/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('el diálogo de tarea a mano valida campos vacíos', () => {
     render(<BoardView />);
 
