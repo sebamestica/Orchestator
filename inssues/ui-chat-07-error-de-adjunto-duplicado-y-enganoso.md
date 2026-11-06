@@ -3,7 +3,7 @@
 - **Área:** Interfaz: chat y composer
 - **Severidad:** baja
 - **Archivos:** `src/ui/features/chat/ChatView.tsx:163-170`, `src/ui/features/chat/ChatView.tsx:337-349`, `src/ui/features/chat/ChatView.tsx:368`, `src/ui/features/composer/useAttachments.ts:16`, `src/ui/features/composer/useAttachments.ts:59-66`, `src/ui/features/composer/Composer.tsx:166-182`, `src/ui/features/chat/store.ts:61-67`, `src/core/chat/attachments.ts:149`, `src/core/chat/attachments.ts:172-174`, `tests/ui/composer/Composer.test.tsx:163-170`
-- **Estado:** abierta
+- **Estado:** resuelta
 
 ## Cómo ocurre
 El composer (`Composer.tsx`) recibe de la vista de chat la función `onAttach`, que sube o registra cada archivo. En

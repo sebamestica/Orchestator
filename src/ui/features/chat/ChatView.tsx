@@ -182,15 +182,6 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
     [createChat, toChat],
   );
 
-  const onAttach = useCallback(async (file: File): Promise<Attachment> => {
-    try {
-      return await attachFile(file);
-    } catch (err) {
-      useChat.getState().setNotice(`No se pudo adjuntar ${file.name}: ${errorText(err)}`);
-      throw err;
-    }
-  }, []);
-
   const onNew = useCallback(async () => {
     const created = await createChat();
     if (created) toChat(created.id);
@@ -388,7 +379,7 @@ export default function ChatView({ projectId, chatId }: ChatViewProps) {
           effort={effort}
           onEffortChange={setEffort}
           effortLevels={effortSchema.options}
-          onAttach={onAttach}
+          onAttach={attachFile}
           onSubmit={onSubmit}
           isStreaming={running}
           onStop={() => void useChat.getState().interrupt()}

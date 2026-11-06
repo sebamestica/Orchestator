@@ -5,6 +5,7 @@ import { Composer } from '../../../src/ui/features/composer/Composer.tsx';
 import type { ComposerProps } from '../../../src/ui/features/composer/Composer.tsx';
 import { MAX_ATTACHMENT_BYTES } from '../../../src/shared/api.ts';
 import type { Attachment } from '../../../src/shared/api.ts';
+import { ApiError } from '../../../src/ui/api/client.ts';
 
 const attachment: Attachment = { id: 'attachment-1', name: 'foto.png', mime: 'image/png', size: 3, path: 'C:/data/foto.png', kind: 'image', source: 'upload', createdAt: '2026-11-04T12:00:00.000Z' };
 const image = () => new File(['abc'], 'foto.png', { type: 'image/png' });
@@ -198,12 +199,18 @@ describe('Composer', () => {
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   });
   it('muestra fallo de carga y bloquea el envío hasta quitarlo', async () => {
-    setup({ onAttach: vi.fn().mockRejectedValue(new Error('404')) });
+    setup({ onAttach: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) });
     paste([image()]);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('servicio'));
     expect((screen.getByRole('button', { name: 'Enviar mensaje' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Quitar foto.png' }));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+  it('si el núcleo rechaza el adjunto, muestra su motivo en un solo aviso', async () => {
+    setup({ onAttach: vi.fn().mockRejectedValue(new ApiError(400, 'invalid_request', 'La ruta no es un archivo')) });
+    paste([image()]);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('La ruta no es un archivo'));
+    expect(screen.getByRole('alert').textContent).not.toContain('servicio puede no estar disponible');
   });
   it('muestra error de envío y conserva borrador sin rechazo sin controlar', async () => {
     setup({ onSubmit: vi.fn().mockRejectedValue(new Error('501')) });

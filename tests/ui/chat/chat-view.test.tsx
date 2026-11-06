@@ -536,6 +536,19 @@ describe('adjuntos', () => {
   });
 });
 
+describe('adjunto rechazado', () => {
+  it('el motivo del núcleo queda en el Composer, sin un segundo aviso en el pie', async () => {
+    fakeCore({ chats: [makeChat()] }, (_method, path) =>
+      path === '/attachments/by-path' ? { status: 400, body: { error: { code: 'invalid_request', message: 'La ruta no es un archivo' } } } : undefined);
+    render(<ChatView projectId="demo" />);
+    await waitFor(() => expect(composer().isDisabled).toBe(false));
+    setBridge({ pathForFile: () => 'C:\\Users\\yo\\MiCarpeta' });
+    await expect(composer().onAttach(new File([''], 'MiCarpeta'))).rejects.toThrow('La ruta no es un archivo');
+    await act(async () => {});
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
 describe('borrador por conversación', () => {
   const field = () => screen.getByLabelText('Mensaje') as HTMLTextAreaElement;
   const picker = () => screen.getByRole('button', { name: 'Conversaciones del proyecto' });

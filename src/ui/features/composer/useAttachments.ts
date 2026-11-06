@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MAX_ATTACHMENT_BYTES, attachmentSchema } from '../../../shared/api.ts';
 import type { Attachment } from '../../../shared/api.ts';
+import { ApiError } from '../../api/client.ts';
 
 /** Adjunto en la bandeja del composer: el archivo local, su miniatura y, al terminar de subir, el adjunto del núcleo. */
 export interface PendingAttachment {
@@ -14,6 +15,11 @@ export interface PendingAttachment {
 
 export const MAX_ATTACHMENTS = 20;
 const UPLOAD_ERROR = 'El servicio puede no estar disponible. Quita el archivo y vuelve a intentarlo.';
+
+/** Si el núcleo respondió, su motivo (ya en español); si no llegó a responder (red, sin núcleo, respuesta rara), el genérico. */
+function uploadError(err: unknown): string {
+  return err instanceof ApiError && err.status >= 400 ? err.message : UPLOAD_ERROR;
+}
 
 export function useAttachments(onAttach: (file: File) => Promise<Attachment>) {
   const [items, setItems] = useState<PendingAttachment[]>([]);
@@ -62,8 +68,9 @@ export function useAttachments(onAttach: (file: File) => Promise<Attachment>) {
         try {
           const attachment = attachmentSchema.parse(await upload.current(file));
           if (mounted.current) update(current.current.map((entry) => entry.id === item.id ? { ...entry, attachment } : entry));
-        } catch {
-          if (mounted.current) update(current.current.map((entry) => entry.id === item.id ? { ...entry, error: UPLOAD_ERROR } : entry));
+        } catch (err) {
+          const error = uploadError(err);
+          if (mounted.current) update(current.current.map((entry) => entry.id === item.id ? { ...entry, error } : entry));
         }
       })();
     }
