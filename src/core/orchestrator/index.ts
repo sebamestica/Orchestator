@@ -6,3 +6,4 @@ export * from './router.ts';
 export * from './supervisor.ts';
 export * from './fleet.ts';
 export * from './task-plan.ts';
+export * from './pruebas.ts';

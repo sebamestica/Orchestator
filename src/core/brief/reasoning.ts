@@ -49,6 +49,11 @@ export interface RunHints {
   budgetUsd?: number;
   /** Modo local: se trabaja en la carpeta del usuario. El encargo lleva la sección «Modo local» (`renderBrief`). */
   local?: { path: string };
+  /**
+   * Modelo forzado para este intento (F6): lo pone la escalera de corrección (Sonnet y luego Opus cuando fallan las
+   * pruebas). Manda sobre el modelo por dificultad. Solo lo usan los adaptadores de Claude.
+   */
+  model?: string;
 }
 
 export type HintedRunContext = RunContext & RunHints;
@@ -60,6 +65,7 @@ export function runHints(ctx: RunContext): RunHints {
   if (typeof c.retries === 'number' && Number.isFinite(c.retries) && c.retries > 0) hints.retries = Math.floor(c.retries);
   if (typeof c.budgetUsd === 'number' && Number.isFinite(c.budgetUsd) && c.budgetUsd >= 0) hints.budgetUsd = c.budgetUsd;
   if (typeof c.local?.path === 'string' && c.local.path.trim()) hints.local = { path: c.local.path };
+  if (typeof c.model === 'string' && /^[A-Za-z0-9._:@/-]{1,100}$/.test(c.model)) hints.model = c.model;
   return hints;
 }
 
