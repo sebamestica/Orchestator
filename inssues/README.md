@@ -1,7 +1,7 @@
 # Issues abiertos de Berland (`inssues/`)
 
 Esta carpeta junta los problemas **abiertos** que se encontraron en Berland (el orquestador de `C:\dev\orquestador`)
-el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **120 issues** (23 de ellas `autoeval-*`, agregadas después), uno por archivo `.md`, y
+el 2026-11-05, después de integrar los planes de `docs/plan/issues/`. Hay **123 issues** (23 de ellas `autoeval-*`, agregadas después, y `mente-09`, `mente-10` y `skills-01`, verificadas el 2026-11-07 con las líneas de `edfc8a2`), uno por archivo `.md`, y
 cada uno se verificó leyendo el código (archivo:línea). Los `uso-real-*` se verificaron además con copias de solo lectura
 de la base y de los registros reales. Los números de línea son los del código en el commit `63748b8`. Si el código se
 mueve, busca el fragmento citado.
@@ -17,6 +17,7 @@ Origen de cada prefijo:
 | `agy-` | Revisión de agy (Antigravity), verificada y corregida por Claude (lo que agy tenía mal está anotado en cada archivo) |
 | `codex-` | Revisión de seguridad y corrección de Codex, verificada por Claude |
 | `uso-real-` | Evidencia de uso real: la base `%LOCALAPPDATA%\orquestador\orquestador.db` y `logs\nucleo-escritorio.log` |
+| `skills-` | Catálogo de skills del hub y cómo llegan a las tareas (`buscar_skills`, planificador, briefs) |
 | `autoeval-` | Las vulnerabilidades que la propia mente de Berland dijo tener. Cada una se verificó en el código (5 verificadores, más un revisor que intentó refutar cada borrador) y se cruzó con las demás issues: solo se escribió lo que ninguna cubría |
 
 La numeración tiene huecos (por ejemplo `flota-05` o `agy-03`): esos números no tienen archivo. Los cinco
@@ -70,6 +71,8 @@ Ordenado por severidad (alta, media, baja) y después por área.
 |---|---|---|---|
 | [uso-real-02-gasto-de-la-mente-contado-dos-veces-al-reanudar.md](uso-real-02-gasto-de-la-mente-contado-dos-veces-al-reanudar.md) | El uso y el gasto de la mente se cuentan dos veces cada vez que su sesión se recrea con `resume` | alta | Evidencia de uso real |
 | [ui-chat-01-entrega-fallida-de-propuesta-silenciosa.md](ui-chat-01-entrega-fallida-de-propuesta-silenciosa.md) | Si una propuesta aprobada no llega a la flota, el chat la muestra «Aprobada» en verde, sin aviso y sin forma de reintentar | alta | Interfaz: chat y composer |
+| [mente-09-subagentes-de-la-mente-solo-leen.md](mente-09-subagentes-de-la-mente-solo-leen.md) | La mente no puede repartir cambios entre subagentes: los suyos solo leen y ella aplica todo sola (resuelta) | alta | Mente y chat |
+| [mente-10-mensaje-a-mitad-de-turno-queda-esperando.md](mente-10-mensaje-a-mitad-de-turno-queda-esperando.md) | Un mensaje enviado a mitad del trabajo deja a la mente «pensando» sin mostrar nada hasta que termina o se detiene | alta | Mente y chat |
 | [mente-01-plugins-chrome-saltan-guardia-lectura.md](mente-01-plugins-chrome-saltan-guardia-lectura.md) | Con el plugin Chrome, la mente lee por `file://` archivos que la guardia le niega (otros proyectos, la memoria de Obsidian y credenciales), en todos los modos | alta | Mente y chat |
 | [flota-01-modo-local-reglas-fuera-del-prompt.md](flota-01-modo-local-reglas-fuera-del-prompt.md) | En modo local las reglas «sin commits, sin stash/checkout/reset» no llegan al prompt del agente: solo quedan en `.orq/BRIEF.md` | alta | Núcleo de la flota |
 | [plugins-01-puerta-chrome-cancelacion-en-curso-bloquea-candado.md](plugins-01-puerta-chrome-cancelacion-en-curso-bloquea-candado.md) | Al cancelar una llamada que ya llegó al servidor, la puerta de Chrome no suelta el candado | alta | Plugins y navegador |
@@ -95,6 +98,7 @@ Ordenado por severidad (alta, media, baja) y después por área.
 | [ui-resto-02-detalle-tarea-arrastra-agente-y-error.md](ui-resto-02-detalle-tarea-arrastra-agente-y-error.md) | El detalle de una tarea arrastra el agente elegido y el aviso de error de la tarea anterior, y puede aprobar otra tarea con ese agente | media | Interfaz: tablero, panel, ajustes |
 | [ui-resto-04-panel-mente-ciega-fuera-del-chat.md](ui-resto-04-panel-mente-ciega-fuera-del-chat.md) | La fila «Mente» del panel solo ve los chats de la vista de chat abierta: en el Tablero siempre dice «Libre» | media | Interfaz: tablero, panel, ajustes |
 | [ui-resto-05-textos-modos-mente-desactualizados.md](ui-resto-05-textos-modos-mente-desactualizados.md) | Ajustes y la ficha del chat describen Bypass como «Auto que lee fuera de la carpeta»: no dicen que la mente edita archivos y ejecuta comandos sin preguntar | media | Interfaz: tablero, panel, ajustes |
+| [skills-01-catalogo-de-skills-para-crear-tareas.md](skills-01-catalogo-de-skills-para-crear-tareas.md) | Las skills casi no llegan a las tareas: el catálogo es corto, la búsqueda falla y las referencias salen rotas | media | Mente, planificador y skills |
 | [mente-02-adjunto-subido-abre-carpeta-comun.md](mente-02-adjunto-subido-abre-carpeta-comun.md) | Adjuntar un archivo subido (no imagen) abre a la mente la carpeta común de adjuntos de todos los chats y proyectos | media | Mente y chat |
 | [mente-03-crear-tareas-acepta-otro-proyecto.md](mente-03-crear-tareas-acepta-otro-proyecto.md) | crear_tareas acepta otro proyecto: en auto y bypass la tarea se aprueba sola y la flota trabaja en el repo ajeno | media | Mente y chat |
 | [mente-04-reanudar-sesion-sdk-inexistente-rompe-chat.md](mente-04-reanudar-sesion-sdk-inexistente-rompe-chat.md) | Si la transcripción del SDK ya no existe, el chat no vuelve a responder: cada mensaje reanuda con el mismo id | media | Mente y chat |

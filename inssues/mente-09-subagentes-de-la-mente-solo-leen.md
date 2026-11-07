@@ -2,7 +2,7 @@
 
 - **Área:** Mente y chat
 - **Severidad:** alta
-- **Archivos:** `src/core/conductor/session.ts:92-106`, `src/core/conductor/session.ts:307`, `src/core/conductor/prompt.ts:45`, `src/core/conductor/guard.ts:199-211`
+- **Archivos (líneas de `d27b772`, antes del arreglo):** `src/core/conductor/session.ts:92-106`, `src/core/conductor/session.ts:307`, `src/core/conductor/prompt.ts:45`, `src/core/conductor/guard.ts:199-211`
 - **Estado:** resuelta
 - **Origen:** uso real, chat de `radio_example-` del 2026-11-07 (modo bypass)
 - **Relacionadas:** `docs/plan/F6-FLUJO-RAPIDO.md` (el investigador en Opus como causa de lentitud)
