@@ -168,8 +168,9 @@ const STEP_EVENTS: ReadonlySet<AgentEvent['type']> = new Set(['tool_call', 'tool
  * Parte la historia de la sesión por turnos. Cada mensaje de la mente se queda con los eventos con
  * `ts` en (mensaje anterior, mensaje]; lo que llegó después del último mensaje es el borrador en vivo.
  * Así, al llegar el `chat_message` final, el borrador se vacía solo. Si lo que precede a un mensaje del
- * usuario trae pasos, es un turno sin respuesta y se ancla al mensaje anterior (los eventos sueltos, como
- * un `usage` tardío, se descartan).
+ * usuario trae pasos y se cerró (`done`, error, cancelado), es un turno sin respuesta y se ancla al mensaje anterior
+ * (los eventos sueltos, como un `usage` tardío, se descartan). Si no se cerró, el mensaje entró al turno en curso y
+ * esos pasos siguen con la respuesta de ese turno.
  */
 export function splitTurns(events: readonly AgentEvent[], messages: readonly ChatMessage[]): Turns {
   const byMessage = new Map<string, AgentEvent[]>();
@@ -179,10 +180,14 @@ export function splitTurns(events: readonly AgentEvent[], messages: readonly Cha
   let i = 0;
   let mi = 0;
   const list = [...events];
+  // Pasos de un turno que siguió vivo tras un mensaje del usuario («Ahora», a mitad de turno): van a la respuesta que
+  // cierra ese turno (o al borrador), no a un «turno sin respuesta» (mente-10).
+  let carry: AgentEvent[] = [];
   while (mi < messages.length) {
     const m = messages[mi];
     const until = bounds[mi] ?? 0;
-    const chunk: AgentEvent[] = [];
+    const chunk: AgentEvent[] = carry;
+    carry = [];
     while (i < list.length && time(list[i]?.ts ?? '') <= until) {
       const e = list[i];
       if (e) chunk.push(e);
@@ -190,10 +195,19 @@ export function splitTurns(events: readonly AgentEvent[], messages: readonly Cha
     }
     const prev = messages[mi - 1];
     if (m && m.role === 'assistant' && chunk.length) byMessage.set(m.id, chunk);
-    else if (prev && chunk.some((e) => STEP_EVENTS.has(e.type))) orphans.set(prev.id, chunk);
+    else if (prev && chunk.some((e) => STEP_EVENTS.has(e.type))) {
+      if (chunk.some(closesTurn)) orphans.set(prev.id, chunk);
+      else carry = chunk;
+    }
     mi++;
   }
-  return { byMessage, orphans, pending: list.slice(i) };
+  return { byMessage, orphans, pending: [...carry, ...list.slice(i)] };
+}
+
+/** Evento que cierra un turno de la mente: su `done`, un error o el estado cancelado o fallido (Detener, caída). */
+function closesTurn(e: AgentEvent): boolean {
+  if (e.type === 'done' || e.type === 'error') return true;
+  return e.type === 'status' && (e.payload.state === 'cancelled' || e.payload.state === 'failed' || e.payload.state === 'done');
 }
 
 /**

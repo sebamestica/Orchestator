@@ -16,6 +16,7 @@ import {
   EDITOR_SUBAGENT,
   EDITOR_SUBAGENT_DEFINITION,
   MAX_IMAGE_BASE64_BYTES,
+  MID_TURN_NOTE,
   PROGRAMADOR_RULE,
   SUBAGENT_TOOL,
   buildEnv,
@@ -222,7 +223,12 @@ describe('ConductorSession: opciones del SDK', () => {
     expect(await pre({ ...task, subagent_type: 'general-purpose' })).toMatch(/"permissionDecision":"deny".*investigador/);
     expect(await pre({ ...task, subagent_type: 'general-purpose' }, { agent_id: 'a1', agent_type: 'investigador' })).toMatch(/"permissionDecision":"deny"/);
     expect(await pre(task)).toMatch(/"permissionDecision":"deny".*subagent_type/);
-    expect(await pre({ ...task, subagent_type: 'investigador' })).toBe('{}');
+    // mente-10: permitido y siempre en segundo plano, aunque la mente pida primer plano.
+    const launched = JSON.parse(await pre({ ...task, subagent_type: 'investigador', run_in_background: false })) as { hookSpecificOutput?: { permissionDecision?: string; updatedInput?: Record<string, unknown> } };
+    expect(launched.hookSpecificOutput?.permissionDecision).toBe('allow');
+    expect(launched.hookSpecificOutput?.updatedInput).toEqual({ ...task, subagent_type: 'investigador', run_in_background: true });
+    // Ya en segundo plano: el hook no cambia nada.
+    expect(await pre({ ...task, subagent_type: 'investigador', run_in_background: true })).toBe('{}');
     expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/Indica siempre subagent_type: investigador o programador/);
     // Fuera de bypass y chat no hay programador: el SDK no lo conoce y la guardia lo niega.
     expect(await pre({ ...task, subagent_type: 'programador' })).toMatch(/"permissionDecision":"deny"/);
@@ -632,7 +638,7 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
     // El prompt de bypass le dice a la mente cómo repartir el trabajo.
     expect(promptBlocks(o)[2]).toContain(PROGRAMADOR_RULE);
     const pre = guardAt(o, project);
-    expect(await pre('Agent', { description: 'micrófono', prompt: 'rehaz mic.css', subagent_type: EDITOR_SUBAGENT })).toBe('{}');
+    expect(await pre('Agent', { description: 'micrófono', prompt: 'rehaz mic.css', subagent_type: EDITOR_SUBAGENT })).toMatch(/"permissionDecision":"allow".*"run_in_background":true/);
     // Lo que escribe el programador pasa por la misma guardia (el hook ve también las llamadas de los subagentes).
     const hook = (o.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
     if (!hook) throw new Error('falta la guardia');
@@ -657,16 +663,22 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
     s.send('hola');
     const pre = guardAt(optionsOf(q), project);
     const launch = { description: 'x', prompt: 'y', subagent_type: EDITOR_SUBAGENT };
-    expect(await pre('Agent', launch)).toBe('{}');
+    expect(await pre('Agent', launch)).toMatch(/"permissionDecision":"allow"/);
     for (const next of ['auto', 'plan'] as const) {
       mode = next;
       expect(await pre('Agent', launch), next).toMatch(/"deny".*programador solo está disponible en los modos bypass y chat/);
       expect(await pre('Task', launch), next).toMatch(/"deny"/);
       expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' }), next).toMatch(/"deny"/);
       // El investigador sigue disponible.
-      expect(await pre('Agent', { ...launch, subagent_type: 'investigador' }), next).toBe('{}');
+      expect(await pre('Agent', { ...launch, subagent_type: 'investigador' }), next).toMatch(/"permissionDecision":"allow"/);
     }
     s.close();
+  });
+
+  it('mente-10: la mente sabe que sus subagentes van en segundo plano y qué hacer con un mensaje a mitad de su trabajo', () => {
+    expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/Los subagentes corren siempre en segundo plano/);
+    expect(CONDUCTOR_PROMPT_PREFIX).toContain(`Un mensaje que empieza con «${MID_TURN_NOTE}»`);
+    expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/No abandones lo que tenías en marcha/);
   });
 
   it('mente-09: plan y auto no conocen al programador', () => {

@@ -11,6 +11,7 @@ import {
   upsertMessage,
 } from '../../../src/ui/features/chat/timeline.ts';
 import { COMPACTED_DETAIL } from '../../../src/shared/index.ts';
+import type { AgentEvent } from '../../../src/shared/index.ts';
 import { at, ev, makeMessage, makeProposal } from './helpers.ts';
 
 describe('mergeEvents', () => {
@@ -71,6 +72,12 @@ describe('buildReply', () => {
   });
 });
 
+/** Estado cancelado del turno de la mente (lo que deja «Detener»). */
+function cancelledAt(seq: number, sec: number): AgentEvent {
+  const base = ev.status(seq, sec, 'interrumpido por ti');
+  return { ...base, type: 'status', payload: { state: 'cancelled', detail: 'interrumpido por ti' } } as AgentEvent;
+}
+
 describe('splitTurns', () => {
   const messages = [
     makeMessage({ id: 'u1', role: 'user', text: 'hola', at: at(0) }),
@@ -101,6 +108,34 @@ describe('splitTurns', () => {
     expect(turns.orphans.get('u1')?.map((e) => e.seq)).toEqual([0, 1]);
     expect(turns.byMessage.get('a2')?.map((e) => e.seq)).toEqual([2]);
     expect(turns.pending).toEqual([]);
+  });
+
+  it('mente-10: un mensaje enviado con el turno vivo no lo parte: los pasos siguen en la respuesta de ese turno', () => {
+    const list = [
+      makeMessage({ id: 'u1', role: 'user', text: 'continua', at: at(10) }),
+      makeMessage({ id: 'u2', role: 'user', text: 'levanta la página', at: at(50) }),
+    ];
+    const events = [ev.call(0, 12, 'c1', 'Read', 'a.ts'), ev.call(1, 20, 'c2', 'Agent', 'investigador: revisa'), ev.text(2, 60, 'Recibido, la levanto')];
+    // Turno en curso: nada queda como «turno sin respuesta» y el borrador trae los pasos de antes y de después.
+    const live = splitTurns(events, list);
+    expect(live.orphans.size).toBe(0);
+    expect(live.pending.map((e) => e.seq)).toEqual([0, 1, 2]);
+    // Al guardarse la respuesta, esa respuesta se queda con todo el turno.
+    const done = splitTurns([...events, ev.done(3, 70)], [...list, makeMessage({ id: 'a1', role: 'assistant', text: 'listo', at: at(70) })]);
+    expect(done.orphans.size).toBe(0);
+    expect(done.byMessage.get('a1')?.map((e) => e.seq)).toEqual([0, 1, 2, 3]);
+    expect(done.pending).toEqual([]);
+  });
+
+  it('mente-10: si el turno anterior se cerró (Detener, error), sus pasos sí quedan como turno sin respuesta', () => {
+    const list = [
+      makeMessage({ id: 'u1', role: 'user', text: 'hola', at: at(10) }),
+      makeMessage({ id: 'u2', role: 'user', text: 'otra vez', at: at(50) }),
+    ];
+    const events = [ev.call(0, 12, 'c1', 'Read', 'a.ts'), cancelledAt(1, 15), ev.text(2, 60, 'nuevo')];
+    const turns = splitTurns(events, list);
+    expect(turns.orphans.get('u1')?.map((e) => e.seq)).toEqual([0, 1]);
+    expect(turns.pending.map((e) => e.seq)).toEqual([2]);
   });
 
   it('sin mensajes, todo es borrador', () => {

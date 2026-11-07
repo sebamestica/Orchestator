@@ -416,4 +416,32 @@ describe('ChatService: tope de turnos autónomos seguidos', () => {
     await waitFor(() => b.service.messages(chat.id).some((m) => m.text === 'turno D'));
     expect(q.closed).toBe(1);
   });
+
+  it('mente-10: un subagente que termina con otros de su tanda vivos no cuenta para el tope; sin subagentes vivos sí', async () => {
+    const q = injectableQuery(launchScript);
+    const limits = { ...DEFAULT_SETTINGS.mindLimits, maxAutonomousTurns: 1 };
+    const b = await bench({ query: q.fn, settings: { ...DEFAULT_SETTINGS, mindLimits: limits } });
+    const chat = b.service.create({ projectId: 'demo' });
+    await b.service.send(chat.id, { text: 'investiga' });
+    await b.settle(chat.id);
+    const sid = 'sdk-1';
+    // Tres programadores en paralelo (el primero lo lanzó el turno del usuario).
+    q.inject([taskStarted('t2', 'tu2', sid), taskStarted('t3', 'tu3', sid)]);
+    await waitFor(() => b.service.get(chat.id).backgroundTasks === 3);
+    // Cada uno termina y abre un turno: los dos primeros son parciales; el último es el único que cuenta (1 de 1).
+    for (const [i, id] of ['t1', 't2', 't3'].entries()) {
+      q.inject([taskDone(id, `tu${i + 1}`, sid), sdkInit(sid), sdkText(`resultado ${id}`, sid), sdkResult(`resultado ${id}`, sid, 0.01)]);
+      await waitFor(() => b.service.messages(chat.id).some((m) => m.text === `resultado ${id}`));
+      await b.settle(chat.id);
+    }
+    expect(q.closed).toBe(0);
+    expect(b.service.get(chat.id).backgroundTasks).toBeUndefined();
+    // Un turno más sin ningún subagente que lo explique sí pasa el tope.
+    q.inject([sdkInit(sid), sdkText('de más', sid), sdkResult('de más', sid, 0.01)]);
+    await waitFor(() => q.closed === 1);
+    await b.settle(chat.id);
+    const texts = b.service.messages(chat.id).map((m) => m.text);
+    expect(texts).not.toContain('de más');
+    expect(texts.at(-1)).toMatch(/1 turnos seguidos sin mensaje tuyo/);
+  });
 });

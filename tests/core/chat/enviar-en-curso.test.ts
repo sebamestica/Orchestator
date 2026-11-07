@@ -1,6 +1,7 @@
 /** Issue ui-chat-08: escribirle a la mente mientras trabaja («Ahora» entra al turno; «Al terminar» espera en la cola). */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import { MID_TURN_NOTE } from '../../../src/core/conductor/index.ts';
 import { bench, closeBenches, echoTurn, sdkInit, sdkResult, sdkText, type ChatBench, type TurnFn } from './helpers.ts';
 
 afterEach(closeBenches);
@@ -93,7 +94,8 @@ describe('enviar con la mente ocupada', () => {
 
     g.release();
     await vi.waitFor(() => expect(b.q.received).toHaveLength(2));
-    expect(b.q.received[1]).toMatchObject({ type: 'user', priority: 'next', message: { content: 'y esto también' } });
+    // mente-10: a la mente le llega marcado como mensaje a mitad de su trabajo; en el hilo queda tal cual lo escribió el usuario.
+    expect(b.q.received[1]).toMatchObject({ type: 'user', priority: 'next', message: { content: `${MID_TURN_NOTE}\ny esto también` } });
     expect(b.q.received[0]?.priority).toBeUndefined();
     // Si el SDK no lo incorporó al turno, lo corre como turno propio y su respuesta también queda en el hilo.
     await vi.waitFor(() =>
@@ -101,7 +103,7 @@ describe('enviar con la mente ocupada', () => {
         ['user', 'largo'],
         ['user', 'y esto también'],
         ['assistant', 'listo'],
-        ['assistant', 'eco: y esto también'],
+        ['assistant', `eco: ${MID_TURN_NOTE}\ny esto también`],
       ]),
     );
     await b.settle(chat.id);
@@ -139,7 +141,7 @@ describe('enviar con la mente ocupada', () => {
         ['user', 'largo'],
         ['user', 'ahora'],
         ['assistant', 'listo'],
-        ['assistant', 'eco: ahora'],
+        ['assistant', `eco: ${MID_TURN_NOTE}\nahora`],
         ['user', 'luego'],
         ['assistant', 'eco: luego'],
       ]),

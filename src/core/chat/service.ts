@@ -45,6 +45,7 @@ import {
   approveAndDeliver,
   effortNote,
   imageTooLarge,
+  MID_TURN_NOTE,
   modeActs,
   sdkSessionIdOf,
   usageDeltas,
@@ -68,7 +69,7 @@ import { AttachmentError, sniffImage, type AttachmentStore } from './attachments
 import { ChatDb, ChatRepo, type ChatUpdate, type StoredChat } from './db.ts';
 import { ChatProposals, toProposal } from './proposals.ts';
 import { conversationDir } from './conversations.ts';
-import { chainCapNotice, dayCapMessage, dayLeftUsd, exhausted, freshSpend, MIND_MAX_TURNS, sessionCapUsd, turnCapNotice, type MindSpend } from './limits.ts';
+import { AUTONOMOUS_TOTAL_FACTOR, chainCapNotice, dayCapMessage, dayLeftUsd, exhausted, freshSpend, MIND_MAX_TURNS, sessionCapUsd, turnCapNotice, type MindSpend } from './limits.ts';
 import { asInterrupted } from './interrupted.ts';
 import { ChatTargets, normalizeDestination, resolveChangesTarget } from './target.ts';
 import { TurnChanges, turnSession } from './turn-memory.ts';
@@ -208,6 +209,8 @@ interface Live {
    * haya alguno, la sesión no se cierra por inactividad ni se recrea por un cambio de ajustes: se los mataría.
    */
   background: Set<string>;
+  /** Un subagente de la mente terminó desde el último turno: el turno autónomo que abra es su resultado (mente-10). */
+  subagentEnded?: boolean;
   /** Gasto en vivo desde el último mensaje del usuario (topes por mensaje y de turnos autónomos). */
   spend: MindSpend;
   /** Mensajes que esperan el fin del turno (`delivery: 'after-turn'`), en orden. Solo en memoria. */
@@ -682,7 +685,8 @@ export class ChatService {
         return undefined;
       }
       try {
-        turn.session.send(composed, { images, priority: 'next' });
+        // La marca le dice a la mente que el turno ya tenía trabajo en marcha (regla del prompt): lo suma sin dejarlo.
+        turn.session.send(`${MID_TURN_NOTE}\n${composed}`, { images, priority: 'next' });
       } catch (err) {
         throw new ChatError('invalid', oneLine(err));
       }
@@ -1228,6 +1232,8 @@ export class ChatService {
     if (live.turn !== turn) return;
     live.turn = undefined;
     live.busy = false;
+    // Lo que terminó durante este turno ya lo vio la mente: el próximo turno autónomo no es su resultado parcial.
+    live.subagentEnded = false;
     if (turn.grace) clearTimeout(turn.grace);
     const stored = this.#repo.get(chatId);
     if (!stored) return;
@@ -1274,9 +1280,15 @@ export class ChatService {
   /** Turno que arranca la mente sin mensaje del usuario: ocupa el chat y su respuesta se guarda como cualquier otra. */
   #beginAutonomousTurn(chatId: string, live: Live, session: ConductorSession): void {
     if (!this.#repo.get(chatId)) return;
-    live.spend.autonomous++;
+    // mente-10: los subagentes van en segundo plano. Si el turno lo abre un subagente que terminó mientras otros siguen
+    // trabajando, es un resultado parcial de la misma tanda (12 programadores no son 12 turnos de la cadena). Igual cuenta
+    // para un techo total.
+    const partial = live.subagentEnded === true && live.background.size > 0;
+    live.subagentEnded = false;
+    if (!partial) live.spend.autonomous++;
+    live.spend.autonomousTotal++;
     const max = this.#deps.settings().mindLimits.maxAutonomousTurns;
-    if (max !== null && live.spend.autonomous > max) {
+    if (max !== null && (live.spend.autonomous > max || live.spend.autonomousTotal > max * AUTONOMOUS_TOTAL_FACTOR)) {
       // La cadena se corta con sus subagentes; el próximo mensaje del usuario la reanuda con el contador en cero.
       live.spend.capped = true;
       this.#recordInFlight(chatId, live);
@@ -1373,7 +1385,7 @@ export class ChatService {
   #trackBackground(chatId: string, live: Live, sessionId: string, state: string): void {
     const before = live.background.size;
     if (state === 'starting' || state === 'running' || state === 'waiting') live.background.add(sessionId);
-    else live.background.delete(sessionId);
+    else if (live.background.delete(sessionId)) live.subagentEnded = true;
     if (live.background.size === before) return;
     this.#publishLive(chatId);
     // Terminó el último y la mente está libre: vuelve a correr el plazo de inactividad.

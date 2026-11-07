@@ -3,7 +3,7 @@
 - **Área:** Mente y chat (núcleo, prompt e interfaz)
 - **Severidad:** alta
 - **Archivos:** `src/core/chat/service.ts:676-705`, `src/core/conductor/session.ts:179-186` (`SendOptions.priority`), `src/core/conductor/prompt.ts:45`, `src/core/conductor/guard.ts:199-211`, `src/ui/features/chat/timeline.ts:174-197`, `src/ui/features/chat/components/MessageList.tsx:63-79`, `src/ui/features/chat/store.ts:649-658`, `node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts:792-796`
-- **Estado:** abierta
+- **Estado:** resuelta en lo principal (capas 1, 2 y 4, y el tope de turnos autónomos). Queda abierta la capa 3: el aviso «Recibido…» y el botón «Atender ya». Ver «Lo que se hizo».
 - **Origen:** uso real, chat `faf636ea…` de `radio_example-` (2026-11-07), con la base y el log del núcleo
 - **Relacionadas:** `ui-chat-08-enviar-mientras-razona.md` (resuelta: abrió el envío «Ahora», pero no cubre este caso), `mente-09-subagentes-de-la-mente-solo-leen.md`
 
@@ -103,6 +103,37 @@ En capas. Se puede entregar en ese orden, y cada una mejora algo por sí sola.
 - **Solo la capa 4 (interfaz).** El usuario vería que la mente sigue viva, pero el mensaje seguiría esperando al
   subagente.
 
+## Lo que se hizo (2026-11-07)
+
+1. **Subagentes siempre en segundo plano.**
+   - `ToolGuardOptions.backgroundSubagents` (`guard.ts`), que la sesión de la mente activa (`session.ts`): el hook
+     devuelve cada `Agent`/`Task` permitido con `permissionDecision: 'allow'` y `updatedInput.run_in_background: true`.
+     Si ya venía en segundo plano, no lo toca.
+   - No hay excepción para primer plano: la mente lanza, sigue o cierra su respuesta, y retoma cuando llega el
+     resultado.
+2. **Tope de turnos autónomos con tandas en paralelo** (`service.ts` y `limits.ts`).
+   - Con todo en segundo plano, 12 programadores podían abrir 12 turnos autónomos al terminar uno por uno. Con el tope
+     de 5, el sexto turno habría cortado a los que seguían vivos.
+   - Ahora un turno abierto por un subagente que terminó mientras otros de la tanda siguen trabajando
+     (`Live.subagentEnded` con `background.size > 0`) no suma a `autonomous`.
+   - Sí suma a `autonomousTotal`, con un techo de `maxAutonomousTurns × AUTONOMOUS_TOTAL_FACTOR` (10, o sea 50 con el
+     tope por defecto) contra una mente que siempre deja uno vivo. El tope por mensaje en USD sigue contando todo.
+3. **Mensaje a mitad de turno marcado, con su regla.**
+   - `#joinTurn` le manda a la mente `MID_TURN_NOTE` (`[Mensaje del usuario a mitad de tu trabajo]`) antes del texto.
+     En el hilo queda el texto tal cual lo escribió el usuario.
+   - El prefijo del prompt suma «Mensajes durante el trabajo»: acusar recibo en una línea, atender lo corto y seguir,
+     ajustar el plan sin rehacer lo hecho y juntar con el resultado del subagente.
+4. **La vista no parte el turno** (`timeline.ts`).
+   - Si los pasos que preceden a un mensaje del usuario no traen nada que cierre el turno (`done`, `error` o estado
+     cancelado, fallido o terminado), `splitTurns` los pasa a la respuesta de ese turno o al borrador, en vez de
+     dibujarlos como «Este turno terminó sin respuesta».
+
+Queda pendiente:
+- **Capa 3:** el aviso «Recibido, la mente lo lee cuando termine X» y el botón «Atender ya» (`priority: 'now'`). Con los
+  subagentes en segundo plano quedan pocos casos: un comando o una herramienta de un plugin que tarde mucho.
+- **`SendMessage`:** para que la mente pase una corrección a un subagente vivo. No se sumó porque también llega a otras
+  sesiones de Claude de la máquina (`ListAgents`) y habría que limitarlo en la guardia a los subagentes de la sesión.
+
 ## Cómo probar que quedó resuelta
 
 - **Prueba automatizada propuesta, núcleo** (`tests/core/chat/` y `tests/core/conductor/`):
@@ -114,6 +145,15 @@ En capas. Se puede entregar en ese orden, y cada una mejora algo por sí sola.
 - **Prueba automatizada propuesta, interfaz** (`tests/ui/chat/`): eventos de un turno vivo, luego un mensaje
   `joinedTurn` y luego más eventos. No aparece `orphan-turn`, el borrador muestra los pasos de antes y de después, y el
   subagente vivo aparece con su descripción.
+- **Pruebas que ya existen** (con `mente-10` en el nombre o en el comentario):
+  - `tests/core/conductor/session.test.ts`: `Agent` con `run_in_background: false` sale permitido y en segundo plano, y
+    el prefijo trae la regla y la marca;
+  - `tests/core/chat/enviar-en-curso.test.ts`: «Ahora» llega al SDK con la marca y con `priority: 'next'`, y el hilo
+    guarda el texto sin la marca;
+  - `tests/core/chat/background.test.ts`: con un tope de 1, tres subagentes que terminan uno por uno no cortan la
+    cadena, y un turno más sin subagentes sí la corta;
+  - `tests/ui/chat/timeline.test.tsx`: un mensaje con el turno vivo no deja `orphans` y la respuesta se queda con todos
+    los pasos; si el turno se canceló antes, sus pasos siguen siendo un turno sin respuesta.
 - **Comando (desde WSL):** `/mnt/c/dev/orquestador/scripts/win.sh npx vitest run tests/core/chat tests/core/conductor tests/ui/chat`.
 - **Verificación manual:** en bypass, pedir «revisa con 2 investigadores todo el CSS». Mientras trabajan, mandar «y
   levanta la vista previa en localhost». En segundos la mente contesta que lo recibió, levanta la vista previa y sigue;

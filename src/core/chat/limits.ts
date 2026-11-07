@@ -20,12 +20,23 @@ export interface MindSpend {
   shownCents: number;
   /** Ya se cortó por un tope desde el último mensaje del usuario. */
   capped: boolean;
-  /** Turnos que la mente abrió sola desde el último mensaje del usuario. */
+  /**
+   * Turnos que la mente abrió sola desde el último mensaje del usuario, sin contar los que abrió un subagente que
+   * terminó mientras otros de la misma tanda seguían trabajando (mente-10).
+   */
   autonomous: number;
+  /** Todos los turnos que abrió sola, también los parciales: techo de `maxAutonomousTurns × AUTONOMOUS_TOTAL_FACTOR`. */
+  autonomousTotal: number;
 }
 
+/**
+ * Techo de turnos autónomos contando los parciales de una tanda en segundo plano: con el tope por defecto (5), 50
+ * turnos. Frena una mente que siempre deja un subagente vivo para que la cadena no cuente.
+ */
+export const AUTONOMOUS_TOTAL_FACTOR = 10;
+
 export function freshSpend(base = 0): MindSpend {
-  return { base, mark: base, shownCents: 0, capped: false, autonomous: 0 };
+  return { base, mark: base, shownCents: 0, capped: false, autonomous: 0, autonomousTotal: 0 };
 }
 
 function usd(value: number): string {

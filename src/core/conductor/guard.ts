@@ -22,7 +22,7 @@
  *   del sistema operativo, un script del proyecto puede escribir fuera.
  * - Subagentes: con `subagentTypes`, solo esos tipos y con `subagent_type` explícito (el SDK suma sus integrados, como
  *   `general-purpose`, que es el tipo por omisión). No pueden pedir un modo de permisos más amplio ni ejecutarse en
- *   remoto (ni en un worktree propio).
+ *   remoto (ni en un worktree propio). Con `backgroundSubagents`, el hook los lanza siempre en segundo plano.
  * - Chrome personal (`mcp__chrome-personal__*`): solo navega a http(s) y `about:blank` (nunca `file:`, `view-source:`,
  *   `data:`…); los archivos que sube pasan por las mismas reglas de lectura, y los que guarda (capturas, volcados,
  *   trazas) quedan dentro de `writeRoots`. Así lo que Read tiene negado no se lee por el navegador.
@@ -71,6 +71,12 @@ export interface ToolGuardOptions {
    * `subagent_type` de ella: sin él, el SDK lanza su `general-purpose` con todas las herramientas de la sesión.
    */
   subagentTypes?: readonly string[];
+  /**
+   * Subagentes siempre en segundo plano (issue mente-10): el hook devuelve el `Agent`/`Task` permitido con
+   * `run_in_background: true`. Un subagente en primer plano deja a la mente bloqueada hasta que termina, y un mensaje
+   * del usuario a mitad de turno espera todo ese rato sin respuesta.
+   */
+  backgroundSubagents?: boolean;
 }
 
 export interface ToolGuard {
@@ -336,7 +342,13 @@ export function createToolGuard(opts: ToolGuardOptions): ToolGuard {
   const hook: HookCallback = async (input) => {
     if (input.hook_event_name !== 'PreToolUse') return {};
     const decision = await decide(input.tool_name, input.tool_input, input.cwd || undefined);
-    if (decision.allow) return {};
+    if (decision.allow) {
+      const args = input.tool_input;
+      if (opts.backgroundSubagents && SUBAGENT_TOOLS.has(input.tool_name) && args && typeof args === 'object' && (args as Record<string, unknown>).run_in_background !== true) {
+        return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...(args as Record<string, unknown>), run_in_background: true } } };
+      }
+      return {};
+    }
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: decision.reason } };
   };
 

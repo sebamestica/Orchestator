@@ -400,6 +400,8 @@ export class ConductorSession {
       allowedTools,
       cwd: o.cwd,
       subagentTypes: Object.keys(agents),
+      // mente-10: la mente nunca queda bloqueada esperando a un subagente; un mensaje a mitad de turno entra enseguida.
+      backgroundSubagents: true,
       readRoots,
       denyPaths: [...(opts.denyPaths ?? [])],
       // Escritura: la carpeta y las carpetas extra del chat. Shell: la política de los workers con la carpeta como raíz.
