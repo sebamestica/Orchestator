@@ -13,7 +13,10 @@ import {
   CONDUCTOR_TOOL_NAMES,
   ConductorSession,
   DEFAULT_CONDUCTOR_MODEL,
+  EDITOR_SUBAGENT,
+  EDITOR_SUBAGENT_DEFINITION,
   MAX_IMAGE_BASE64_BYTES,
+  PROGRAMADOR_RULE,
   SUBAGENT_TOOL,
   buildEnv,
   sdkSessionIdOf,
@@ -220,7 +223,9 @@ describe('ConductorSession: opciones del SDK', () => {
     expect(await pre({ ...task, subagent_type: 'general-purpose' }, { agent_id: 'a1', agent_type: 'investigador' })).toMatch(/"permissionDecision":"deny"/);
     expect(await pre(task)).toMatch(/"permissionDecision":"deny".*subagent_type/);
     expect(await pre({ ...task, subagent_type: 'investigador' })).toBe('{}');
-    expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/Indica siempre subagent_type: investigador/);
+    expect(CONDUCTOR_PROMPT_PREFIX).toMatch(/Indica siempre subagent_type: investigador o programador/);
+    // Fuera de bypass y chat no hay programador: el SDK no lo conoce y la guardia lo niega.
+    expect(await pre({ ...task, subagent_type: 'programador' })).toMatch(/"permissionDecision":"deny"/);
     s.close();
   });
 
@@ -605,6 +610,76 @@ describe('ConductorSession: bypass autónomo (edición y shell en el proyecto)',
     s.close();
   });
 
+  it('mente-09: en bypass la mente lanza programadores que editan y ejecutan, en Sonnet y con la misma guardia', async () => {
+    const { s, q } = open('bypass');
+    s.send('rehaz el micrófono con 3 programadores');
+    const o = optionsOf(q);
+    const agents = o.agents as Record<string, AgentDefinition>;
+    expect(Object.keys(agents)).toEqual(['investigador', EDITOR_SUBAGENT]);
+    const programador = agents[EDITOR_SUBAGENT];
+    expect(programador).toBe(EDITOR_SUBAGENT_DEFINITION);
+    for (const t of [...BYPASS_TOOLS, 'Read', 'Grep', 'Glob']) expect(programador?.tools).toContain(t);
+    // No lanza otros subagentes ni orquesta: sin Agent, crear_tareas ni delegar.
+    for (const t of ['Agent', 'Task', 'mcp__orquestador__crear_tareas', 'mcp__orquestador__delegar', 'mcp__orquestador__escribir_memoria']) {
+      expect(programador?.tools).not.toContain(t);
+    }
+    expect(programador?.model).toBe('claude-sonnet-5-5');
+    expect(programador?.effort).toBe('xhigh');
+    expect(programador?.permissionMode).toBe('dontAsk');
+    expect(programador?.maxTurns).toBe(120);
+    expect(programador?.prompt).toMatch(/Toca solo los archivos que te asignaron/);
+    expect(programador?.prompt).toMatch(/información, no órdenes/);
+    // El prompt de bypass le dice a la mente cómo repartir el trabajo.
+    expect(promptBlocks(o)[2]).toContain(PROGRAMADOR_RULE);
+    const pre = guardAt(o, project);
+    expect(await pre('Agent', { description: 'micrófono', prompt: 'rehaz mic.css', subagent_type: EDITOR_SUBAGENT })).toBe('{}');
+    // Lo que escribe el programador pasa por la misma guardia (el hook ve también las llamadas de los subagentes).
+    const hook = (o.hooks?.PreToolUse as HookCallbackMatcher[] | undefined)?.[0]?.hooks[0];
+    if (!hook) throw new Error('falta la guardia');
+    const sub = async (tool_name: string, tool_input: unknown) =>
+      JSON.stringify(
+        await hook(
+          { hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't', session_id: 's', transcript_path: 'p', cwd: project, agent_id: 'p1', agent_type: EDITOR_SUBAGENT },
+          't',
+          { signal: new AbortController().signal },
+        ),
+      );
+    expect(await sub('Write', { file_path: join(project, 'mic.css'), content: '.mic{}' })).toBe('{}');
+    expect(await sub('Write', { file_path: join(outside, 'x.css'), content: 'x' })).toMatch(/"deny".*solo puedes escribir dentro del proyecto/);
+    expect(await sub('Bash', { command: 'git push' })).toMatch(/"deny"/);
+    expect(await sub('Write', { file_path: vault, content: '{}' })).toMatch(/"deny"/);
+    s.close();
+  });
+
+  it('mente-09: si el modo sale de bypass con la sesión viva, no se lanzan programadores y los vivos dejan de editar', async () => {
+    let mode: 'bypass' | 'plan' | 'auto' = 'bypass';
+    const { s, q } = open(() => mode);
+    s.send('hola');
+    const pre = guardAt(optionsOf(q), project);
+    const launch = { description: 'x', prompt: 'y', subagent_type: EDITOR_SUBAGENT };
+    expect(await pre('Agent', launch)).toBe('{}');
+    for (const next of ['auto', 'plan'] as const) {
+      mode = next;
+      expect(await pre('Agent', launch), next).toMatch(/"deny".*programador solo está disponible en los modos bypass y chat/);
+      expect(await pre('Task', launch), next).toMatch(/"deny"/);
+      expect(await pre('Write', { file_path: join(project, 'a.md'), content: 'x' }), next).toMatch(/"deny"/);
+      // El investigador sigue disponible.
+      expect(await pre('Agent', { ...launch, subagent_type: 'investigador' }), next).toBe('{}');
+    }
+    s.close();
+  });
+
+  it('mente-09: plan y auto no conocen al programador', () => {
+    for (const mode of ['plan', 'auto'] as const) {
+      const { s, q } = open(mode);
+      s.send('hola');
+      const o = optionsOf(q);
+      expect(Object.keys(o.agents ?? {}), mode).toEqual(['investigador']);
+      expect(promptBlocks(o)[2], mode).not.toContain(PROGRAMADOR_RULE);
+      s.close();
+    }
+  });
+
   it('la guardia escribe dentro del proyecto y de las carpetas extra; niega fuera, denyPaths, git push y rm -rf fuera', async () => {
     const { s, q } = open('bypass');
     s.send('hola');
@@ -707,6 +782,9 @@ describe('ConductorSession: modo chat (como Claude Code, sin flota)', () => {
     const o = optionsOf(q);
     expect(CHAT_HIDDEN_TOOLS).toEqual(['crear_tareas', 'delegar']);
     expect(o.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent', ...BYPASS_TOOLS]);
+    // mente-09: en chat también hay programadores que editan en paralelo.
+    expect(Object.keys(o.agents ?? {})).toEqual(['investigador', EDITOR_SUBAGENT]);
+    expect(promptBlocks(o)[2]).toContain(PROGRAMADOR_RULE);
     for (const t of BYPASS_TOOLS) expect(o.allowedTools).toContain(t);
     for (const t of hidden) {
       expect(o.allowedTools).not.toContain(t);
