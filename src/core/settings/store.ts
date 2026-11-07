@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
-import { DEFAULT_SETTINGS, settingsPatchSchema, settingsSchema, type Settings, type SettingsPatch } from '../../shared/index.ts';
+import { DEFAULT_FLEET_SETTINGS, DEFAULT_SETTINGS, settingsPatchSchema, settingsSchema, type Settings, type SettingsPatch } from '../../shared/index.ts';
 import { redactDeep, StoreError } from '../store/index.ts';
 
 /** Tabla propia del módulo (F5: sin tocar `schema.ts`). Una fila por clave de primer nivel de `Settings`. */
@@ -42,6 +42,14 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
   if (patch.defaultMode !== undefined) next.defaultMode = patch.defaultMode;
   if (patch.quotaFloor !== undefined) next.quotaFloor = patch.quotaFloor;
   if (patch.concurrency !== undefined) next.concurrency = patch.concurrency;
+  if (patch.fleet) {
+    const f = patch.fleet;
+    const fleet = structuredClone(next.fleet ?? DEFAULT_FLEET_SETTINGS);
+    if (f.cliParallel !== undefined) fleet.cliParallel = f.cliParallel;
+    if (f.claudeModels) fleet.claudeModels = { ...fleet.claudeModels, ...Object.fromEntries(Object.entries(f.claudeModels).filter(([, v]) => v !== undefined)) };
+    if (f.escalation !== undefined) fleet.escalation = [...f.escalation];
+    next.fleet = fleet;
+  }
   if (patch.appearance) {
     const a = patch.appearance;
     if (a.theme !== undefined) next.appearance.theme = a.theme;

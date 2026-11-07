@@ -3027,6 +3027,58 @@
                           "minimum": 1,
                           "maximum": 8
                         },
+                        "fleet": {
+                          "type": "object",
+                          "properties": {
+                            "cliParallel": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "claudeModels": {
+                              "type": "object",
+                              "properties": {
+                                "low": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "medium": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "high": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                }
+                              },
+                              "required": [
+                                "low",
+                                "medium",
+                                "high"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "escalation": {
+                              "minItems": 1,
+                              "maxItems": 4,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100
+                              }
+                            }
+                          },
+                          "required": [
+                            "cliParallel",
+                            "claudeModels",
+                            "escalation"
+                          ],
+                          "additionalProperties": false
+                        },
                         "appearance": {
                           "type": "object",
                           "properties": {
@@ -3221,6 +3273,48 @@
                     "minimum": 1,
                     "maximum": 8
                   },
+                  "fleet": {
+                    "type": "object",
+                    "properties": {
+                      "cliParallel": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4
+                      },
+                      "claudeModels": {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "medium": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "high": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "escalation": {
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "appearance": {
                     "type": "object",
                     "properties": {
@@ -3375,6 +3469,58 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 8
+                        },
+                        "fleet": {
+                          "type": "object",
+                          "properties": {
+                            "cliParallel": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 4
+                            },
+                            "claudeModels": {
+                              "type": "object",
+                              "properties": {
+                                "low": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "medium": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "high": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                }
+                              },
+                              "required": [
+                                "low",
+                                "medium",
+                                "high"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "escalation": {
+                              "minItems": 1,
+                              "maxItems": 4,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100
+                              }
+                            }
+                          },
+                          "required": [
+                            "cliParallel",
+                            "claudeModels",
+                            "escalation"
+                          ],
+                          "additionalProperties": false
                         },
                         "appearance": {
                           "type": "object",
@@ -11971,6 +12117,31 @@
             "items": {
               "type": "string"
             }
+          },
+          "checks": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "desc": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "cmd"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "sensible": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -12056,6 +12227,31 @@
             "items": {
               "type": "string"
             }
+          },
+          "checks": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cmd": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "desc": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "required": [
+                "cmd"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "sensible": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -13211,6 +13407,58 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 8
+                  },
+                  "fleet": {
+                    "type": "object",
+                    "properties": {
+                      "cliParallel": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4
+                      },
+                      "claudeModels": {
+                        "type": "object",
+                        "properties": {
+                          "low": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "medium": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          },
+                          "high": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100
+                          }
+                        },
+                        "required": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "escalation": {
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        }
+                      }
+                    },
+                    "required": [
+                      "cliParallel",
+                      "claudeModels",
+                      "escalation"
+                    ],
+                    "additionalProperties": false
                   },
                   "appearance": {
                     "type": "object",

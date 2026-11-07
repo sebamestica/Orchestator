@@ -57,6 +57,31 @@ export const mindLimitsSchema = z.strictObject({
 export type MindLimits = z.infer<typeof mindLimitsSchema>;
 export const DEFAULT_MIND_LIMITS: MindLimits = { turnUsd: 5, dayUsd: 50, maxAutonomousTurns: 5 };
 
+/** Modelo de Claude por dificultad de la tarea (F6): una tarea fácil no tiene por qué ir a Opus. */
+export const fleetModelsSchema = z.strictObject({
+  low: z.string().min(1).max(100),
+  medium: z.string().min(1).max(100),
+  high: z.string().min(1).max(100),
+});
+/**
+ * Ajustes de la flota (F6, docs/plan/F6-FLUJO-RAPIDO.md):
+ * - `cliParallel`: tareas a la vez por agente de CLI (Codex, agy);
+ * - `claudeModels`: modelo del Claude de la flota según la dificultad (el esfuerzo sigue saliendo de la dificultad);
+ * - `escalation`: quién corrige cuando fallan las pruebas o el gate de una tarea, en orden. Si el autor ya está en un
+ *   escalón, se sigue desde el siguiente; Codex y agy empiezan en el primero.
+ */
+export const fleetSettingsSchema = z.strictObject({
+  cliParallel: z.number().int().min(1).max(4),
+  claudeModels: fleetModelsSchema,
+  escalation: z.array(z.string().min(1).max(100)).min(1).max(4),
+});
+export type FleetSettings = z.infer<typeof fleetSettingsSchema>;
+export const DEFAULT_FLEET_SETTINGS: FleetSettings = {
+  cliParallel: 2,
+  claudeModels: { low: 'claude-haiku-5-5', medium: 'claude-sonnet-5-5', high: 'claude-opus-5-5' },
+  escalation: ['claude-sonnet-5-5', 'claude-opus-5-5'],
+};
+
 export const settingsSchema = z.strictObject({
   mind: z.strictObject({
     /** Agente que hace de mente (orquestador). `null`: el primer agente `claude-sdk` habilitado. */
@@ -74,6 +99,8 @@ export const settingsSchema = z.strictObject({
   quotaFloor: z.number().min(0).max(1),
   /** Agentes ejecutando a la vez (sin contar la mente). */
   concurrency: z.number().int().min(1).max(8),
+  /** Reparto de la flota (F6). Sin él, `DEFAULT_FLEET_SETTINGS`. */
+  fleet: fleetSettingsSchema.optional(),
   appearance: z.strictObject({
     theme: themeSchema,
     /** Sin desenfoque de vidrio ni animaciones largas (menos GPU). */
@@ -89,6 +116,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultMode: 'plan',
   quotaFloor: 0.2,
   concurrency: 3,
+  fleet: DEFAULT_FLEET_SETTINGS,
   appearance: { theme: 'dark', reducedEffects: false },
 };
 
@@ -113,6 +141,13 @@ export const settingsPatchSchema = z.strictObject({
   defaultMode: mindModeSchema.optional(),
   quotaFloor: z.number().min(0).max(1).optional(),
   concurrency: z.number().int().min(1).max(8).optional(),
+  fleet: z
+    .strictObject({
+      cliParallel: fleetSettingsSchema.shape.cliParallel.optional(),
+      claudeModels: fleetModelsSchema.partial().optional(),
+      escalation: fleetSettingsSchema.shape.escalation.optional(),
+    })
+    .optional(),
   appearance: z.strictObject({ theme: themeSchema.optional(), reducedEffects: z.boolean().optional() }).optional(),
 });
 export type SettingsPatch = z.infer<typeof settingsPatchSchema>;

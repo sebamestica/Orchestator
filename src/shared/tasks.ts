@@ -16,6 +16,16 @@ export const taskBriefSchema = z.strictObject({
   /** Notas de memoria (Obsidian) y skills a leer, por ruta; el agente abre solo lo que necesite. */
   contextRefs: z.array(z.string()).default([]),
   skillRefs: z.array(z.string()).default([]),
+  /**
+   * Pruebas rápidas de la tarea (F6): comandos que el autor corre al terminar, en vez de la suite completa. Solo van en
+   * el encargo como texto; Berland no los ejecuta (el gate es otro).
+   */
+  checks: z.array(z.strictObject({ cmd: z.string().min(1).max(500), desc: z.string().max(300).optional() })).max(20).optional(),
+  /**
+   * Tarea sensible (seguridad, datos, concurrencia, despliegue): siempre pasa por la revisión de un modelo, aunque su
+   * dificultad no sea alta, y su encargo lleva la sección de Seguridad (F6).
+   */
+  sensible: z.boolean().optional(),
 });
 export type TaskBrief = z.infer<typeof taskBriefSchema>;
 
